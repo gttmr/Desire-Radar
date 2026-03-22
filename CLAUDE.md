@@ -72,6 +72,18 @@ Key optional vars (with defaults):
 
 All vars validated with Zod in `src/config.ts`. The predictor runs in fallback/mock mode when external API keys are absent.
 
+## Git Workflow
+
+GitHub remote 없음 — 로컬 git으로 관리.
+
+```bash
+git add <files>
+git commit -m "..."
+git log --oneline
+```
+
+작업 단위마다 커밋. 브랜치 전략: 실험적 기능은 feature 브랜치, 안정된 것은 main에 merge.
+
 ## Module System
 
 The project uses `"type": "module"` with `"moduleResolution": "NodeNext"`. All imports must use explicit `.js` extensions (e.g., `import ... from './foo.js'`) even for `.ts` source files.
