@@ -1,5 +1,7 @@
 import type {
+  AgentSignal,
   GuildReportConfig,
+  KnowledgeEntry,
   ReportDetailLevel,
   PredictorRequest,
   PredictorResponse,
@@ -16,6 +18,11 @@ export type ReportDispatch = {
 
 export interface PredictorGateway {
   generateReport(request: PredictorRequest): Promise<PredictorResponse>;
+  getAgentSignals(): Promise<AgentSignal[]>;
+  runAgents(agents?: string[]): Promise<AgentSignal[]>;
+  listKnowledge(): Promise<KnowledgeEntry[]>;
+  addKnowledge(content: string, tags?: string[]): Promise<KnowledgeEntry>;
+  removeKnowledge(id: string): Promise<void>;
 }
 
 function todayInTimeZone(timeZone: string): string {
@@ -30,11 +37,15 @@ function todayInTimeZone(timeZone: string): string {
 }
 
 export class ReportService {
+  readonly predictor: PredictorGateway;
+
   constructor(
     private readonly store: GuildConfigStore,
-    private readonly predictor: PredictorGateway,
+    predictor: PredictorGateway,
     private readonly defaultTimeZone: string
-  ) {}
+  ) {
+    this.predictor = predictor;
+  }
 
   async getStatus(guildId: string): Promise<GuildReportConfig | undefined> {
     return this.store.get(guildId);

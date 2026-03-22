@@ -50,7 +50,42 @@ export const commandBuilders = [
     ),
   new SlashCommandBuilder()
     .setName('voice-stop')
-    .setDescription('음성 채널 수집 중지')
+    .setDescription('음성 채널 수집 중지'),
+  new SlashCommandBuilder()
+    .setName('agent-status')
+    .setDescription('모든 관찰 에이전트 최신 신호 조회'),
+  new SlashCommandBuilder()
+    .setName('agent-run')
+    .setDescription('관찰 에이전트 즉시 실행 (캐시 갱신)')
+    .addStringOption((opt) =>
+      opt
+        .setName('agent')
+        .setDescription('실행할 에이전트 (미지정 시 전체)')
+        .addChoices(
+          { name: 'macro (거시경제)', value: 'macro' },
+          { name: 'semiconductor (반도체)', value: 'semiconductor' },
+          { name: 'geopolitical (지정학)', value: 'geopolitical' }
+        )
+        .setRequired(false)
+    ),
+  new SlashCommandBuilder()
+    .setName('knowledge-add')
+    .setDescription('투자 관점 지식 추가')
+    .addStringOption((opt) =>
+      opt.setName('content').setDescription('추가할 지식/인사이트').setRequired(true).setMaxLength(500)
+    )
+    .addStringOption((opt) =>
+      opt.setName('tags').setDescription('태그 (쉼표 구분, 예: semiconductor,cycle)').setRequired(false)
+    ),
+  new SlashCommandBuilder()
+    .setName('knowledge-list')
+    .setDescription('저장된 투자 지식 목록 확인'),
+  new SlashCommandBuilder()
+    .setName('knowledge-remove')
+    .setDescription('저장된 투자 지식 삭제')
+    .addStringOption((opt) =>
+      opt.setName('id').setDescription('삭제할 항목 ID').setRequired(true)
+    )
 ];
 
 export const commandJson = commandBuilders.map((c) => c.toJSON());

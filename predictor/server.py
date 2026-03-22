@@ -721,6 +721,57 @@ from store.knowledge_store import KnowledgeStore
 SIGNAL_STORE = SignalStore(os.getenv("SIGNAL_STORE_DIR", "data/signals"))
 KNOWLEDGE_STORE = KnowledgeStore(os.getenv("KNOWLEDGE_STORE_PATH", "data/knowledge.json"))
 
+from llm.client import build_llm_client
+from agents.macro_agent import MacroAgent
+from agents.semiconductor_agent import SemiconductorAgent
+from agents.geopolitical_agent import GeopoliticalAgent
+from agents.synthesis_agent import SynthesisAgent
+
+def _build_agent_registry(config: PredictorConfig, http_client: HttpJsonClient) -> dict:
+    llm = build_llm_client(
+        endpoint=config.azure_openai_endpoint,
+        api_key=config.azure_openai_api_key,
+        deployment=config.azure_openai_deployment,
+    )
+    naver = NaverNewsClient(config, http_client)
+    dart = DARTClient(config, http_client)
+    return {
+        "macro":         MacroAgent(llm_client=llm),
+        "semiconductor": SemiconductorAgent(llm_client=llm, naver_client=naver, dart_client=dart),
+        "geopolitical":  GeopoliticalAgent(llm_client=llm, naver_client=naver),
+        "synthesis":     SynthesisAgent(llm_client=llm),
+    }
+
+_HTTP_CLIENT = HttpJsonClient(PredictorConfig.timeout_seconds)
+AGENT_REGISTRY = _build_agent_registry(PredictorConfig(), _HTTP_CLIENT)
+
+
+def run_agents(names: list[str] | None = None) -> list:
+    """Run specified agents (or all domain agents) and persist signals. Returns saved signals."""
+    domain_names = ["macro", "semiconductor", "geopolitical"]
+    targets = [n for n in (names or domain_names) if n in AGENT_REGISTRY and n != "synthesis"]
+    knowledge = [e.content for e in KNOWLEDGE_STORE.list_all()]
+    results = []
+
+    for name in targets:
+        agent = AGENT_REGISTRY[name]
+        if SIGNAL_STORE.is_fresh(name, agent.ttl_seconds):
+            logger.info("[agents] %s is fresh, skipping", name)
+            signal = SIGNAL_STORE.get_latest(name)
+        else:
+            logger.info("[agents] running %s", name)
+            signal = agent.run(knowledge=knowledge)
+            SIGNAL_STORE.save(signal)
+        if signal:
+            results.append(signal)
+
+    # Always re-run synthesis with fresh domain signals
+    synth_agent: SynthesisAgent = AGENT_REGISTRY["synthesis"]
+    synth_signal = synth_agent.run_with_signals(results, knowledge)
+    SIGNAL_STORE.save(synth_signal)
+    results.append(synth_signal)
+    return results
+
 
 class PredictorHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -772,6 +823,37 @@ class PredictorHandler(BaseHTTPRequestHandler):
                 tags = [str(t).strip() for t in payload.get("tags", []) if str(t).strip()]
                 entry = KNOWLEDGE_STORE.add(content, tags)
                 self._write_json(201, entry.to_dict())
+            except Exception as exc:
+                self._write_json(500, {"ok": False, "error": str(exc)})
+            return
+
+        if self.path in {"/agents/run", "/agents/run/"}:
+            try:
+                payload = self._read_json()
+                names = payload.get("agents")  # optional list of agent names
+                signals = run_agents(names)
+                self._write_json(200, {
+                    "ok": True,
+                    "signals": [s.to_dict() for s in signals],
+                    "count": len(signals),
+                })
+            except Exception as exc:
+                logger.exception("agent run failed")
+                self._write_json(500, {"ok": False, "error": str(exc)})
+            return
+
+        if self.path.startswith("/agents/run/"):
+            agent_name = self.path.removeprefix("/agents/run/")
+            if agent_name not in AGENT_REGISTRY or agent_name == "synthesis":
+                self._write_json(404, {"ok": False, "error": f"unknown agent: {agent_name}"})
+                return
+            try:
+                signals = run_agents([agent_name])
+                self._write_json(200, {
+                    "ok": True,
+                    "signals": [s.to_dict() for s in signals],
+                    "count": len(signals),
+                })
             except Exception as exc:
                 self._write_json(500, {"ok": False, "error": str(exc)})
             return

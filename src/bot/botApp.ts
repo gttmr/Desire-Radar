@@ -361,6 +361,84 @@ export class BotApp {
         await interaction.reply({ content: '음성 수집을 중지했습니다.', ephemeral: true });
         return;
       }
+      case 'agent-status': {
+        await interaction.deferReply({ ephemeral: true });
+        try {
+          const signals = await this.reports.predictor.getAgentSignals();
+          if (signals.length === 0) {
+            await interaction.editReply({ content: '저장된 에이전트 신호가 없습니다. `/agent-run`으로 먼저 실행하세요.' });
+            return;
+          }
+          const lines = signals.map((s) =>
+            `**${s.agent}** | ${s.signal.toUpperCase()} (${Math.round(s.confidence * 100)}%) | ${s.horizon}\n${s.summary}`
+          );
+          await interaction.editReply({ content: lines.join('\n\n') });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+          await interaction.editReply({ content: `에이전트 신호 조회 실패: ${msg}` });
+        }
+        return;
+      }
+      case 'agent-run': {
+        await interaction.deferReply({ ephemeral: true });
+        const agentName = interaction.options.getString('agent') ?? undefined;
+        try {
+          const signals = await this.reports.predictor.runAgents(agentName ? [agentName] : undefined);
+          const names = signals.map((s) => s.agent).join(', ');
+          await interaction.editReply({ content: `에이전트 실행 완료: ${names}\n\n결과를 확인하려면 \`/agent-status\`를 사용하세요.` });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+          await interaction.editReply({ content: `에이전트 실행 실패: ${msg}` });
+        }
+        return;
+      }
+      case 'knowledge-add': {
+        const content = interaction.options.getString('content', true);
+        const tagsRaw = interaction.options.getString('tags') ?? '';
+        const tags = tagsRaw ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) : [];
+        try {
+          const entry = await this.reports.predictor.addKnowledge(content, tags);
+          const tagStr = entry.tags.length > 0 ? ` [${entry.tags.join(', ')}]` : '';
+          await interaction.reply({
+            content: `지식 추가 완료 (ID: \`${entry.id}\`)\n> ${content}${tagStr}`,
+            ephemeral: true
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+          await interaction.reply({ content: `지식 추가 실패: ${msg}`, ephemeral: true });
+        }
+        return;
+      }
+      case 'knowledge-list': {
+        await interaction.deferReply({ ephemeral: true });
+        try {
+          const entries = await this.reports.predictor.listKnowledge();
+          if (entries.length === 0) {
+            await interaction.editReply({ content: '저장된 지식이 없습니다. `/knowledge-add`로 추가하세요.' });
+            return;
+          }
+          const lines = entries.map((e, i) => {
+            const tagStr = e.tags.length > 0 ? ` [${e.tags.join(', ')}]` : '';
+            return `**${i + 1}.** \`${e.id.slice(0, 8)}\`${tagStr}\n${e.content}`;
+          });
+          await interaction.editReply({ content: lines.join('\n\n') });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+          await interaction.editReply({ content: `지식 목록 조회 실패: ${msg}` });
+        }
+        return;
+      }
+      case 'knowledge-remove': {
+        const id = interaction.options.getString('id', true).trim();
+        try {
+          await this.reports.predictor.removeKnowledge(id);
+          await interaction.reply({ content: `삭제 완료: \`${id}\``, ephemeral: true });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+          await interaction.reply({ content: `삭제 실패: ${msg}`, ephemeral: true });
+        }
+        return;
+      }
       default:
         await interaction.reply({ content: '지원하지 않는 명령입니다.', ephemeral: true });
     }

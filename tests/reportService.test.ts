@@ -9,6 +9,12 @@ import type { PredictorRequest, PredictorResponse } from '../src/types/domain.js
 class FakePredictorClient {
   lastRequest?: PredictorRequest;
 
+  async getAgentSignals() { return []; }
+  async runAgents() { return []; }
+  async listKnowledge() { return []; }
+  async addKnowledge(content: string) { return { id: 'fake', content, tags: [], created_at: '' }; }
+  async removeKnowledge(_id: string) {}
+
   async generateReport(request: PredictorRequest): Promise<PredictorResponse> {
     this.lastRequest = request;
     return {
