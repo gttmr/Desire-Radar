@@ -64,7 +64,11 @@ export const commandBuilders = [
         .addChoices(
           { name: 'macro (거시경제)', value: 'macro' },
           { name: 'semiconductor (반도체)', value: 'semiconductor' },
-          { name: 'geopolitical (지정학)', value: 'geopolitical' }
+          { name: 'geopolitical (지정학)', value: 'geopolitical' },
+          { name: 'reddit_sentiment (소셜)', value: 'reddit_sentiment' },
+          { name: 'tech_buzz (기술트렌드)', value: 'tech_buzz' },
+          { name: 'entertainment (엔터)', value: 'entertainment' },
+          { name: 'supply_chain (공급망/심리)', value: 'supply_chain' }
         )
         .setRequired(false)
     ),

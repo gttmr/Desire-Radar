@@ -725,7 +725,13 @@ from llm.client import build_llm_client
 from agents.macro_agent import MacroAgent
 from agents.semiconductor_agent import SemiconductorAgent
 from agents.geopolitical_agent import GeopoliticalAgent
+from agents.reddit_sentiment_agent import RedditSentimentAgent
+from agents.tech_buzz_agent import TechBuzzAgent
+from agents.entertainment_agent import EntertainmentAgent
+from agents.supply_chain_agent import SupplyChainAgent
 from agents.synthesis_agent import SynthesisAgent
+
+DOMAIN_AGENTS = ["macro", "semiconductor", "geopolitical", "reddit_sentiment", "tech_buzz", "entertainment", "supply_chain"]
 
 def _build_agent_registry(config: PredictorConfig, http_client: HttpJsonClient) -> dict:
     llm = build_llm_client(
@@ -736,10 +742,14 @@ def _build_agent_registry(config: PredictorConfig, http_client: HttpJsonClient) 
     naver = NaverNewsClient(config, http_client)
     dart = DARTClient(config, http_client)
     return {
-        "macro":         MacroAgent(llm_client=llm),
-        "semiconductor": SemiconductorAgent(llm_client=llm, naver_client=naver, dart_client=dart),
-        "geopolitical":  GeopoliticalAgent(llm_client=llm, naver_client=naver),
-        "synthesis":     SynthesisAgent(llm_client=llm),
+        "macro":            MacroAgent(llm_client=llm),
+        "semiconductor":    SemiconductorAgent(llm_client=llm, naver_client=naver, dart_client=dart),
+        "geopolitical":     GeopoliticalAgent(llm_client=llm, naver_client=naver),
+        "reddit_sentiment": RedditSentimentAgent(llm_client=llm),
+        "tech_buzz":        TechBuzzAgent(llm_client=llm),
+        "entertainment":    EntertainmentAgent(llm_client=llm),
+        "supply_chain":     SupplyChainAgent(llm_client=llm),
+        "synthesis":        SynthesisAgent(llm_client=llm),
     }
 
 _HTTP_CLIENT = HttpJsonClient(PredictorConfig.timeout_seconds)
@@ -748,8 +758,7 @@ AGENT_REGISTRY = _build_agent_registry(PredictorConfig(), _HTTP_CLIENT)
 
 def run_agents(names: list[str] | None = None) -> list:
     """Run specified agents (or all domain agents) and persist signals. Returns saved signals."""
-    domain_names = ["macro", "semiconductor", "geopolitical"]
-    targets = [n for n in (names or domain_names) if n in AGENT_REGISTRY and n != "synthesis"]
+    targets = [n for n in (names or DOMAIN_AGENTS) if n in AGENT_REGISTRY and n != "synthesis"]
     knowledge = [e.content for e in KNOWLEDGE_STORE.list_all()]
     results = []
 
@@ -845,7 +854,7 @@ class PredictorHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/agents/run/"):
             agent_name = self.path.removeprefix("/agents/run/")
             if agent_name not in AGENT_REGISTRY or agent_name == "synthesis":
-                self._write_json(404, {"ok": False, "error": f"unknown agent: {agent_name}"})
+                self._write_json(404, {"ok": False, "error": f"unknown agent: {agent_name}. available: {DOMAIN_AGENTS}"})
                 return
             try:
                 signals = run_agents([agent_name])
