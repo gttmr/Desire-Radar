@@ -1,0 +1,23 @@
+# Node.js
+node_modules/
+dist/
+*.js.map
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Data (runtime, not versioned)
+data/
+predictor/__pycache__/
+predictor/**/__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
