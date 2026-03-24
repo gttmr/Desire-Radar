@@ -63,11 +63,11 @@ LLM_ANALYSIS_ENABLED: bool = _get_bool(
 )
 LLM_ANALYSIS_EXECUTION_MODE: str = _get("LLM_ANALYSIS_EXECUTION_MODE", "batch")
 LLM_ANALYSIS_BATCH_SIZE: int = _get_int("LLM_ANALYSIS_BATCH_SIZE", 3)
-LLM_CLI_EXEC_PATH: str = _get("LLM_CLI_EXEC_PATH", "mock")
+LLM_CLI_EXEC_PATH: str = _get("LLM_CLI_EXEC_PATH", "codex")
 LLM_CLI_PROVIDER: str = _get("LLM_CLI_PROVIDER", "codex")
 LLM_CLI_INITIAL_ARGS: str = _get(
     "LLM_CLI_INITIAL_ARGS",
-    "exec - --skip-git-repo-check -C /tmp -s read-only --json",
+    "exec --skip-git-repo-check --ephemeral -C /tmp -s read-only --json",
 )
 LLM_CLI_RESUME_ARGS: str = _get(
     "LLM_CLI_RESUME_ARGS",
@@ -77,9 +77,9 @@ LLM_CLI_USE_STDIN: bool = _get_bool("LLM_CLI_USE_STDIN", True)
 LLM_CLI_ARGS: str = _get("LLM_CLI_ARGS", "")
 LLM_CLI_PROMPT_MODE: str = _get("LLM_CLI_PROMPT_MODE", "stdin")
 LLM_CLI_PROMPT_FLAG: str = _get("LLM_CLI_PROMPT_FLAG", "")
-LLM_CLI_MODEL_FLAG: str = _get("LLM_CLI_MODEL_FLAG", "")
+LLM_CLI_MODEL_FLAG: str = _get("LLM_CLI_MODEL_FLAG", "-m")
 LLM_CLI_CONTINUE_FLAG: str = _get("LLM_CLI_CONTINUE_FLAG", "")
-LLM_DEFAULT_MODEL: str = _get("LLM_DEFAULT_MODEL", LLM_MODEL)
+LLM_DEFAULT_MODEL: str = _get("LLM_DEFAULT_MODEL", "")
 LLM_TIMEOUT_SECONDS: int = _get_int("LLM_TIMEOUT_SECONDS", 120)
 LLM_CONTEXT_CHAR_BUDGET: int = _get_int("LLM_CONTEXT_CHAR_BUDGET", 6000)
 LLM_BATCH_CHAR_BUDGET: int = _get_int("LLM_BATCH_CHAR_BUDGET", 7000)

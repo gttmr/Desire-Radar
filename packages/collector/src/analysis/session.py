@@ -120,24 +120,7 @@ class CliSession:
         *,
         execution_mode: str,
     ) -> ExecutionResult:
-        if execution_mode == "resume" and self.resume_args and self.state.turn_count > 0:
-            args = list(self.resume_args)
-            if self.model and self.model_flag:
-                args.extend([self.model_flag, self.model])
-            args.append(self.state.session_id)
-            stdin_data: bytes | None = None
-            if self.use_stdin:
-                args.append("-")
-                stdin_data = prompt.encode("utf-8")
-            else:
-                args.append(prompt)
-        else:
-            args = list(self.initial_args)
-            if self.model and self.model_flag:
-                args.extend([self.model_flag, self.model])
-            stdin_data = prompt.encode("utf-8") if self.use_stdin else None
-            if not self.use_stdin:
-                args.append(prompt)
+        args, stdin_data = self._build_codex_invocation(prompt, execution_mode=execution_mode)
 
         proc = await asyncio.create_subprocess_exec(
             self.exec_path,
@@ -173,6 +156,49 @@ class CliSession:
             usage=usage,
             raw_text=raw_text,
         )
+
+    def _build_codex_invocation(
+        self,
+        prompt: str,
+        *,
+        execution_mode: str,
+    ) -> tuple[list[str], bytes | None]:
+        use_resume = execution_mode == "resume" and self.resume_args and self.state.turn_count > 0
+        if use_resume:
+            args = self._sanitize_codex_args(self.resume_args, allow_ephemeral=False)
+        else:
+            args = self._sanitize_codex_args(
+                self.initial_args,
+                allow_ephemeral=execution_mode != "resume",
+            )
+
+        if self.model and self.model_flag:
+            args.extend([self.model_flag, self.model])
+        if use_resume:
+            args.append(self.state.session_id)
+
+        stdin_data: bytes | None = None
+        if self.use_stdin:
+            args.append("-")
+            stdin_data = prompt.encode("utf-8")
+        else:
+            args.append(prompt)
+        return args, stdin_data
+
+    def _sanitize_codex_args(
+        self,
+        raw_args: list[str],
+        *,
+        allow_ephemeral: bool,
+    ) -> list[str]:
+        sanitized: list[str] = []
+        for arg in raw_args:
+            if arg == "-":
+                continue
+            if not allow_ephemeral and arg == "--ephemeral":
+                continue
+            sanitized.append(arg)
+        return sanitized
 
     async def _run_generic(
         self,

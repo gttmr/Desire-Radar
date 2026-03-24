@@ -89,6 +89,31 @@ npm run dev:orchestrator
 cd packages/collector && pytest
 ```
 
+### Collector CLI 분석 벤치
+
+collector는 기본적으로 `batch` 실행 모드에서 상위 후보 3개를 한 번의 Codex 호출로 묶어 분석한다. `resume` 경로는 비교용 fallback으로만 남아 있고 기본 비활성화다.
+
+실제 Codex 실측 벤치:
+
+```bash
+cd packages/collector
+PYTHONPATH=. RUN_REAL_CODEX_SMOKE=1 python3 -m src.analysis.benchmark
+```
+
+mock 벤치:
+
+```bash
+cd packages/collector
+PYTHONPATH=. LLM_CLI_EXEC_PATH=mock python3 -m src.analysis.benchmark
+```
+
+프롬프트 미리보기:
+
+```bash
+curl http://localhost:5002/internal/analysis/preview-batch
+curl http://localhost:5002/internal/analysis/preview/ChatGPT
+```
+
 ## Discord 명령어
 
 | 명령어 | 설명 |
@@ -112,6 +137,13 @@ cd packages/collector && pytest
 | `DISCORD_GUILD_ID` | discord-bot | | 테스트 길드 ID |
 | `ANALYSIS_BACKEND` | discord-bot | | `predictor` (기본) 또는 `orchestrator` |
 | `COLLECTOR_PORT` | collector | | 기본 5002 |
+| `LLM_ANALYSIS_EXECUTION_MODE` | collector | | 기본 `batch`, 허용값 `batch \| fresh \| resume` |
+| `LLM_ANALYSIS_BATCH_SIZE` | collector | | 기본 3, batch prompt에 묶는 후보 수 |
+| `LLM_CLI_EXEC_PATH` | collector | | 기본 `codex` |
+| `LLM_CLI_INITIAL_ARGS` | collector | | 기본 fresh/batch Codex 실행 인자 |
+| `LLM_CLI_RESUME_ARGS` | collector | | resume 비교용 Codex 실행 인자 |
+| `LLM_CONTEXT_CHAR_BUDGET` | collector | | 단건 prompt 문자 budget |
+| `LLM_BATCH_CHAR_BUDGET` | collector | | batch prompt 문자 budget |
 | `ORCHESTRATOR_PORT` | mcp-orchestrator | | 기본 5003 |
 | `DEFAULT_PROVIDERS` | mcp-orchestrator | | 기본 `codex,claude` |
 | `KIS_APP_KEY` / `KIS_APP_SECRET` | predictor-legacy | | 한국투자증권 API |
