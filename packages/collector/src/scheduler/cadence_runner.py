@@ -1,12 +1,12 @@
 """Cadence-based scheduler for running connectors at declared intervals."""
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any, Callable
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from ..analysis.engine import AnalysisEngine
 from ..connectors.base import BaseConnector
 from ..resolver.entity_resolver import EntityResolver
 
@@ -21,12 +21,14 @@ class CadenceRunner:
         normalizer_fn: Callable,
         evidence_sink: Any = None,
         entity_resolver: EntityResolver | None = None,
+        analysis_engine: AnalysisEngine | None = None,
     ) -> None:
         self.connectors = connectors
         self.snapshot_store = snapshot_store
         self.normalizer_fn = normalizer_fn
         self.evidence_sink: Any = evidence_sink if evidence_sink is not None else []
         self.entity_resolver = entity_resolver
+        self.analysis_engine = analysis_engine
         self._scheduler = AsyncIOScheduler()
         self._last_run: dict[str, str] = {}
 
@@ -81,6 +83,7 @@ class CadenceRunner:
 
         payloads = await connector.fetch()
         evidence_count = 0
+        all_evidences: list = []
 
         for payload in payloads:
             # Save raw snapshot
@@ -108,9 +111,20 @@ class CadenceRunner:
                     # If no candidates resolved, keep originals (they are
                     # already queued for review by resolve_candidates)
 
-            self.evidence_sink.extend(evidences)
+            all_evidences.extend(evidences)
             evidence_count += len(evidences)
 
+        self.evidence_sink.extend(all_evidences)
+        if self.analysis_engine is not None and all_evidences:
+            try:
+                queued = await self.analysis_engine.on_evidence_updated()
+                if queued:
+                    logger.info(
+                        "Queued %d candidate analyses after %s",
+                        len(queued), connector_name,
+                    )
+            except Exception:
+                logger.exception("Candidate analysis scheduling failed for connector %s", connector_name)
         self._last_run[connector_name] = datetime.now(timezone.utc).isoformat()
         return evidence_count
 

@@ -91,7 +91,14 @@ async def get_evidence_bundle(entity: str) -> dict:
 async def get_sources_status() -> dict:
     """Get status of all source connectors."""
     runner = _deps["cadence_runner"]
-    return {"sources": runner.get_status()}
+    analysis_engine = _deps.get("analysis_engine")
+    return {
+        "sources": runner.get_status(),
+        "analysis": {
+            "enabled": analysis_engine.enabled if analysis_engine is not None else False,
+            "queue_size": analysis_engine.get_status("_")["queue_size"] if analysis_engine is not None else 0,
+        },
+    }
 
 
 @router.post("/review/approve")

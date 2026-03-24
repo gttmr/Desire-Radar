@@ -21,7 +21,7 @@ class BuildBundleRequest(BaseModel):
 
 
 @router.get("/next-candidates")
-async def next_candidates() -> dict:
+async def next_candidates(only_needs_analysis: bool = False) -> dict:
     """Get next signal candidates for orchestrator consumption.
 
     Returns top candidates sorted by emergence score, excluding already
@@ -30,6 +30,12 @@ async def next_candidates() -> dict:
     builder = _deps["signal_builder"]
     evidence_sink = _deps["evidence_sink"]
     candidates = builder.build_candidates(evidence_sink.get_all())
+
+    if only_needs_analysis:
+        candidates = [
+            candidate for candidate in candidates
+            if candidate.analysis_status in (None, "failed", "needs_review")
+        ]
 
     # Return top 20 candidates
     top = candidates[:20]
@@ -95,3 +101,26 @@ async def entity_history(entity: str) -> dict:
         "total_evidence": len(history),
         "history": history,
     }
+
+
+class AnalysisRunRequest(BaseModel):
+    entity: str
+
+
+@router.post("/analysis/run")
+async def run_analysis(body: AnalysisRunRequest) -> dict:
+    """Queue analysis for a specific entity."""
+    engine = _deps["analysis_engine"]
+    queued = await engine.enqueue_entity(body.entity)
+    return {
+        "entity": body.entity,
+        "queued": len(queued) > 0,
+        "tasks": [task.model_dump() for task in queued],
+    }
+
+
+@router.get("/analysis/status/{entity}")
+async def analysis_status(entity: str) -> dict:
+    """Return analysis status for a specific entity."""
+    engine = _deps["analysis_engine"]
+    return engine.get_status(entity)
