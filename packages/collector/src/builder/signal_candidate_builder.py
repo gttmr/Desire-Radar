@@ -112,29 +112,29 @@ class SignalCandidateBuilder:
 
             # Aggregate LLM-enriched fields
             desire_types = list({
-                ev.desire_type for ev in evidences
-                if ev.desire_type
+                desire_type for ev in evidences
+                if (desire_type := getattr(ev, "desire_type", None))
             })
             behavioral_signals = list({
-                ev.behavioral_signal for ev in evidences
-                if ev.behavioral_signal
+                behavioral_signal for ev in evidences
+                if (behavioral_signal := getattr(ev, "behavioral_signal", None))
             })
             intensities = [
-                ev.intensity for ev in evidences
-                if ev.intensity is not None
+                intensity for ev in evidences
+                if (intensity := getattr(ev, "intensity", None)) is not None
             ]
             avg_intensity = (
                 round(sum(intensities) / len(intensities), 2)
                 if intensities else None
             )
             demographic_hints = list({
-                ev.demographic_hint for ev in evidences
-                if ev.demographic_hint
+                demographic_hint for ev in evidences
+                if (demographic_hint := getattr(ev, "demographic_hint", None))
             })
             # Pick the longest LLM summary as the best one
             summaries = [
-                ev.llm_summary for ev in evidences
-                if ev.llm_summary
+                llm_summary for ev in evidences
+                if (llm_summary := getattr(ev, "llm_summary", None))
             ]
             desire_summary = max(summaries, key=len) if summaries else None
             projection = (
