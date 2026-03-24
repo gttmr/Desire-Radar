@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -48,6 +49,8 @@ class CadenceRunner:
                 id=f"connector_{name}",
                 name=f"Connector: {name}",
                 max_instances=1,
+                next_run_time=datetime.now(timezone.utc),
+                misfire_grace_time=connector.cadence_seconds,
             )
             logger.info(
                 "Scheduled %s every %d seconds", name, connector.cadence_seconds
@@ -107,8 +110,6 @@ class CadenceRunner:
 
             self.evidence_sink.extend(evidences)
             evidence_count += len(evidences)
-
-        from datetime import datetime, timezone
 
         self._last_run[connector_name] = datetime.now(timezone.utc).isoformat()
         return evidence_count

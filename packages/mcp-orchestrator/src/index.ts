@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import express from 'express';
 import { loadConfig } from './config.js';
 import { ProviderRegistry } from './providers/registry.js';
+import { OpenAIProvider } from './providers/openai.js';
 import { CodexProvider } from './providers/codex.js';
 import { ClaudeProvider } from './providers/claude.js';
 import { GeminiProvider } from './providers/gemini.js';
@@ -20,8 +21,13 @@ const __dirname = dirname(__filename);
 async function main(): Promise<void> {
   const config = loadConfig();
 
-  // Provider registry
+  // Provider registry — API providers first, CLI providers as optional fallback
   const registry = new ProviderRegistry();
+  if (config.OPENAI_API_KEY) {
+    registry.register(
+      new OpenAIProvider(config.OPENAI_API_KEY, config.OPENAI_MODEL, config.PROVIDER_TIMEOUT_MS, config.OPENAI_BASE_URL),
+    );
+  }
   registry.register(new CodexProvider(config.CODEX_PATH, config.PROVIDER_TIMEOUT_MS));
   registry.register(new ClaudeProvider(config.CLAUDE_PATH, config.PROVIDER_TIMEOUT_MS));
   registry.register(new GeminiProvider(config.GEMINI_PATH, config.PROVIDER_TIMEOUT_MS));
@@ -30,8 +36,12 @@ async function main(): Promise<void> {
   const sessionStore = new SessionStore(config.DATA_DIR);
   const runStore = new RunStore(config.DATA_DIR);
 
-  // Prompt system
-  const agentsDir = join(__dirname, 'agents');
+  // Prompt system — agents are .md files copied to /app/src/agents in Docker
+  // In dev they're relative to source; check both locations.
+  const distAgentsDir = join(__dirname, 'agents');
+  const srcAgentsDir = join(__dirname, '..', '..', 'src', 'agents');
+  const { existsSync } = await import('node:fs');
+  const agentsDir = existsSync(distAgentsDir) ? distAgentsDir : srcAgentsDir;
   const promptLoader = new PromptLoader(agentsDir);
   const promptComposer = new PromptComposer(promptLoader);
 

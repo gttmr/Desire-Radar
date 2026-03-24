@@ -61,6 +61,8 @@ services:
       - .env
     environment:
       COLLECTOR_BASE_URL: http://collector:5002
+      # OpenAI is the primary provider; CLI providers are optional fallbacks
+      DEFAULT_PROVIDERS: ${DEFAULT_PROVIDERS:-openai}
       # CLI paths inside the container
       CODEX_PATH: /usr/local/bin/codex
       CLAUDE_PATH: /usr/local/bin/claude

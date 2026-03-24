@@ -240,43 +240,58 @@ export class BotApp {
           return;
         }
 
-        const config = await this.reports.addTicker(interaction.guildId, interaction.channelId, ticker);
-        if (config.enabled && config.tickers.length > 0) {
-          this.scheduler.setSchedule(interaction.guildId, this.runScheduledReport.bind(this));
+        try {
+          const config = await this.reports.addTicker(interaction.guildId, interaction.channelId, ticker);
+          if (config.enabled && config.tickers.length > 0) {
+            this.scheduler.setSchedule(interaction.guildId, this.runScheduledReport.bind(this));
+          }
+          await interaction.reply({
+            content: `관심 종목 등록 완료: \`${ticker}\`\n리포트 채널: <#${config.reportChannelId}>\n현재 목록: ${config.tickers.join(', ')}`,
+            ephemeral: true
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+          await interaction.reply({ content: `종목 등록 실패: ${msg}`, ephemeral: true });
         }
-        await interaction.reply({
-          content: `관심 종목 등록 완료: \`${ticker}\`\n리포트 채널: <#${config.reportChannelId}>\n현재 목록: ${config.tickers.join(', ')}`,
-          ephemeral: true
-        });
         return;
       }
       case 'watchlist-remove': {
-        const ticker = normalizeTicker(interaction.options.getString('ticker', true));
-        const config = await this.reports.removeTicker(interaction.guildId, interaction.channelId, ticker);
-        if (config.enabled && config.tickers.length > 0) {
-          this.scheduler.setSchedule(interaction.guildId, this.runScheduledReport.bind(this));
-        } else {
-          this.scheduler.clearSchedule(interaction.guildId);
+        try {
+          const ticker = normalizeTicker(interaction.options.getString('ticker', true));
+          const config = await this.reports.removeTicker(interaction.guildId, interaction.channelId, ticker);
+          if (config.enabled && config.tickers.length > 0) {
+            this.scheduler.setSchedule(interaction.guildId, this.runScheduledReport.bind(this));
+          } else {
+            this.scheduler.clearSchedule(interaction.guildId);
+          }
+          await interaction.reply({
+            content: config.tickers.length > 0
+              ? `관심 종목 삭제 완료: \`${ticker}\`\n현재 목록: ${config.tickers.join(', ')}`
+              : `관심 종목 삭제 완료: \`${ticker}\`\n현재 목록이 비어 있습니다.`,
+            ephemeral: true
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+          await interaction.reply({ content: `종목 삭제 실패: ${msg}`, ephemeral: true });
         }
-        await interaction.reply({
-          content: config.tickers.length > 0
-            ? `관심 종목 삭제 완료: \`${ticker}\`\n현재 목록: ${config.tickers.join(', ')}`
-            : `관심 종목 삭제 완료: \`${ticker}\`\n현재 목록이 비어 있습니다.`,
-          ephemeral: true
-        });
         return;
       }
       case 'watchlist-list': {
-        const config = await this.reports.ensureGuild(interaction.guildId, interaction.channelId);
-        await interaction.reply({
-          content: [
-            `리포트 채널: <#${config.reportChannelId}>`,
-            `시간대: ${config.timezone}`,
-            `관심 종목: ${config.tickers.length > 0 ? config.tickers.join(', ') : '(비어 있음)'}`,
-            `자동 발송: ${config.enabled ? `평일 ${env.REPORT_TIME_KST}` : '비활성화'}`
-          ].join('\n'),
-          ephemeral: true
-        });
+        try {
+          const config = await this.reports.ensureGuild(interaction.guildId, interaction.channelId);
+          await interaction.reply({
+            content: [
+              `리포트 채널: <#${config.reportChannelId}>`,
+              `시간대: ${config.timezone}`,
+              `관심 종목: ${config.tickers.length > 0 ? config.tickers.join(', ') : '(비어 있음)'}`,
+              `자동 발송: ${config.enabled ? `평일 ${env.REPORT_TIME_KST}` : '비활성화'}`
+            ].join('\n'),
+            ephemeral: true
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+          await interaction.reply({ content: `목록 조회 실패: ${msg}`, ephemeral: true });
+        }
         return;
       }
       case 'report-summary':
@@ -299,19 +314,24 @@ export class BotApp {
         return;
       }
       case 'report-status': {
-        const config = await this.reports.ensureGuild(interaction.guildId, interaction.channelId);
-        const last = config.lastReport
-          ? `${config.lastReport.status} / ${config.lastReport.mode} / ${config.lastReport.ranAt}${config.lastReport.error ? ` / ${config.lastReport.error}` : ''}`
-          : '실행 이력 없음';
-        await interaction.reply({
-          content: [
-            `리포트 채널: <#${config.reportChannelId}>`,
-            `관심 종목 수: ${config.tickers.length}`,
-            `자동 발송 시각: 평일 ${env.REPORT_TIME_KST} ${env.REPORT_TIMEZONE} (summary)`,
-            `최근 실행: ${last}`
-          ].join('\n'),
-          ephemeral: true
-        });
+        try {
+          const config = await this.reports.ensureGuild(interaction.guildId, interaction.channelId);
+          const last = config.lastReport
+            ? `${config.lastReport.status} / ${config.lastReport.mode} / ${config.lastReport.ranAt}${config.lastReport.error ? ` / ${config.lastReport.error}` : ''}`
+            : '실행 이력 없음';
+          await interaction.reply({
+            content: [
+              `리포트 채널: <#${config.reportChannelId}>`,
+              `관심 종목 수: ${config.tickers.length}`,
+              `자동 발송 시각: 평일 ${env.REPORT_TIME_KST} ${env.REPORT_TIMEZONE} (summary)`,
+              `최근 실행: ${last}`
+            ].join('\n'),
+            ephemeral: true
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+          await interaction.reply({ content: `리포트 상태 조회 실패: ${msg}`, ephemeral: true });
+        }
         return;
       }
       case 'voice-start': {
@@ -338,21 +358,26 @@ export class BotApp {
           return;
         }
 
-        const voiceChannel = await guild.channels.fetch(voiceChannelId);
-        if (!voiceChannel || voiceChannel.type !== ChannelType.GuildVoice) {
-          await interaction.reply({ content: '유효한 음성 채널이 아닙니다.', ephemeral: true });
-          return;
-        }
+        try {
+          const voiceChannel = await guild.channels.fetch(voiceChannelId);
+          if (!voiceChannel || voiceChannel.type !== ChannelType.GuildVoice) {
+            await interaction.reply({ content: '유효한 음성 채널이 아닙니다.', ephemeral: true });
+            return;
+          }
 
-        await this.voiceCapture.start(
-          guildId,
-          voiceChannelId,
-          guild.voiceAdapterCreator as Parameters<VoiceCaptureService['start']>[2]
-        );
-        await interaction.reply({
-          content: `음성 수집 시작: ${voiceChannel.name}`,
-          ephemeral: true
-        });
+          await this.voiceCapture.start(
+            guildId,
+            voiceChannelId,
+            guild.voiceAdapterCreator as Parameters<VoiceCaptureService['start']>[2]
+          );
+          await interaction.reply({
+            content: `음성 수집 시작: ${voiceChannel.name}`,
+            ephemeral: true
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+          await interaction.reply({ content: `음성 수집 시작 실패: ${msg}`, ephemeral: true });
+        }
         return;
       }
       case 'voice-stop': {
@@ -447,15 +472,16 @@ export class BotApp {
         await interaction.deferReply({ ephemeral: true });
         try {
           const status = await this.collector.getSourcesStatus();
-          if (status.sources.length === 0) {
+          const entries = Object.entries(status.sources);
+          if (entries.length === 0) {
             await interaction.editReply({ content: '등록된 소스가 없습니다.' });
             return;
           }
-          const lines = status.sources.map((s) => {
-            const quarantine = s.quarantine_status === 'active' ? 'OK' : s.quarantine_status.toUpperCase();
-            const last = s.last_fetched_at ?? 'never';
+          const lines = entries.map(([name, s]) => {
+            const scheduled = s.scheduled ? 'ON' : 'OFF';
+            const last = s.last_run ?? 'never';
             const cadenceMin = Math.round(s.cadence_seconds / 60);
-            return `**${s.source}** (T${s.tier}) | ${quarantine} | 마지막 수집: ${last} | 주기: ${cadenceMin}분 | 실패율: ${Math.round(s.failure_rate * 100)}%`;
+            return `**${name}** (T${s.source_tier}) | ${scheduled} | 마지막 수집: ${last} | 주기: ${cadenceMin}분`;
           });
           await interaction.editReply({ content: lines.join('\n') });
         } catch (err) {
@@ -472,13 +498,19 @@ export class BotApp {
             await interaction.editReply({ content: '현재 떠오르는 신호 후보가 없습니다.' });
             return;
           }
-          const lines = result.candidates.map((c) => {
+          // Show top 15 candidates sorted by emergence_score (desc)
+          const top = result.candidates
+            .sort((a, b) => b.emergence_score - a.emergence_score)
+            .slice(0, 15);
+          const header = `📡 **떠오르는 신호 후보** (상위 ${top.length}개 / 전체 ${result.candidates.length}개)\n`;
+          const lines = top.map((c, i) => {
             const score = Math.round(c.emergence_score * 100);
             const velocity = Math.round(c.velocity_score * 100);
-            const sources = c.primary_sources.join(', ');
-            return `**${c.entity}** [${c.status}] | 출현: ${score}% | 확산 속도: ${velocity}% | 소스(${c.source_count}): ${sources}`;
+            const sources = c.sources.join(', ');
+            return `${i + 1}. **${c.entity}** [${c.status}] | 출현: ${score}% | 속도: ${velocity}% | 소스(${c.source_count}): ${sources}`;
           });
-          await interaction.editReply({ content: lines.join('\n\n') });
+          const content = header + lines.join('\n');
+          await interaction.editReply({ content: content.slice(0, 2000) });
         } catch (err) {
           const msg = err instanceof Error ? err.message : '알 수 없는 오류';
           await interaction.editReply({ content: `신호 후보 조회 실패: ${msg}` });
