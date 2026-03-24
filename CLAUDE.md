@@ -4,73 +4,90 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Discord bot that sends KRX (Korean Stock Exchange) morning briefings. It maintains per-guild watchlists and generates AI-powered market analysis reports using a multi-agent system (bull/bear/judge).
+"욕망 레이더" — 소비자 욕구 탐지 및 투자 신호 생성 시스템. 다중 소스에서 트렌드 데이터를 수집하고, AI 에이전트가 토론하여 일일 분석 리포트를 생성한다.
 
-Two services run together via Docker Compose:
-- **bot-api**: Node.js/TypeScript — Discord slash commands, scheduling, config persistence
-- **predictor**: Python — multi-agent report generation pipeline (collect → bull → bear → report)
+4개 서비스가 Docker Compose로 실행된다:
+- **discord-bot** (`packages/discord-bot/`): TypeScript — Discord 슬래시 커맨드, 스케줄링, 길드 설정
+- **collector** (`packages/collector/`): Python — 다중 소스 데이터 수집, evidence 생산, 신호 후보 생성
+- **mcp-orchestrator** (`packages/mcp-orchestrator/`): TypeScript — 세션형 CLI 다중 프로바이더 MCP 오케스트레이터, 에이전트 토론 중계
+- **predictor-legacy** (`packages/predictor-legacy/`): Python — 기존 KRX 주식 리포트 파이프라인 (점진적 축소 예정)
+
+## Monorepo Structure
+
+```
+packages/
+  shared-types/     # @agentic/shared-types — 모듈 간 공유 타입
+  discord-bot/      # @agentic/discord-bot — Discord 인터페이스
+  collector/        # agentic-collector — Python 수집 서비스
+  mcp-orchestrator/ # @agentic/mcp-orchestrator — 에이전트 오케스트레이션
+  predictor-legacy/ # 기존 predictor (호환 유지)
+```
+
+npm workspaces로 TypeScript 패키지를 관리한다. Python 패키지(collector, predictor-legacy)는 독립 관리.
 
 ## Commands
 
 ```bash
-# Development
-npm run dev          # tsx watch (hot reload)
-npm run build        # tsc compile to dist/
-npm start            # run compiled output
+# Root level
+npm run build              # 전체 TypeScript 패키지 빌드
+npm run test               # 전체 테스트
+npm run dev:bot            # discord-bot 핫 리로드
+npm run dev:orchestrator   # mcp-orchestrator 핫 리로드
 
-# Testing
-npm test             # vitest run (single pass)
-npm run test:watch   # vitest watch mode
+# Package level
+cd packages/discord-bot && npm test
+cd packages/mcp-orchestrator && npm test
+cd packages/collector && pytest
 
 # Docker
-docker-compose up --build   # run both services
+docker-compose up --build  # 4개 서비스 실행
 ```
-
-To run a single test file: `npx vitest run tests/reportService.test.ts`
 
 ## Architecture
 
-### Service Wiring (`src/index.ts`)
-All services are constructed and injected in `index.ts`: `JobEngine` → `ActionOrchestrator` → `GuildConfigStore` → `PredictorClient` → `ReportService` → `NotificationScheduler` → `BotApp(orchestrator, scheduler, reports)` + Express server.
+### Discord Bot (`packages/discord-bot/`)
+슬래시 커맨드 디스패치, 길드 설정 관리, 스케줄 리포트 발송.
+`ANALYSIS_BACKEND` 설정으로 predictor-legacy 또는 mcp-orchestrator를 선택.
 
-### Key Service Responsibilities
-- **`BotApp`** (`src/bot/botApp.ts`): Discord.js client, slash command dispatch, button interactions, voice channel capture
-- **`ReportService`** (`src/services/reportService.ts`): Orchestrates report generation; delegates to `PredictorClient`
-- **`PredictorClient`** (`src/services/predictorClient.ts`): HTTP client to the Python predictor (`POST /reports/generate`)
-- **`NotificationScheduler`** (`src/services/notificationScheduler.ts`): Timezone-aware weekday scheduling using `setTimeout` loops; triggers per-guild at `REPORT_TIME_KST`. Uses `computeNextOccurrence()` from `src/services/reportSchedule.ts`
-- **`GuildConfigStore`** (`src/services/guildConfigStore.ts`): JSON file persistence at `data/guild-report-config.json`
-- **`ActionOrchestrator`** (`src/services/actionOrchestrator.ts`): Tracks pending voice transcription actions with TTL; dispatches confirmed actions to `JobEngine`
-- **`JobEngine`** (`src/services/jobEngine.ts`): Executes `JobRequest`s produced by the voice pipeline (currently mock)
+서비스 와이어링: `JobEngine` → `ActionOrchestrator` → `GuildConfigStore` → `PredictorClient` / `OrchestratorClient` / `CollectorClient` → `ReportService` → `NotificationScheduler` → `BotApp` + Express.
 
-### Predictor Service (`predictor/server.py`)
-Python HTTP server (port 5001) with a multi-phase pipeline:
-1. **collect**: Fetches data from KIS API, Naver News, DART
-2. **bull/bear agents**: Azure OpenAI analysis (falls back to mock if keys absent)
-3. **report agent**: Synthesizes markdown report
+### Collector (`packages/collector/`)
+5계층 구조: Source Connectors → Raw Snapshot Store → Normalizer → Entity Resolver → Signal Candidate Builder.
+소스 스캔 우선 전략: 먼저 top movers를 훑고, 새 엔티티를 발견하면 tracking에 승격.
+소스별 혼합 cadence: 1h (Reddit, SteamDB, AppStore), 6h (Google Trends), 12h (Naver DataLab), 24h (resale).
+티어드 검역: T1(자동), T2(자동, trust↓), T3(review queue 필수).
 
-### Discord Messaging
-Reports are split into ≤1900-char chunks (`chunkMessage()`) to respect Discord's 2000-char limit.
+### MCP Orchestrator (`packages/mcp-orchestrator/`)
+세션형 CLI 다중 프로바이더 오케스트레이터.
+Provider: codex exec, claude -p, gemini -p.
+에이전트: search_intent, ranking_momentum, conversion_proxy, scarcity, diffusion, human_intel, theme_mapper, synthesis, report.
+핵심 에이전트는 2+ provider 병렬 실행 후 비교/합성.
 
-### Voice Pipeline
-`VoiceCaptureService` decodes Opus → PCM16LE, segments audio via `SpeechSegmenter`, and creates `ActionOrchestrator` entries. STT provider is abstracted in `src/stt/provider.ts` (`STT_PROVIDER=mock` by default).
+### Inter-Service Communication
+```
+Discord Bot → Collector (GET /candidates/emerging, GET /evidence/bundles/:entity)
+Discord Bot → MCP Orchestrator (POST /runs/submit-evidence, POST /runs/debate, POST /runs/synthesize)
+Discord Bot → Predictor Legacy (POST /reports/generate) [ANALYSIS_BACKEND=predictor]
+MCP Orchestrator → Collector (GET /internal/next-candidates, POST /internal/build-bundle)
+```
+
+### Shared Types (`packages/shared-types/`)
+모듈 간 계약: bot.ts, evidence.ts, orchestrator.ts, collector-api.ts, orchestrator-api.ts.
 
 ## Environment Variables
 
-Minimum required: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`
+### Discord Bot
+Required: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`
+Optional: `DISCORD_GUILD_ID`, `DEFAULT_TEXT_CHANNEL_ID`, `PREDICTOR_BASE_URL` (default `http://predictor-legacy:5001`), `COLLECTOR_BASE_URL` (default `http://collector:5002`), `ORCHESTRATOR_BASE_URL` (default `http://mcp-orchestrator:5003`), `ANALYSIS_BACKEND` (default `predictor`), `REPORT_TIME_KST`, `REPORT_TIMEZONE`, `ACTION_TTL_SEC`, `HEALTH_PORT`, `CONFIG_STORE_PATH`, `STT_PROVIDER`
 
-Key optional vars (with defaults):
-- `DISCORD_GUILD_ID` — if set, commands are registered to this guild only (faster for dev)
-- `DEFAULT_TEXT_CHANNEL_ID` — fallback text channel for voice pipeline and report delivery
-- `PREDICTOR_BASE_URL` (default: `http://predictor:5001`)
-- `REPORT_TIME_KST` (default: `08:00`) / `REPORT_TIMEZONE` (default: `Asia/Seoul`) — scheduling
-- `ACTION_TTL_SEC` (default: `600`) — TTL for pending voice actions
-- `HEALTH_PORT` (default: `3000`) — Express API port
-- `CONFIG_STORE_PATH` (default: `data/guild-report-config.json`)
-- `KIS_APP_KEY` / `KIS_APP_SECRET` — Korean stock API
-- `DART_API_KEY`, `NAVER_CLIENT_ID` / `NAVER_CLIENT_SECRET`
-- `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_DEPLOYMENT`
+### Collector
+`COLLECTOR_PORT` (default 5002), `DATA_DIR`, `REDDIT_USER_AGENT`, 각 소스별 API 키 (선택)
 
-All vars validated with Zod in `src/config.ts`. The predictor runs in fallback/mock mode when external API keys are absent.
+### MCP Orchestrator
+`ORCHESTRATOR_PORT` (default 5003), `COLLECTOR_BASE_URL`, `DATA_DIR`, `CODEX_PATH`, `CLAUDE_PATH`, `GEMINI_PATH`, `DEFAULT_PROVIDERS`, `PROVIDER_TIMEOUT_MS`
+
+### Predictor Legacy
+`KIS_APP_KEY`/`KIS_APP_SECRET`, `DART_API_KEY`, `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`, `AZURE_OPENAI_*`
 
 ## Git Workflow
 
@@ -86,4 +103,4 @@ git log --oneline
 
 ## Module System
 
-The project uses `"type": "module"` with `"moduleResolution": "NodeNext"`. All imports must use explicit `.js` extensions (e.g., `import ... from './foo.js'`) even for `.ts` source files.
+TypeScript packages use `"type": "module"` with `"moduleResolution": "NodeNext"`. All imports must use explicit `.js` extensions (e.g., `import ... from './foo.js'`).

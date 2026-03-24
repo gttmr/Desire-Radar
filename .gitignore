@@ -10,10 +10,10 @@ dist/
 
 # Data (runtime, not versioned)
 data/
-predictor/__pycache__/
-predictor/**/__pycache__/
+__pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
 
 # OS
 .DS_Store
