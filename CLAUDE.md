@@ -91,12 +91,12 @@ Optional: `DISCORD_GUILD_ID`, `DEFAULT_TEXT_CHANNEL_ID`, `PREDICTOR_BASE_URL` (d
 
 ## Git Workflow
 
-GitHub remote 없음 — 로컬 git으로 관리.
+GitHub remote: `https://github.com/gttmr/Agentic-World.git`
 
 ```bash
 git add <files>
 git commit -m "..."
-git log --oneline
+git push origin main
 ```
 
 작업 단위마다 커밋. 브랜치 전략: 실험적 기능은 feature 브랜치, 안정된 것은 main에 merge.
