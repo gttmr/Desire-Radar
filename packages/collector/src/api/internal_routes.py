@@ -124,3 +124,17 @@ async def analysis_status(entity: str) -> dict:
     """Return analysis status for a specific entity."""
     engine = _deps["analysis_engine"]
     return engine.get_status(entity)
+
+
+@router.get("/analysis/preview/{entity}")
+async def analysis_preview(entity: str) -> dict:
+    """Return the packed prompt preview for one entity."""
+    engine = _deps["analysis_engine"]
+    return engine.preview_entity(entity)
+
+
+@router.get("/analysis/preview-batch")
+async def analysis_preview_batch() -> dict:
+    """Return the packed prompt preview for the next analysis batch."""
+    engine = _deps["analysis_engine"]
+    return engine.preview_batch()

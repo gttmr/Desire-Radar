@@ -14,6 +14,9 @@ AnalysisStatus = Literal[
     "needs_review",
     "skipped",
 ]
+AnalysisExecutionMode = Literal["batch", "fresh", "resume"]
+PromptFormat = Literal["json", "markdown"]
+ResponseMode = Literal["single", "batch"]
 
 
 class PolicyDecision(BaseModel):
@@ -38,11 +41,17 @@ class AnalysisTask(BaseModel):
 
 
 class PackedContext(BaseModel):
-    entity: str
+    entity: str | None = None
+    entities: list[str] = Field(default_factory=list)
     prompt: str
     evidence_ids: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
     char_count: int
+    estimated_input_tokens: int
+    omitted_fields: list[str] = Field(default_factory=list)
+    prompt_format: PromptFormat = "markdown"
+    batch_size: int = 1
+    response_mode: ResponseMode = "single"
 
 
 class SessionState(BaseModel):
@@ -52,9 +61,13 @@ class SessionState(BaseModel):
     turn_count: int = 0
     last_active_at: str
     rolling_memory: str = ""
+    total_input_tokens: int = 0
+    total_cached_input_tokens: int = 0
+    total_uncached_input_tokens: int = 0
 
 
 class AnalysisResponse(BaseModel):
+    entity: str | None = None
     summary: str
     confidence: float
     desire_types: list[str] = Field(default_factory=list)
@@ -62,6 +75,22 @@ class AnalysisResponse(BaseModel):
     demographic_hints: list[str] = Field(default_factory=list)
     avg_intensity: float | None = None
     open_questions: list[str] = Field(default_factory=list)
+
+
+class ExecutionUsage(BaseModel):
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+    uncached_input_tokens: int = 0
+    elapsed_ms: float | None = None
+
+
+class ExecutionResult(BaseModel):
+    session_id: str
+    model: str | None = None
+    responses: list[AnalysisResponse] = Field(default_factory=list)
+    usage: ExecutionUsage = Field(default_factory=ExecutionUsage)
+    raw_text: str = ""
 
 
 class AnalysisProjection(BaseModel):
@@ -85,5 +114,12 @@ class AnalysisProjection(BaseModel):
     last_velocity_score: float | None = None
     first_enqueued_at: str | None = None
     analyzed_at: str | None = None
+    last_execution_mode: AnalysisExecutionMode | None = None
+    last_prompt_char_count: int | None = None
+    last_estimated_input_tokens: int | None = None
+    last_input_tokens: int | None = None
+    last_cached_input_tokens: int | None = None
+    last_uncached_input_tokens: int | None = None
+    last_output_tokens: int | None = None
+    last_batch_size: int | None = None
     updated_at: str
-

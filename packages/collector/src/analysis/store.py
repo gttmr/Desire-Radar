@@ -7,7 +7,7 @@ import os
 import threading
 from datetime import datetime, timezone
 
-from .models import AnalysisProjection, AnalysisResponse, AnalysisTask
+from .models import AnalysisProjection, AnalysisResponse, AnalysisTask, ExecutionUsage, PackedContext
 
 
 def _now_iso() -> str:
@@ -82,6 +82,9 @@ class AnalysisStore:
         task: AnalysisTask,
         session_id: str,
         model: str | None,
+        execution_mode: str,
+        packed: PackedContext,
+        batch_size: int,
     ) -> AnalysisProjection:
         now = _now_iso()
         with self._lock:
@@ -106,6 +109,10 @@ class AnalysisStore:
             projection.source_count = task.source_count
             projection.last_emergence_score = task.emergence_score
             projection.last_velocity_score = task.velocity_score
+            projection.last_execution_mode = execution_mode
+            projection.last_prompt_char_count = packed.char_count
+            projection.last_estimated_input_tokens = packed.estimated_input_tokens
+            projection.last_batch_size = batch_size
             projection.updated_at = now
             self._set_unlocked(projection)
             return projection
@@ -117,6 +124,10 @@ class AnalysisStore:
         session_id: str,
         model: str | None,
         review_threshold: float,
+        packed: PackedContext,
+        usage: ExecutionUsage,
+        execution_mode: str,
+        batch_size: int,
     ) -> AnalysisProjection:
         now = _now_iso()
         with self._lock:
@@ -141,12 +152,28 @@ class AnalysisStore:
                 last_velocity_score=task.velocity_score,
                 first_enqueued_at=self._first_enqueued_unlocked(task.entity, task.enqueued_at),
                 analyzed_at=now,
+                last_execution_mode=execution_mode,
+                last_prompt_char_count=packed.char_count,
+                last_estimated_input_tokens=packed.estimated_input_tokens,
+                last_input_tokens=usage.input_tokens,
+                last_cached_input_tokens=usage.cached_input_tokens,
+                last_uncached_input_tokens=usage.uncached_input_tokens,
+                last_output_tokens=usage.output_tokens,
+                last_batch_size=batch_size,
                 updated_at=now,
             )
             self._set_unlocked(projection)
             return projection
 
-    def mark_failed(self, task: AnalysisTask, error_message: str) -> AnalysisProjection:
+    def mark_failed(
+        self,
+        task: AnalysisTask,
+        error_message: str,
+        *,
+        packed: PackedContext | None = None,
+        execution_mode: str | None = None,
+        batch_size: int | None = None,
+    ) -> AnalysisProjection:
         now = _now_iso()
         with self._lock:
             existing = self._get_unlocked(task.entity)
@@ -168,6 +195,13 @@ class AnalysisStore:
             projection.source_count = task.source_count
             projection.last_emergence_score = task.emergence_score
             projection.last_velocity_score = task.velocity_score
+            if execution_mode is not None:
+                projection.last_execution_mode = execution_mode
+            if packed is not None:
+                projection.last_prompt_char_count = packed.char_count
+                projection.last_estimated_input_tokens = packed.estimated_input_tokens
+            if batch_size is not None:
+                projection.last_batch_size = batch_size
             projection.updated_at = now
             self._set_unlocked(projection)
             return projection
@@ -185,4 +219,3 @@ class AnalysisStore:
     def _set_unlocked(self, projection: AnalysisProjection) -> None:
         self._data["projections"][_norm_entity(projection.entity)] = projection.model_dump()
         self._save()
-
