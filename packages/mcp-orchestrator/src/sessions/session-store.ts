@@ -2,9 +2,24 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ProviderSession, AgentTurn } from '@agentic/shared-types';
+import type { ExecutionPhase, ModelProfile } from '../providers/base.js';
+
+export type SessionScope = {
+  phase: ExecutionPhase;
+  modelProfile: ModelProfile;
+  runScope: string;
+  model?: string;
+};
+
+type ScopedProviderSession = ProviderSession & {
+  phase: ExecutionPhase;
+  model_profile: ModelProfile;
+  run_scope: string;
+  model?: string;
+};
 
 type SessionData = {
-  sessions: ProviderSession[];
+  sessions: ScopedProviderSession[];
 };
 
 export class SessionStore {
@@ -16,18 +31,35 @@ export class SessionStore {
     this.load();
   }
 
-  getSession(agentName: string, provider: string): ProviderSession | undefined {
+  getSession(
+    agentName: string,
+    provider: string,
+    scope: SessionScope,
+  ): ScopedProviderSession | undefined {
     return this.data.sessions.find(
-      (s) => s.agent_name === agentName && s.provider === provider,
+      (session) =>
+        session.agent_name === agentName &&
+        session.provider === provider &&
+        session.phase === scope.phase &&
+        session.model_profile === scope.modelProfile &&
+        session.run_scope === scope.runScope,
     );
   }
 
-  createSession(agentName: string, provider: string): ProviderSession {
+  createSession(
+    agentName: string,
+    provider: string,
+    scope: SessionScope,
+  ): ScopedProviderSession {
     const now = new Date().toISOString();
-    const session: ProviderSession = {
+    const session: ScopedProviderSession = {
       session_id: randomUUID(),
       agent_name: agentName,
       provider,
+      phase: scope.phase,
+      model_profile: scope.modelProfile,
+      run_scope: scope.runScope,
+      model: scope.model,
       created_at: now,
       last_active_at: now,
       turn_count: 0,
@@ -53,11 +85,17 @@ export class SessionStore {
     this.save();
   }
 
-  listSessions(agentName?: string): ProviderSession[] {
+  listSessions(agentName?: string, runScope?: string): ScopedProviderSession[] {
     if (agentName) {
-      return this.data.sessions.filter((s) => s.agent_name === agentName);
+      return this.data.sessions.filter(
+        (session) =>
+          session.agent_name === agentName &&
+          (runScope ? session.run_scope === runScope : true),
+      );
     }
-    return [...this.data.sessions];
+    return runScope
+      ? this.data.sessions.filter((session) => session.run_scope === runScope)
+      : [...this.data.sessions];
   }
 
   private load(): void {

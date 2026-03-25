@@ -11,11 +11,13 @@ import {
   Routes,
   type ChatInputCommandInteraction,
   type GuildMember,
+  type Message,
   type TextChannel
 } from 'discord.js';
 import { env } from '../config.js';
 import { ActionOrchestrator } from '../services/actionOrchestrator.js';
 import { CollectorClient } from '../services/collectorClient.js';
+import { DiscordIngestRouter } from '../services/discordIngestRouter.js';
 import { NotificationScheduler } from '../services/notificationScheduler.js';
 import { ReportService, type ReportDispatch } from '../services/reportService.js';
 import { SpeechSegmenter } from '../services/speechSegmenter.js';
@@ -61,6 +63,7 @@ export class BotApp {
   readonly orchestrator: ActionOrchestrator;
   readonly reports: ReportService;
   readonly collector: CollectorClient;
+  readonly ingestRouter: DiscordIngestRouter;
   readonly segmenter: SpeechSegmenter;
   readonly stt: SttProvider;
   readonly voiceCapture: VoiceCaptureService;
@@ -75,6 +78,7 @@ export class BotApp {
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildVoiceStates
       ],
       partials: [Partials.Channel]
@@ -83,6 +87,7 @@ export class BotApp {
     this.scheduler = scheduler;
     this.reports = reports;
     this.collector = collector;
+    this.ingestRouter = new DiscordIngestRouter(collector);
     this.segmenter = new SpeechSegmenter();
     this.stt = new MockSttProvider();
     this.voiceCapture = new VoiceCaptureService(this.client, async (input) => {
@@ -177,6 +182,14 @@ export class BotApp {
         if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
           await interaction.reply({ content: '처리 중 오류가 발생했습니다.', ephemeral: true });
         }
+      }
+    });
+
+    this.client.on(Events.MessageCreate, async (message) => {
+      try {
+        await this.handleIngestMessage(message);
+      } catch (error) {
+        console.error('Discord ingest routing error', error);
       }
     });
   }
@@ -393,7 +406,7 @@ export class BotApp {
       case 'agent-status': {
         await interaction.deferReply({ ephemeral: true });
         try {
-          const signals = await this.reports.predictor.getAgentSignals();
+          const signals = await this.reports.analysis.getAgentSignals();
           if (signals.length === 0) {
             await interaction.editReply({ content: '저장된 에이전트 신호가 없습니다. `/agent-run`으로 먼저 실행하세요.' });
             return;
@@ -412,7 +425,7 @@ export class BotApp {
         await interaction.deferReply({ ephemeral: true });
         const agentName = interaction.options.getString('agent') ?? undefined;
         try {
-          const signals = await this.reports.predictor.runAgents(agentName ? [agentName] : undefined);
+          const signals = await this.reports.analysis.runAgents(agentName ? [agentName] : undefined);
           const names = signals.map((s) => s.agent).join(', ');
           await interaction.editReply({ content: `에이전트 실행 완료: ${names}\n\n결과를 확인하려면 \`/agent-status\`를 사용하세요.` });
         } catch (err) {
@@ -426,7 +439,7 @@ export class BotApp {
         const tagsRaw = interaction.options.getString('tags') ?? '';
         const tags = tagsRaw ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) : [];
         try {
-          const entry = await this.reports.predictor.addKnowledge(content, tags);
+          const entry = await this.reports.analysis.addKnowledge(content, tags);
           const tagStr = entry.tags.length > 0 ? ` [${entry.tags.join(', ')}]` : '';
           await interaction.reply({
             content: `지식 추가 완료 (ID: \`${entry.id}\`)\n> ${content}${tagStr}`,
@@ -441,7 +454,7 @@ export class BotApp {
       case 'knowledge-list': {
         await interaction.deferReply({ ephemeral: true });
         try {
-          const entries = await this.reports.predictor.listKnowledge();
+          const entries = await this.reports.analysis.listKnowledge();
           if (entries.length === 0) {
             await interaction.editReply({ content: '저장된 지식이 없습니다. `/knowledge-add`로 추가하세요.' });
             return;
@@ -460,7 +473,7 @@ export class BotApp {
       case 'knowledge-remove': {
         const id = interaction.options.getString('id', true).trim();
         try {
-          await this.reports.predictor.removeKnowledge(id);
+          await this.reports.analysis.removeKnowledge(id);
           await interaction.reply({ content: `삭제 완료: \`${id}\``, ephemeral: true });
         } catch (err) {
           const msg = err instanceof Error ? err.message : '알 수 없는 오류';
@@ -472,7 +485,14 @@ export class BotApp {
         await interaction.deferReply({ ephemeral: true });
         try {
           const status = await this.collector.getSourcesStatus();
-          const entries = Object.entries(status.sources);
+          const entries = Object.entries(
+            status.sources as Record<string, {
+              cadence_seconds: number;
+              source_tier: number;
+              last_run: string | null;
+              scheduled: boolean;
+            }>
+          );
           if (entries.length === 0) {
             await interaction.editReply({ content: '등록된 소스가 없습니다.' });
             return;
@@ -499,14 +519,22 @@ export class BotApp {
             return;
           }
           // Show top 15 candidates sorted by emergence_score (desc)
-          const top = result.candidates
+          const top = (result.candidates as Array<{
+            entity: string;
+            status: string;
+            emergence_score: number;
+            velocity_score: number;
+            source_count: number;
+            sources: string[];
+            primary_sources?: string[];
+          }>)
             .sort((a, b) => b.emergence_score - a.emergence_score)
             .slice(0, 15);
           const header = `📡 **떠오르는 신호 후보** (상위 ${top.length}개 / 전체 ${result.candidates.length}개)\n`;
           const lines = top.map((c, i) => {
             const score = Math.round(c.emergence_score * 100);
             const velocity = Math.round(c.velocity_score * 100);
-            const sources = c.sources.join(', ');
+            const sources = (c.sources.length > 0 ? c.sources : (c.primary_sources ?? [])).join(', ');
             return `${i + 1}. **${c.entity}** [${c.status}] | 출현: ${score}% | 속도: ${velocity}% | 소스(${c.source_count}): ${sources}`;
           });
           const content = header + lines.join('\n');
@@ -517,9 +545,85 @@ export class BotApp {
         }
         return;
       }
+      case 'human-queue': {
+        await interaction.deferReply({ ephemeral: true });
+        try {
+          if (
+            env.DISCORD_HUMAN_QUEUE_CHANNEL_IDS.size > 0 &&
+            !env.DISCORD_HUMAN_QUEUE_CHANNEL_IDS.has(interaction.channelId)
+          ) {
+            await interaction.editReply({
+              content: '이 명령은 지정된 사람 입력 큐 채널에서만 사용하세요.',
+            });
+            return;
+          }
+          const limit = interaction.options.getInteger('limit') ?? 10;
+          const result = await this.collector.listSubmissions('pending_human', 'human_analyst_note', limit);
+          if (result.count === 0) {
+            await interaction.editReply({ content: '대기 중인 사람 입력 요청이 없습니다.' });
+            return;
+          }
+
+          const lines = result.submissions.map((submission, index) => {
+            const metadata = (submission.metadata ?? {}) as Record<string, unknown>;
+            const entities = Array.isArray(metadata.entity_candidates)
+              ? metadata.entity_candidates.map((value) => String(value)).join(', ')
+              : '(none)';
+            const question = typeof metadata.question === 'string' ? metadata.question : '(no question)';
+            const kind =
+              typeof metadata.requested_input_kind === 'string'
+                ? metadata.requested_input_kind
+                : 'study_result';
+            const priority = typeof metadata.priority === 'string' ? metadata.priority : 'normal';
+            const requestedBy =
+              typeof metadata.requested_by_agent === 'string'
+                ? metadata.requested_by_agent
+                : 'unknown';
+            return [
+              `${index + 1}. ${submission.submission_id}`,
+              `entity=${entities}`,
+              `kind=${kind}`,
+              `priority=${priority}`,
+              `requested_by=${requestedBy}`,
+              `question=${question}`,
+            ].join(' | ');
+          });
+
+          await interaction.editReply({ content: lines.join('\n').slice(0, 2000) });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : '알 수 없는 오류';
+          await interaction.editReply({ content: `사람 입력 큐 조회 실패: ${msg}` });
+        }
+        return;
+      }
       default:
         await interaction.reply({ content: '지원하지 않는 명령입니다.', ephemeral: true });
     }
+  }
+
+  private async handleIngestMessage(message: Message<boolean>): Promise<void> {
+    if (!message.inGuild() || message.author.bot) {
+      return;
+    }
+
+    const result = await this.ingestRouter.handleMessage(message);
+    if (!result.handled) {
+      return;
+    }
+
+    if (result.accepted) {
+      try {
+        await message.react('📥');
+      } catch (error) {
+        console.error('Failed to react to ingested message', error);
+      }
+      return;
+    }
+
+    await message.reply({
+      content: result.message.slice(0, 1900),
+      allowedMentions: { repliedUser: false },
+    });
   }
 
   private async sendToTextChannel(channelId: string, message: string): Promise<void> {

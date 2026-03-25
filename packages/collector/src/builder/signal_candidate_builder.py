@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from ..analysis.store import AnalysisStore
 from ..normalizer.evidence_schema import Evidence
 from ..store.entity_store import EntityStore
 
@@ -21,15 +22,30 @@ class SignalCandidate(BaseModel):
     first_seen: str
     last_seen: str
 
+    # LLM-enriched aggregated fields
+    desire_types: list[str] = []  # Aggregated desire types from evidence
+    behavioral_signals: list[str] = []  # Aggregated behavioral descriptions
+    avg_intensity: float | None = None  # Average desire intensity
+    demographic_hints: list[str] = []  # Aggregated demographics
+    desire_summary: str | None = None  # Best LLM summary for this entity
+    analysis_status: str | None = None
+    analysis_summary: str | None = None
+    analysis_confidence: float | None = None
+    analysis_reason: str | None = None
+    last_analyzed_at: str | None = None
+    analysis_session_domain: str | None = None
+
 
 class SignalCandidateBuilder:
     def __init__(
         self,
         time_window_seconds: int = 86400,
         entity_store: EntityStore | None = None,
+        analysis_store: AnalysisStore | None = None,
     ) -> None:
         self.time_window_seconds = time_window_seconds
         self.entity_store = entity_store
+        self.analysis_store = analysis_store
 
     def _is_t3_allowed(self, ev: Evidence, entity: str) -> bool:
         """Check if T3 evidence is allowed (approved in review queue)."""
@@ -94,6 +110,46 @@ class SignalCandidateBuilder:
             else:
                 status = "emerging"
 
+            # Aggregate LLM-enriched fields
+            desire_types = list({
+                desire_type for ev in evidences
+                if (desire_type := getattr(ev, "desire_type", None))
+            })
+            behavioral_signals = list({
+                behavioral_signal for ev in evidences
+                if (behavioral_signal := getattr(ev, "behavioral_signal", None))
+            })
+            intensities = [
+                intensity for ev in evidences
+                if (intensity := getattr(ev, "intensity", None)) is not None
+            ]
+            avg_intensity = (
+                round(sum(intensities) / len(intensities), 2)
+                if intensities else None
+            )
+            demographic_hints = list({
+                demographic_hint for ev in evidences
+                if (demographic_hint := getattr(ev, "demographic_hint", None))
+            })
+            # Pick the longest LLM summary as the best one
+            summaries = [
+                llm_summary for ev in evidences
+                if (llm_summary := getattr(ev, "llm_summary", None))
+            ]
+            desire_summary = max(summaries, key=len) if summaries else None
+            projection = (
+                self.analysis_store.get_projection(entity)
+                if self.analysis_store is not None
+                else None
+            )
+
+            if projection is not None:
+                desire_types = projection.desire_types or desire_types
+                behavioral_signals = projection.behavioral_signals or behavioral_signals
+                avg_intensity = projection.avg_intensity if projection.avg_intensity is not None else avg_intensity
+                demographic_hints = projection.demographic_hints or demographic_hints
+                desire_summary = projection.summary or desire_summary
+
             candidates.append(
                 SignalCandidate(
                     entity=entity,
@@ -105,6 +161,17 @@ class SignalCandidateBuilder:
                     sources=sources,
                     first_seen=first_seen,
                     last_seen=last_seen,
+                    desire_types=desire_types,
+                    behavioral_signals=behavioral_signals,
+                    avg_intensity=avg_intensity,
+                    demographic_hints=demographic_hints,
+                    desire_summary=desire_summary,
+                    analysis_status=projection.status if projection is not None else None,
+                    analysis_summary=projection.summary if projection is not None else None,
+                    analysis_confidence=projection.confidence if projection is not None else None,
+                    analysis_reason=projection.reason if projection is not None else None,
+                    last_analyzed_at=projection.analyzed_at if projection is not None else None,
+                    analysis_session_domain=projection.session_domain if projection is not None else None,
                 )
             )
 

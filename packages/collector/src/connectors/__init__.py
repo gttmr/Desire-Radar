@@ -1,6 +1,5 @@
-"""Connector registry for all data sources."""
+"""Connector registry for pull-based data sources."""
 
-from .manual_observation import ManualObservationConnector
 from .reddit_mentions import RedditMentionsConnector
 from .google_trends import GoogleTrendsConnector
 from .naver_datalab import NaverDatalabConnector
@@ -15,12 +14,7 @@ def build_connector_registry(
     data_dir: str = "data",
 ) -> dict[str, BaseConnector]:
     """Return a dict mapping connector name to connector instance."""
-    import os
-
     connectors: list[BaseConnector] = [
-        ManualObservationConnector(
-            persist_path=os.path.join(data_dir, "manual_observations.json")
-        ),
         RedditMentionsConnector(),
         GoogleTrendsConnector(),
         NaverDatalabConnector(),

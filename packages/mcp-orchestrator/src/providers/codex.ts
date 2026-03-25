@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { ProviderAdapter, ProviderResult } from './base.js';
+import type { ProviderAdapter, ProviderExecutionRequest, ProviderResult } from './base.js';
 
 export class CodexProvider implements ProviderAdapter {
   readonly name = 'codex';
@@ -10,13 +10,18 @@ export class CodexProvider implements ProviderAdapter {
     private readonly timeoutMs: number = 120_000,
   ) {}
 
-  async execute(prompt: string, sessionId?: string): Promise<ProviderResult> {
-    const sid = sessionId ?? randomUUID();
+  async execute(request: ProviderExecutionRequest): Promise<ProviderResult> {
+    const sid = request.sessionId ?? randomUUID();
     const start = Date.now();
+    const model = request.model;
 
     try {
-      const text = await this.run(['exec', '--quiet'], prompt);
-      return { text, sessionId: sid, durationMs: Date.now() - start };
+      const args = ['exec', '--quiet'];
+      if (model) {
+        args.push('-m', model);
+      }
+      const text = await this.run(args, request.prompt, request.timeoutMs);
+      return { text, sessionId: sid, durationMs: Date.now() - start, model };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[codex] execution failed: ${message}`);
@@ -32,6 +37,7 @@ export class CodexProvider implements ProviderAdapter {
         }),
         sessionId: sid,
         durationMs: Date.now() - start,
+        model,
       };
     }
   }

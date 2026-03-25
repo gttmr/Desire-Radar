@@ -1,10 +1,21 @@
 import type {
+  CollectRunRequest,
   CollectRunResponse,
+  CollectorSourceCatalogResponse,
   EmergingCandidatesResponse,
   EvidenceBundleResponse,
+  HumanAnalystNoteRequest,
+  HumanEvidenceBatchRequest,
+  HumanInputMessageRequest,
+  IngestSubmissionListResponse,
+  IngestSubmission,
   SourcesStatusResponse,
   ManualObservationRequest,
-  ManualObservationResponse
+  ManualObservationResponse,
+  ReviewApproveRequest,
+  ReviewApproveResponse,
+  ReviewRejectRequest,
+  ReviewRejectResponse,
 } from '@agentic/shared-types';
 
 export class CollectorClient {
@@ -25,12 +36,60 @@ export class CollectorClient {
     return this.get('/sources/status');
   }
 
+  async getSourcesCatalog(): Promise<CollectorSourceCatalogResponse> {
+    return this.get('/sources/catalog');
+  }
+
+  async listSubmissions(status?: string, sourceId?: string, limit = 20): Promise<IngestSubmissionListResponse> {
+    const params = new URLSearchParams();
+    if (status) {
+      params.set('status', status);
+    }
+    if (sourceId) {
+      params.set('source_id', sourceId);
+    }
+    params.set('limit', String(limit));
+    const query = params.toString();
+    return this.get(`/ingest/submissions${query ? `?${query}` : ''}`);
+  }
+
   async submitManualObservation(obs: ManualObservationRequest): Promise<ManualObservationResponse> {
     return this.post('/manual-observation', obs);
   }
 
-  async triggerCollect(sources?: string[]): Promise<CollectRunResponse> {
-    return this.post('/collect/run', { sources });
+  async submitHumanObservation(obs: ManualObservationRequest & { reporter?: string }): Promise<IngestSubmission> {
+    return this.post('/ingest/human-observation', obs);
+  }
+
+  async submitHumanStudyResult(note: HumanAnalystNoteRequest): Promise<IngestSubmission> {
+    return this.post('/ingest/human-study-result', note);
+  }
+
+  async submitHumanDataSource(batch: HumanEvidenceBatchRequest): Promise<IngestSubmission> {
+    return this.post('/ingest/human-data-source', batch);
+  }
+
+  async submitHumanInput(message: HumanInputMessageRequest): Promise<IngestSubmission> {
+    return this.post('/ingest/human-input', message);
+  }
+
+  async approveReview(req: ReviewApproveRequest): Promise<ReviewApproveResponse> {
+    return this.post('/review/approve', req);
+  }
+
+  async rejectReview(req: ReviewRejectRequest): Promise<ReviewRejectResponse> {
+    return this.post('/review/reject', req);
+  }
+
+  async triggerCollect(connector?: string | string[]): Promise<CollectRunResponse> {
+    const body: CollectRunRequest = {};
+    if (typeof connector === 'string') {
+      body.connector = connector;
+    } else if (Array.isArray(connector) && connector.length > 0) {
+      body.connector = connector[0];
+      body.sources = connector;
+    }
+    return this.post('/collect/run', body);
   }
 
   private async get<T>(path: string): Promise<T> {

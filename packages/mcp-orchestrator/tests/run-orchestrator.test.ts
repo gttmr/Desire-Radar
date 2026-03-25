@@ -5,15 +5,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
-import type { ProviderAdapter, ProviderResult } from '../src/providers/base.js';
+import type { ProviderAdapter, ProviderExecutionRequest, ProviderResult } from '../src/providers/base.js';
 import type { EvidenceBundle, AgentResponse } from '@agentic/shared-types';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import { SessionStore } from '../src/sessions/session-store.js';
 import { RunStore } from '../src/orchestrator/run-store.js';
+import { RunContextStore } from '../src/orchestrator/run-context-store.js';
 import { PromptLoader } from '../src/prompt/loader.js';
 import { PromptComposer } from '../src/prompt/composer.js';
 import { AgentExecutor } from '../src/orchestrator/agent-executor.js';
 import { RunOrchestrator } from '../src/orchestrator/run-orchestrator.js';
+import { DebateService } from '../src/pipeline/debate.js';
+import { ExecutionPolicyResolver } from '../src/policy/execution.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -45,17 +48,18 @@ class MockProvider implements ProviderAdapter {
     this.name = name;
   }
 
-  async execute(prompt: string, sessionId?: string): Promise<ProviderResult> {
+  async execute(request: ProviderExecutionRequest): Promise<ProviderResult> {
     this.callCount++;
     // Extract agent name from prompt to generate appropriate mock
-    const agentMatch = prompt.match(/# (\w[\w\s]+) Agent/);
+    const agentMatch = request.prompt.match(/# (\w[\w\s]+) Agent/);
     const agentName = agentMatch ? agentMatch[1]!.trim().toLowerCase().replace(/\s+/g, '_') : 'unknown';
 
     const response = makeMockResponse(agentName);
     return {
       text: JSON.stringify(response),
-      sessionId: sessionId ?? randomUUID(),
+      sessionId: request.sessionId ?? randomUUID(),
       durationMs: 50,
+      model: request.model,
     };
   }
 
@@ -109,11 +113,74 @@ describe('RunOrchestrator', () => {
 
     const sessionStore = new SessionStore(dataDir);
     const runStore = new RunStore(dataDir);
+    const contextStore = new RunContextStore();
     const promptLoader = new PromptLoader(agentsDir);
     const promptComposer = new PromptComposer(promptLoader);
-    const agentExecutor = new AgentExecutor(registry, sessionStore, promptComposer, runStore);
+    const executionPolicy = new ExecutionPolicyResolver(
+      {
+        defaults: {
+          triage: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
+          debate: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
+          verdict: { providers: ['mock'], modelProfile: 'premium', responseFormat: 'json' },
+          report: { providers: ['mock'], modelProfile: 'balanced', responseFormat: 'json' },
+        },
+        agents: {},
+      },
+      {
+        providers: {
+          mock: {
+            cheap: 'mock-cheap',
+            balanced: 'mock-balanced',
+            premium: 'mock-premium',
+          },
+        },
+      },
+      ['mock'],
+    );
+    const agentExecutor = new AgentExecutor(
+      registry,
+      sessionStore,
+      promptComposer,
+      runStore,
+      executionPolicy,
+    );
+    const debatePolicy = {
+      defaultPlan: [
+        'search_intent',
+        'ranking_momentum',
+        'conversion_proxy',
+        'scarcity',
+        'diffusion',
+        'human_intel',
+        'theme_mapper',
+        'synthesis',
+      ],
+      maxRounds: 3,
+      consensusRequiresQuietRound: true,
+      triage: {
+        agentName: 'triage',
+        minimumEmergenceScore: 0,
+        minimumSourceCount: 1,
+      },
+      verdict: {
+        primaryAgent: 'investment_verdict',
+        crossCheckAgent: 'synthesis',
+        primaryModelProfile: 'premium' as const,
+        crossCheckModelProfile: 'balanced' as const,
+      },
+    };
+    const debateService = new DebateService(
+      agentExecutor,
+      runStore,
+      contextStore,
+      debatePolicy,
+    );
 
-    orchestrator = new RunOrchestrator(agentExecutor, runStore, ['mock']);
+    orchestrator = new RunOrchestrator(agentExecutor, runStore, ['mock'], {
+      sessionStore,
+      contextStore,
+      debateService,
+    });
   });
 
   it('should submit evidence and create a run', async () => {

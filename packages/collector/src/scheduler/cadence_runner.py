@@ -1,14 +1,13 @@
 """Cadence-based scheduler for running connectors at declared intervals."""
 
-import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Callable
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from ..connectors.base import BaseConnector
-from ..resolver.entity_resolver import EntityResolver
+from ..ingest.engine import IngestionEngine
+from ..sources.registry import SourceRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -17,22 +16,21 @@ class CadenceRunner:
     def __init__(
         self,
         connectors: dict[str, BaseConnector],
-        snapshot_store: Any,
-        normalizer_fn: Callable,
-        evidence_sink: Any = None,
-        entity_resolver: EntityResolver | None = None,
+        ingestion_engine: IngestionEngine,
+        source_registry: SourceRegistry,
     ) -> None:
         self.connectors = connectors
-        self.snapshot_store = snapshot_store
-        self.normalizer_fn = normalizer_fn
-        self.evidence_sink: Any = evidence_sink if evidence_sink is not None else []
-        self.entity_resolver = entity_resolver
+        self.ingestion_engine = ingestion_engine
+        self.source_registry = source_registry
         self._scheduler = AsyncIOScheduler()
-        self._last_run: dict[str, str] = {}
 
     def start(self) -> None:
         """Register each connector with its cadence. Use APScheduler."""
         for name, connector in self.connectors.items():
+            source = self.source_registry.get(name)
+            if source is None or not source.enabled:
+                logger.info("Skipping scheduler for %s (disabled or missing source)", name)
+                continue
             if connector.cadence_seconds <= 0:
                 logger.info(
                     "Skipping scheduler for %s (cadence=%d)",
@@ -73,55 +71,15 @@ class CadenceRunner:
             logger.exception("Error running connector %s", connector_name)
 
     async def run_connector(self, connector_name: str) -> int:
-        """Run a single connector, save snapshots, normalize. Return evidence count."""
+        """Run a single connector through the common ingestion engine."""
         connector = self.connectors.get(connector_name)
         if connector is None:
             logger.warning("Unknown connector: %s", connector_name)
             return 0
 
-        payloads = await connector.fetch()
-        evidence_count = 0
-
-        for payload in payloads:
-            # Save raw snapshot
-            snapshot_id = self.snapshot_store.save(
-                source=payload.source,
-                payload=payload.data,
-                request_params=payload.request_params,
-            )
-
-            # Normalize
-            evidences = self.normalizer_fn(
-                source=payload.source,
-                raw_payload=payload.data,
-                snapshot_ref=snapshot_id,
-            )
-
-            # Resolve entity candidates through EntityResolver
-            if self.entity_resolver is not None:
-                for ev in evidences:
-                    resolved = self.entity_resolver.resolve_candidates(
-                        ev.entity_candidates, source=payload.source
-                    )
-                    if resolved:
-                        ev.entity_candidates = resolved
-                    # If no candidates resolved, keep originals (they are
-                    # already queued for review by resolve_candidates)
-
-            self.evidence_sink.extend(evidences)
-            evidence_count += len(evidences)
-
-        self._last_run[connector_name] = datetime.now(timezone.utc).isoformat()
-        return evidence_count
+        record = await self.ingestion_engine.run_source(connector_name)
+        return len(record.evidence_ids)
 
     def get_status(self) -> dict[str, dict]:
-        """Return status of all connectors."""
-        status: dict[str, dict] = {}
-        for name, connector in self.connectors.items():
-            status[name] = {
-                "cadence_seconds": connector.cadence_seconds,
-                "source_tier": connector.source_tier,
-                "last_run": self._last_run.get(name),
-                "scheduled": connector.cadence_seconds > 0,
-            }
-        return status
+        """Return status of all sources from the registry."""
+        return self.source_registry.status()

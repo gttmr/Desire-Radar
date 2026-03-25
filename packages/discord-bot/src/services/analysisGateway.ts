@@ -5,13 +5,13 @@ import type {
   PredictorRequest,
   PredictorResponse,
   SignalValue,
-  EvidenceBundle
+  EvidenceBundle,
+  SignalCandidate,
 } from '@agentic/shared-types';
 import type { CollectorClient } from './collectorClient.js';
 import type { OrchestratorClient } from './orchestratorClient.js';
-import type { PredictorClient } from './predictorClient.js';
 
-export type AnalysisBackend = 'predictor' | 'orchestrator';
+export type AnalysisBackend = 'orchestrator';
 
 export interface AnalysisGateway {
   generateReport(request: PredictorRequest): Promise<PredictorResponse>;
@@ -42,6 +42,10 @@ function turnToSignal(turn: AgentTurn): AgentSignal {
     key_factors: turn.response?.claims?.map(c => c.claim) ?? [],
     updated_at: turn.created_at ?? new Date().toISOString()
   };
+}
+
+function getCandidateSources(candidate: Pick<SignalCandidate, 'sources' | 'primary_sources'>): string[] {
+  return candidate.sources.length > 0 ? candidate.sources : (candidate.primary_sources ?? []);
 }
 
 /**
@@ -106,7 +110,7 @@ export class OrchestratorGatewayAdapter implements AnalysisGateway {
 
   private async _generateViaOrchestrator(
     request: PredictorRequest,
-    candidates: Array<{ entity: string; emergence_score: number; velocity_score: number; source_count: number; sources: string[] }>
+    candidates: SignalCandidate[],
   ): Promise<PredictorResponse | null> {
     const entityList = candidates.map(c => c.entity);
     const evidenceSummary = candidates
@@ -153,14 +157,14 @@ export class OrchestratorGatewayAdapter implements AnalysisGateway {
       markdown,
       items: [],
       risks: [],
-      sources: candidates.flatMap(c => c.sources),
+      sources: [...new Set(candidates.flatMap(getCandidateSources))],
       tickers: request.tickers
     } as PredictorResponse;
   }
 
   private _generateFromCollectorData(
     request: PredictorRequest,
-    candidates: Array<{ entity: string; status: string; emergence_score: number; velocity_score: number; source_count: number; sources: string[] }>
+    candidates: SignalCandidate[],
   ): PredictorResponse {
     const now = new Date().toISOString();
     const date = request.asOfDate || now.slice(0, 10);
@@ -179,7 +183,7 @@ export class OrchestratorGatewayAdapter implements AnalysisGateway {
       for (const c of emerging.slice(0, 10)) {
         const score = Math.round(c.emergence_score * 100);
         const velocity = Math.round(c.velocity_score * 100);
-        lines.push(`- **${c.entity}** — 출현 ${score}% | 확산 속도 ${velocity}% | 소스(${c.source_count}): ${c.sources.join(', ')}`);
+        lines.push(`- **${c.entity}** — 출현 ${score}% | 확산 속도 ${velocity}% | 소스(${c.source_count}): ${getCandidateSources(c).join(', ')}`);
       }
       lines.push('');
     }
@@ -188,12 +192,12 @@ export class OrchestratorGatewayAdapter implements AnalysisGateway {
       lines.push(`## 📡 관찰 중인 신호 (${preheat.length}개)\n`);
       for (const c of preheat.slice(0, 10)) {
         const score = Math.round(c.emergence_score * 100);
-        lines.push(`- **${c.entity}** — 출현 ${score}% | 소스(${c.source_count}): ${c.sources.join(', ')}`);
+        lines.push(`- **${c.entity}** — 출현 ${score}% | 소스(${c.source_count}): ${getCandidateSources(c).join(', ')}`);
       }
       lines.push('');
     }
 
-    const allSources = [...new Set(candidates.flatMap(c => c.sources))];
+    const allSources = [...new Set(candidates.flatMap(getCandidateSources))];
     lines.push(`## 📊 데이터 소스\n`);
     lines.push(`활성 소스: ${allSources.join(', ')}\n`);
 
@@ -320,13 +324,9 @@ export class OrchestratorGatewayAdapter implements AnalysisGateway {
  */
 export function createAnalysisGateway(
   backend: AnalysisBackend,
-  predictor: PredictorClient,
   orchestrator: OrchestratorClient,
   collector: CollectorClient
 ): AnalysisGateway {
-  if (backend === 'orchestrator') {
-    console.log('ANALYSIS_BACKEND=orchestrator — using OrchestratorGatewayAdapter');
-    return new OrchestratorGatewayAdapter(orchestrator, collector);
-  }
-  return predictor;
+  console.log(`ANALYSIS_BACKEND=${backend} — using OrchestratorGatewayAdapter`);
+  return new OrchestratorGatewayAdapter(orchestrator, collector);
 }

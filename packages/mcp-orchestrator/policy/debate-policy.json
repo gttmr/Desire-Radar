@@ -1,0 +1,25 @@
+{
+  "defaultPlan": [
+    "search_intent",
+    "ranking_momentum",
+    "conversion_proxy",
+    "scarcity",
+    "diffusion",
+    "human_intel",
+    "theme_mapper",
+    "synthesis"
+  ],
+  "maxRounds": 3,
+  "consensusRequiresQuietRound": true,
+  "triage": {
+    "agentName": "triage",
+    "minimumEmergenceScore": 0.1,
+    "minimumSourceCount": 1
+  },
+  "verdict": {
+    "primaryAgent": "investment_verdict",
+    "crossCheckAgent": "synthesis",
+    "primaryModelProfile": "premium",
+    "crossCheckModelProfile": "balanced"
+  }
+}

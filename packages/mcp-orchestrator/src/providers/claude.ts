@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { ProviderAdapter, ProviderResult } from './base.js';
+import type { ProviderAdapter, ProviderExecutionRequest, ProviderResult } from './base.js';
 
 export class ClaudeProvider implements ProviderAdapter {
   readonly name = 'claude';
@@ -10,17 +10,21 @@ export class ClaudeProvider implements ProviderAdapter {
     private readonly timeoutMs: number = 120_000,
   ) {}
 
-  async execute(prompt: string, sessionId?: string): Promise<ProviderResult> {
-    const sid = sessionId ?? randomUUID();
+  async execute(request: ProviderExecutionRequest): Promise<ProviderResult> {
+    const sid = request.sessionId ?? randomUUID();
     const start = Date.now();
+    const model = request.model;
 
     try {
-      const args = ['-p', prompt];
-      if (sessionId) {
-        args.push('--continue', sessionId);
+      const args = ['-p', request.prompt];
+      if (model) {
+        args.push('--model', model);
       }
-      const text = await this.run(args);
-      return { text, sessionId: sid, durationMs: Date.now() - start };
+      if (request.sessionId) {
+        args.push('--continue', request.sessionId);
+      }
+      const text = await this.run(args, request.timeoutMs);
+      return { text, sessionId: sid, durationMs: Date.now() - start, model };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[claude] execution failed: ${message}`);
@@ -36,6 +40,7 @@ export class ClaudeProvider implements ProviderAdapter {
         }),
         sessionId: sid,
         durationMs: Date.now() - start,
+        model,
       };
     }
   }

@@ -1,10 +1,14 @@
 import type {
   AgentTurn,
+  DailyReport,
   EvidenceBundle,
   Evidence,
-  DailyReport,
   AgentResponse,
   AgentClaim,
+  ProviderExecution,
+  RunResearch,
+  RunVerdict,
+  HighLevelRun,
   SubmitEvidenceResponse,
   RunDebateResponse,
   SynthesizeReportResponse,
@@ -12,28 +16,46 @@ import type {
 } from '@agentic/shared-types';
 import type { AgentExecutor } from './agent-executor.js';
 import type { RunStore } from './run-store.js';
+import type { SessionStore } from '../sessions/session-store.js';
+import type { CandidateService } from '../collector/candidate-service.js';
+import type { CollectorCandidate } from '../collector/client.js';
+import type { DebateService } from '../pipeline/debate.js';
+import type { ReportService } from '../pipeline/report.js';
+import type { ResearchLoopService } from '../pipeline/research-loop.js';
+import type { TriageService } from '../pipeline/triage.js';
+import type { VerdictService } from '../pipeline/verdict.js';
+import type {
+  DebatePhaseResult,
+  ReportPhaseResult,
+  TriageDecision,
+  VerdictResult,
+} from '../pipeline/types.js';
 import { randomUUID } from 'node:crypto';
+import { RunContextStore } from './run-context-store.js';
 
-const DEFAULT_PLAN = [
-  'search_intent',
-  'ranking_momentum',
-  'conversion_proxy',
-  'scarcity',
-  'diffusion',
-  'human_intel',
-  'theme_mapper',
-  'synthesis',
-];
+type RunOrchestratorOptions = {
+  sessionStore?: SessionStore;
+  contextStore?: RunContextStore;
+  candidateService?: CandidateService;
+  triageService?: TriageService;
+  debateService?: DebateService;
+  researchLoopService?: ResearchLoopService;
+  verdictService?: VerdictService;
+  reportService?: ReportService;
+};
 
 export class RunOrchestrator {
-  private evidenceBundles = new Map<string, EvidenceBundle>();
+  private readonly contextStore: RunContextStore;
   private reports: DailyReport[] = [];
 
   constructor(
     private readonly agentExecutor: AgentExecutor,
     private readonly runStore: RunStore,
     private readonly defaultProviders: string[],
-  ) {}
+    private readonly options: RunOrchestratorOptions = {},
+  ) {
+    this.contextStore = options.contextStore ?? new RunContextStore();
+  }
 
   async submitEvidence(
     topic: string,
@@ -55,7 +77,9 @@ export class RunOrchestrator {
       run = this.runStore.createRun(topic, refs);
     }
 
-    this.evidenceBundles.set(run.run_id, bundle);
+    this.contextStore.setBundle(run.run_id, bundle);
+    this.contextStore.setEntity(run.run_id, bundle.entity);
+    this.contextStore.setTopic(run.run_id, topic);
 
     return {
       run_id: run.run_id,
@@ -69,32 +93,21 @@ export class RunOrchestrator {
     providers?: string[],
   ): Promise<AgentTurn[]> {
     const run = this.runStore.getRun(runId);
-    if (!run) throw new Error(`Run not found: ${runId}`);
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`);
+    }
 
     this.runStore.updateRun(runId, { status: 'running' });
 
-    const bundle = this.evidenceBundles.get(runId);
-    const existingTurns = this.runStore.getTurns(runId);
-
-    // Collect messages directed at this agent from previous turns
-    const otherAgentMessages: Array<{ from: string; content: string }> = [];
-    for (const turn of existingTurns) {
-      for (const msg of turn.response.messages_for_other_agents) {
-        if (msg.target_agent === agentName) {
-          otherAgentMessages.push({
-            from: turn.agent_name,
-            content: msg.content,
-          });
-        }
-      }
-    }
-
     return this.agentExecutor.executeAgent({
       runId,
+      runScope: runId,
       agentName,
+      phase: agentName === 'report' ? 'report' : 'debate',
       providers: providers ?? this.defaultProviders,
-      evidenceBundle: bundle,
-      otherAgentMessages,
+      evidenceBundle: this.contextStore.getBundle(runId),
+      otherAgentMessages: this.collectMessagesForAgent(runId, agentName),
+      researchResults: this.contextStore.getResearchResults(runId),
     });
   }
 
@@ -104,44 +117,26 @@ export class RunOrchestrator {
     maxRounds?: number,
     providers?: string[],
   ): Promise<RunDebateResponse> {
-    const agentPlan = plan ?? DEFAULT_PLAN;
-    const rounds = maxRounds ?? 3;
-    const allTurns: AgentTurn[] = [];
-    let roundsExecuted = 0;
-
-    for (let round = 0; round < rounds; round++) {
-      let hasNewMessages = false;
-
-      for (const agentName of agentPlan) {
-        const turns = await this.runAgentRound(runId, agentName, providers);
-        allTurns.push(...turns);
-
-        // Check if any agent produced messages for others
-        for (const turn of turns) {
-          if (turn.response.messages_for_other_agents.length > 0) {
-            hasNewMessages = true;
-          }
-        }
-      }
-
-      roundsExecuted++;
-
-      // If no agents produced inter-agent messages, we've reached consensus
-      if (!hasNewMessages && round > 0) {
-        this.runStore.updateRun(runId, { status: 'completed' });
-        return {
-          turns: allTurns,
-          status: 'consensus',
-          rounds_executed: roundsExecuted,
-        };
-      }
+    if (!this.options.debateService) {
+      throw new Error('Debate service not configured');
     }
 
-    this.runStore.updateRun(runId, { status: 'completed' });
+    const sourceStatus = this.options.candidateService
+      ? await this.options.candidateService.getSourcesCatalog()
+      : undefined;
+
+    const result = await this.options.debateService.run({
+      runId,
+      plan,
+      maxRounds,
+      providers: providers ?? this.defaultProviders,
+      sourceStatus,
+    });
+
     return {
-      turns: allTurns,
-      status: roundsExecuted >= rounds ? 'max_rounds_reached' : 'completed',
-      rounds_executed: roundsExecuted,
+      turns: result.turns,
+      status: result.status,
+      rounds_executed: result.roundsExecuted,
     };
   }
 
@@ -149,60 +144,130 @@ export class RunOrchestrator {
     runId: string,
     _style?: string,
   ): Promise<SynthesizeReportResponse> {
-    // Run the report agent
-    const reportTurns = await this.runAgentRound(runId, 'report');
+    if (this.options.verdictService && !this.contextStore.getVerdict(runId)) {
+      await this.options.verdictService.run(runId, this.defaultProviders);
+    }
 
-    const synthesisResponse = reportTurns[0]?.response;
-    const now = new Date().toISOString();
-    const reportId = randomUUID();
+    const reportResult = this.options.reportService
+      ? await this.options.reportService.run(runId)
+      : this.buildCompatibilityReport(runId);
 
-    const report: DailyReport = {
-      report_id: reportId,
-      date: now.slice(0, 10),
-      summary: synthesisResponse?.summary ?? 'No synthesis available',
-      agent_highlights: this.buildAgentHighlights(runId),
-      final_verdicts: [],
-      linked_themes: [],
-      linked_entities: [],
-      full_markdown: synthesisResponse?.summary ?? '',
-      created_at: now,
+    this.reports.push(reportResult.report);
+    return {
+      report_id: reportResult.report.report_id,
+      summary: reportResult.report.summary,
+      sections: reportResult.sections,
     };
+  }
 
-    this.reports.push(report);
+  async runFromCandidate(params: {
+    entity: string;
+    providers?: string[];
+    maxRounds?: number;
+    plan?: string[];
+  }): Promise<{
+    run_id: string;
+    triage: TriageDecision;
+    debate?: DebatePhaseResult;
+    research?: Awaited<ReturnType<ResearchLoopService['run']>>;
+    verdict?: VerdictResult;
+    report?: ReportPhaseResult;
+  }> {
+    if (!this.options.candidateService || !this.options.triageService) {
+      throw new Error('Collector-backed run dependencies are not configured');
+    }
 
-    // Build sections from synthesis claims
-    const sections: Array<{ title: string; content: string }> = [];
-    if (synthesisResponse) {
-      sections.push({
-        title: 'Executive Summary',
-        content: synthesisResponse.summary,
-      });
-      if (synthesisResponse.claims.length > 0) {
-        sections.push({
-          title: 'Key Claims',
-          content: synthesisResponse.claims
-            .map(
-              (c: AgentClaim) =>
-                `- **${c.claim}** (confidence: ${c.confidence})\n  Evidence: ${c.supporting_evidence.join(', ')}`,
-            )
-            .join('\n'),
-        });
-      }
-      if (synthesisResponse.open_questions.length > 0) {
-        sections.push({
-          title: 'Open Questions',
-          content: synthesisResponse.open_questions
-            .map((q: string) => `- ${q}`)
-            .join('\n'),
-        });
-      }
+    const bundle = await this.options.candidateService.buildBundle(params.entity);
+    const candidates = await this.options.candidateService.getNextCandidates(false);
+    const candidate =
+      candidates.find((item) => item.entity === params.entity) ??
+      this.syntheticCandidate(bundle.entity, bundle);
+    const triage = this.options.triageService.evaluate(candidate, bundle);
+
+    const { run_id } = await this.submitEvidence(
+      `Candidate pipeline for ${bundle.entity}`,
+      bundle,
+    );
+
+    if (!triage.approved) {
+      return { run_id, triage };
+    }
+
+    const debate = this.options.debateService
+      ? await this.options.debateService.run({
+          runId: run_id,
+          plan: params.plan,
+          maxRounds: params.maxRounds,
+          providers: params.providers ?? this.defaultProviders,
+          sourceStatus: await this.options.candidateService.getSourcesCatalog(),
+        })
+      : undefined;
+
+    const research =
+      this.options.researchLoopService && debate
+        ? await this.options.researchLoopService.run({
+            runId: run_id,
+            entity: bundle.entity,
+            latestDebate: debate,
+            providers: params.providers ?? this.defaultProviders,
+          })
+        : undefined;
+
+    const verdict = this.options.verdictService
+      ? await this.options.verdictService.run(run_id, params.providers ?? this.defaultProviders)
+      : undefined;
+
+    const report = this.options.reportService
+      ? await this.options.reportService.run(run_id)
+      : undefined;
+
+    if (report) {
+      this.reports.push(report.report);
     }
 
     return {
-      report_id: reportId,
-      summary: report.summary,
-      sections,
+      run_id,
+      triage,
+      debate,
+      research,
+      verdict,
+      report,
     };
+  }
+
+  async rerunResearch(runId: string): Promise<Awaited<ReturnType<ResearchLoopService['run']>>> {
+    if (!this.options.researchLoopService) {
+      throw new Error('Research loop service not configured');
+    }
+
+    const entity = this.contextStore.getEntity(runId);
+    if (!entity) {
+      throw new Error(`Run ${runId} has no bound entity`);
+    }
+
+    const latestDebate: DebatePhaseResult = {
+      turns: this.runStore.getTurns(runId),
+      status: 'completed',
+      roundsExecuted: 1,
+    };
+
+    return this.options.researchLoopService.run({
+      runId,
+      entity,
+      latestDebate,
+      providers: this.defaultProviders,
+    });
+  }
+
+  async rerunVerdict(runId: string): Promise<VerdictResult> {
+    if (!this.options.verdictService) {
+      throw new Error('Verdict service not configured');
+    }
+    return this.options.verdictService.run(runId, this.defaultProviders);
+  }
+
+  listResearchRequests(runId: string) {
+    return this.contextStore.getResearchResults(runId);
   }
 
   getRunState(runId: string): RunStateResponse {
@@ -211,7 +276,6 @@ export class RunOrchestrator {
 
     const turns = this.runStore.getTurns(runId);
 
-    // Group turns by agent
     const agentMap = new Map<
       string,
       { turns_completed: number; latest_response?: AgentResponse }
@@ -224,7 +288,7 @@ export class RunOrchestrator {
           latest_response: turn.response,
         });
       } else {
-        existing.turns_completed++;
+        existing.turns_completed += 1;
         existing.latest_response = turn.response;
       }
     }
@@ -234,19 +298,168 @@ export class RunOrchestrator {
       ...data,
     }));
 
-    // Get the last N turns
     const latestTurns = turns.slice(-10);
+    const sessions = this.options.sessionStore?.listSessions(undefined, runId) ?? [];
 
     return {
       run,
       agents,
-      sessions: [],
+      sessions,
       latest_turns: latestTurns,
     };
   }
 
   getReports(): DailyReport[] {
     return [...this.reports];
+  }
+
+  listHighLevelRuns(): { runs: HighLevelRun[]; count: number } {
+    const runs = this.runStore.listRuns().map((run) => this.toHighLevelRun(run.run_id));
+    return { runs, count: runs.length };
+  }
+
+  getHighLevelRun(runId: string): { run: HighLevelRun } {
+    return { run: this.toHighLevelRun(runId) };
+  }
+
+  getRunResearch(runId: string): { run_id: string; research: RunResearch } {
+    const run = this.runStore.getRun(runId);
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+
+    const turns = this.runStore.getTurns(runId);
+    const findings = turns.map((turn) => ({
+      agent_name: turn.agent_name,
+      provider: turn.provider,
+      summary: turn.response.summary,
+      confidence: turn.response.confidence,
+      claims: turn.response.claims,
+      citations: turn.citations,
+      evidence_refs: turn.evidence_refs,
+      open_questions: turn.response.open_questions,
+      recommended_next_step: turn.response.recommended_next_step,
+    }));
+
+    return {
+      run_id: runId,
+      research: {
+        run_id: runId,
+        status: run.status,
+        findings,
+        latest_turns: turns.slice(-10),
+        updated_at: run.updated_at,
+      },
+    };
+  }
+
+  getRunVerdict(runId: string): { run_id: string; verdict: RunVerdict } {
+    const verdict = this.contextStore.getVerdict(runId);
+    if (!verdict) {
+      throw new Error(`Verdict not found for run: ${runId}`);
+    }
+
+    return {
+      run_id: runId,
+      verdict: {
+        run_id: runId,
+        summary: verdict.summary,
+        confidence: verdict.confidence,
+        verdicts: [
+          {
+            entity: verdict.entity,
+            verdict: verdict.recommendation,
+            confidence: verdict.confidence,
+            supporting_agents: verdict.supportingAgents,
+          },
+        ],
+        risks: verdict.openQuestions,
+        generated_at: verdict.createdAt,
+      },
+    };
+  }
+
+  getProviderExecutions(runId: string): { run_id: string; executions: ProviderExecution[]; count: number } {
+    const executions = this.runStore.getTurns(runId).map((turn) => ({
+      execution_id: `${turn.run_id}:${turn.agent_name}:${turn.provider}:${turn.turn_index}`,
+      run_id: turn.run_id,
+      agent_name: turn.agent_name,
+      provider: turn.provider,
+      session_id: turn.session_id,
+      status: 'completed' as const,
+      turn_index: turn.turn_index,
+      prompt_summary: turn.prompt_summary,
+      output_summary: turn.response.summary,
+      completed_at: turn.created_at,
+      created_at: turn.created_at,
+      updated_at: turn.created_at,
+      turn,
+    }));
+    return { run_id: runId, executions, count: executions.length };
+  }
+
+  private collectMessagesForAgent(runId: string, agentName: string): Array<{ from: string; content: string }> {
+    const existingTurns = this.runStore.getTurns(runId);
+    const otherAgentMessages: Array<{ from: string; content: string }> = [];
+    for (const turn of existingTurns) {
+      for (const msg of turn.response.messages_for_other_agents) {
+        if (msg.target_agent === agentName) {
+          otherAgentMessages.push({
+            from: turn.agent_name,
+            content: msg.content,
+          });
+        }
+      }
+    }
+    return otherAgentMessages;
+  }
+
+  private buildCompatibilityReport(runId: string): ReportPhaseResult {
+    const turns = this.runStore.getTurns(runId);
+    const summary = turns.at(-1)?.response.summary ?? 'No synthesis available';
+    const now = new Date().toISOString();
+    const report: DailyReport = {
+      report_id: randomUUID(),
+      date: now.slice(0, 10),
+      summary,
+      agent_highlights: this.buildAgentHighlights(runId),
+      final_verdicts: [],
+      linked_themes: [],
+      linked_entities: [],
+      full_markdown: summary,
+      created_at: now,
+    };
+
+    const sections: Array<{ title: string; content: string }> = [
+      {
+        title: 'Executive Summary',
+        content: summary,
+      },
+    ];
+
+    const synthesisResponse = turns.at(-1)?.response;
+    if (synthesisResponse?.claims.length) {
+      sections.push({
+        title: 'Key Claims',
+        content: synthesisResponse.claims
+          .map(
+            (c: AgentClaim) =>
+              `- **${c.claim}** (confidence: ${c.confidence})\n  Evidence: ${c.supporting_evidence.join(', ')}`,
+          )
+          .join('\n'),
+      });
+    }
+
+    if (synthesisResponse?.open_questions.length) {
+      sections.push({
+        title: 'Open Questions',
+        content: synthesisResponse.open_questions
+          .map((question: string) => `- ${question}`)
+          .join('\n'),
+      });
+    }
+
+    return { report, sections };
   }
 
   private buildAgentHighlights(runId: string): Record<string, string> {
@@ -256,5 +469,61 @@ export class RunOrchestrator {
       highlights[turn.agent_name] = turn.response.summary;
     }
     return highlights;
+  }
+
+  private syntheticCandidate(entity: string, bundle?: EvidenceBundle): CollectorCandidate {
+    const now = new Date().toISOString();
+    const sources = bundle
+      ? bundle.evidence_items
+          .map((item) => item.source)
+          .filter((source, index, items) => items.indexOf(source) === index)
+      : [];
+    return {
+      entity,
+      status: 'emerging',
+      emergence_score: bundle ? Math.min(10, bundle.evidence_items.length * 0.5 + sources.length * 2) : 0,
+      velocity_score: bundle ? Math.min(10, bundle.evidence_items.length) : 0,
+      source_count: sources.length,
+      evidence_ids: bundle?.evidence_items.map((item) => item.evidence_id) ?? [],
+      sources,
+      first_seen: bundle?.time_window.start ?? now,
+      last_seen: bundle?.time_window.end ?? now,
+    };
+  }
+
+  private toHighLevelRun(runId: string): HighLevelRun {
+    const run = this.runStore.getRun(runId);
+    if (!run) {
+      throw new Error(`Run not found: ${runId}`);
+    }
+
+    return {
+      run_id: run.run_id,
+      topic: this.contextStore.getTopic(run.run_id) ?? run.topic_or_theme_set.join(', '),
+      status: run.status,
+      created_at: run.created_at,
+      updated_at: run.updated_at,
+      evidence_count: this.contextStore.getBundle(run.run_id)?.evidence_items.length ?? run.evidence_refs.length,
+      plan: undefined,
+      providers: this.defaultProviders,
+      research: this.safeGetResearch(run.run_id),
+      verdict: this.safeGetVerdict(run.run_id),
+    };
+  }
+
+  private safeGetResearch(runId: string): RunResearch | undefined {
+    try {
+      return this.getRunResearch(runId).research;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private safeGetVerdict(runId: string): RunVerdict | undefined {
+    try {
+      return this.getRunVerdict(runId).verdict;
+    } catch {
+      return undefined;
+    }
   }
 }

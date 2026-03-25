@@ -8,7 +8,6 @@ import { GuildConfigStore } from './services/guildConfigStore.js';
 import { JobEngine } from './services/jobEngine.js';
 import { NotificationScheduler } from './services/notificationScheduler.js';
 import { OrchestratorClient } from './services/orchestratorClient.js';
-import { PredictorClient } from './services/predictorClient.js';
 import { ReportService } from './services/reportService.js';
 
 async function bootstrap() {
@@ -16,11 +15,10 @@ async function bootstrap() {
   const orchestrator = new ActionOrchestrator(env.ACTION_TTL_SEC * 1000, jobEngine);
   const store = new GuildConfigStore(env.CONFIG_STORE_PATH);
 
-  const predictor = new PredictorClient(env.PREDICTOR_BASE_URL);
   const collector = new CollectorClient(env.COLLECTOR_BASE_URL);
   const mcpOrchestrator = new OrchestratorClient(env.ORCHESTRATOR_BASE_URL);
 
-  const gateway = createAnalysisGateway(env.ANALYSIS_BACKEND, predictor, mcpOrchestrator, collector);
+  const gateway = createAnalysisGateway(env.ANALYSIS_BACKEND, mcpOrchestrator, collector);
   const reports = new ReportService(store, gateway, env.REPORT_TIMEZONE);
   const scheduler = new NotificationScheduler(env.REPORT_TIMEZONE, env.REPORT_TIME_KST);
   const bot = new BotApp(orchestrator, scheduler, reports, collector);

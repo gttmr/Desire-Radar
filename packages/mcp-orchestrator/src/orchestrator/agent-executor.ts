@@ -3,13 +3,26 @@ import type { ProviderRegistry } from '../providers/registry.js';
 import type { SessionStore } from '../sessions/session-store.js';
 import type { PromptComposer } from '../prompt/composer.js';
 import type { RunStore } from './run-store.js';
+import type { CollectorCandidate, CollectorSourceStatus } from '../collector/client.js';
+import type { ResearchResult } from '../collector/research-service.js';
+import type { ExecutionPhase, ModelProfile } from '../providers/base.js';
+import { ExecutionPolicyResolver } from '../policy/execution.js';
 
 export interface ExecuteAgentParams {
   runId: string;
+  runScope?: string;
   agentName: string;
-  providers: string[];
+  phase: ExecutionPhase;
+  providers?: string[];
+  modelProfile?: ModelProfile;
   evidenceBundle?: EvidenceBundle;
+  candidate?: CollectorCandidate;
+  debateTurns?: AgentTurn[];
+  researchResults?: ResearchResult[];
+  sourceStatus?: Record<string, CollectorSourceStatus>;
+  verdictSummary?: string;
   otherAgentMessages?: Array<{ from: string; content: string }>;
+  orchestratorQuestions?: string[];
 }
 
 const DEFAULT_RESPONSE: AgentResponse = {
@@ -52,32 +65,68 @@ export class AgentExecutor {
     private readonly sessionStore: SessionStore,
     private readonly promptComposer: PromptComposer,
     private readonly runStore: RunStore,
+    private readonly policyResolver: ExecutionPolicyResolver,
   ) {}
 
   async executeAgent(params: ExecuteAgentParams): Promise<AgentTurn[]> {
     const turns: AgentTurn[] = [];
     const existingTurns = this.runStore.getTurns(params.runId);
+    const resolvedPolicy = this.policyResolver.resolve(params.agentName, params.phase);
+    const providers =
+      params.providers?.length && params.providers.length > 0
+        ? params.providers
+        : resolvedPolicy.providers;
 
-    for (const providerName of params.providers) {
+    for (const providerName of providers) {
       const adapter = this.registry.get(providerName);
       if (!adapter) continue;
+      const modelProfile = params.modelProfile ?? resolvedPolicy.modelProfile;
+      const model = this.policyResolver.resolveModel(providerName, modelProfile);
 
       // 1. Get or create session
-      let session = this.sessionStore.getSession(params.agentName, providerName);
+      let session = this.sessionStore.getSession(params.agentName, providerName, {
+        phase: params.phase,
+        modelProfile,
+        runScope: params.runScope ?? params.runId,
+        model,
+      });
       if (!session) {
-        session = this.sessionStore.createSession(params.agentName, providerName);
+        session = this.sessionStore.createSession(params.agentName, providerName, {
+          phase: params.phase,
+          modelProfile,
+          runScope: params.runScope ?? params.runId,
+          model,
+        });
       }
 
       // 2. Compose prompt
       const prompt = await this.promptComposer.compose({
+        phase: params.phase,
         agentName: params.agentName,
         provider: providerName,
+        model,
+        modelProfile,
+        responseFormat: resolvedPolicy.responseFormat,
         evidenceBundle: params.evidenceBundle,
+        candidate: params.candidate,
         otherAgentMessages: params.otherAgentMessages,
+        debateTurns: params.debateTurns,
+        researchResults: params.researchResults,
+        sourceStatus: params.sourceStatus,
+        orchestratorQuestions: params.orchestratorQuestions,
+        verdictSummary: params.verdictSummary,
       });
 
       // 3. Execute
-      const result = await adapter.execute(prompt, session.session_id);
+      const result = await adapter.execute({
+        prompt,
+        sessionId: session.session_id,
+        model,
+        modelProfile,
+        phase: params.phase,
+        agentName: params.agentName,
+        responseFormat: resolvedPolicy.responseFormat,
+      });
 
       // 4. Parse response
       const response = tryParseResponse(result.text);

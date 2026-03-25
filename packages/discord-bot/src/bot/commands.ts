@@ -96,6 +96,17 @@ export const commandBuilders = [
   new SlashCommandBuilder()
     .setName('radar-emerging')
     .setDescription('떠오르는 신호 후보 조회'),
+  new SlashCommandBuilder()
+    .setName('human-queue')
+    .setDescription('대기 중인 사람 입력 요청 조회')
+    .addIntegerOption((opt) =>
+      opt
+        .setName('limit')
+        .setDescription('최대 조회 개수')
+        .setRequired(false)
+        .setMinValue(1)
+        .setMaxValue(20)
+    ),
 ];
 
 export const commandJson = commandBuilders.map((c) => c.toJSON());

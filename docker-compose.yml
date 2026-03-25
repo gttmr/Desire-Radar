@@ -1,5 +1,3 @@
-version: '3.9'
-
 networks:
   agentic:
     driver: bridge
@@ -12,30 +10,15 @@ services:
     env_file:
       - .env
     environment:
-      PREDICTOR_BASE_URL: http://predictor-legacy:5001
       COLLECTOR_BASE_URL: http://collector:5002
       ORCHESTRATOR_BASE_URL: http://mcp-orchestrator:5003
     ports:
       - "3000:3000"
     depends_on:
-      - predictor-legacy
       - collector
       - mcp-orchestrator
     volumes:
       - ./data/bot:/app/data
-    networks:
-      - agentic
-    restart: unless-stopped
-
-  predictor-legacy:
-    build:
-      context: ./packages/predictor-legacy
-    env_file:
-      - .env
-    ports:
-      - "5001:5001"
-    volumes:
-      - ./data/predictor:/app/data
     networks:
       - agentic
     restart: unless-stopped
@@ -45,10 +28,18 @@ services:
       context: ./packages/collector
     env_file:
       - .env
+    environment:
+      LLM_CLI_EXEC_PATH: /usr/local/bin/codex
     ports:
       - "5002:5002"
     volumes:
       - ./data/collector:/app/data
+      - ${HOME}/.claude:/home/collector/.claude:ro
+      - ${HOME}/.codex:/home/collector/.codex:ro
+      - ${HOME}/.gemini:/home/collector/.gemini:ro
+      - ${HOME}/.local/share/claude:/home/collector/.local/share/claude:ro
+      - ${HOME}/.nvm/versions/node/v24.13.0/lib/node_modules/@openai/codex:/usr/local/lib/node_modules/@openai/codex:ro
+      - ${HOME}/.nvm/versions/node/v24.13.0/lib/node_modules/@google/gemini-cli:/usr/local/lib/node_modules/@google/gemini-cli:ro
     networks:
       - agentic
     restart: unless-stopped

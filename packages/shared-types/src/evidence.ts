@@ -5,6 +5,13 @@
 export type SourceTier = 1 | 2 | 3;
 export type TosRisk = 'none' | 'low' | 'medium' | 'high';
 export type CandidateStatus = 'emerging' | 'preheat' | 'spreading' | 'noisy';
+export type CollectorAnalysisStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'needs_review'
+  | 'skipped';
 
 /** Raw snapshot from a source connector */
 export type RawSnapshot = {
@@ -23,6 +30,10 @@ export type Evidence = {
   evidence_id: string;
   source: string;
   source_tier: SourceTier;
+  source_kind?: 'pull' | 'push' | 'agent' | 'human' | 'derived';
+  producer_ref?: string;
+  parent_evidence_ids?: string[];
+  submission_ref?: string;
   collected_at: string;
   entity_candidates: string[];
   signal_type: string;
@@ -60,18 +71,38 @@ export type EvidenceBundle = {
 
 /** Signal candidate produced by the collector */
 export type SignalCandidate = {
-  candidate_id: string;
   entity: string;
+  status: CandidateStatus;
   emergence_score: number;
   velocity_score: number;
-  conversion_proxy_score: number;
-  scarcity_score: number;
   source_count: number;
-  primary_sources: string[];
-  status: CandidateStatus;
-  next_actions: string[];
-  created_at: string;
-  updated_at: string;
+  evidence_ids: string[];
+  sources: string[];
+  first_seen: string;
+  last_seen: string;
+
+  // Collector-enriched analysis fields.
+  desire_types?: string[];
+  behavioral_signals?: string[];
+  avg_intensity?: number | null;
+  demographic_hints?: string[];
+  desire_summary?: string | null;
+  analysis_status?: CollectorAnalysisStatus | null;
+  analysis_summary?: string | null;
+  analysis_confidence?: number | null;
+  analysis_reason?: string | null;
+  last_analyzed_at?: string | null;
+  analysis_session_domain?: string | null;
+
+  // Legacy / forward-compatible fields kept optional so existing
+  // consumers can compile across contract migrations.
+  candidate_id?: string;
+  primary_sources?: string[];
+  conversion_proxy_score?: number;
+  scarcity_score?: number;
+  next_actions?: string[];
+  created_at?: string;
+  updated_at?: string;
 };
 
 /** Manual observation (human input connector) */
@@ -90,10 +121,15 @@ export type ManualObservation = {
 
 /** Source status */
 export type SourceStatus = {
-  source: string;
-  last_fetched_at: string | null;
-  failure_rate: number;
-  tier: SourceTier;
-  quarantine_status: 'active' | 'quarantined' | 'review_required';
   cadence_seconds: number;
+  source_tier: SourceTier;
+  last_run: string | null;
+  scheduled: boolean;
+
+  // Legacy / forward-compatible fields.
+  source?: string;
+  last_fetched_at?: string | null;
+  failure_rate?: number;
+  tier?: SourceTier;
+  quarantine_status?: 'active' | 'quarantined' | 'review_required';
 };

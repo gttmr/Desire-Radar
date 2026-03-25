@@ -13,6 +13,21 @@ class RawSnapshotStore:
         self.base_dir = base_dir
 
     def save(self, source: str, payload: Any, request_params: dict) -> str:
+        return self.save_record(
+            source=source,
+            payload=payload,
+            request_params=request_params,
+        )["snapshot_id"]
+
+    def save_record(
+        self,
+        source: str,
+        payload: Any,
+        request_params: dict,
+        *,
+        virtual: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Save raw payload, return snapshot_id. Skip if checksum duplicate."""
         payload_json = json.dumps(payload, sort_keys=True, default=str)
         checksum = hashlib.sha256(payload_json.encode()).hexdigest()
@@ -30,7 +45,11 @@ class RawSnapshotStore:
                 with open(filepath, "r") as f:
                     existing = json.load(f)
                 if existing.get("checksum_sha256") == checksum:
-                    return existing.get("snapshot_id", fname.replace(".json", ""))
+                    return {
+                        "snapshot_id": existing.get("snapshot_id", fname.replace(".json", "")),
+                        "deduped": True,
+                        "record": existing,
+                    }
             except (json.JSONDecodeError, OSError):
                 continue
 
@@ -42,13 +61,15 @@ class RawSnapshotStore:
             "checksum_sha256": checksum,
             "request_params": request_params,
             "payload": payload,
+            "virtual": virtual,
+            "metadata": metadata or {},
         }
 
         filepath = os.path.join(directory, f"{snapshot_id}.json")
         with open(filepath, "w") as f:
             json.dump(record, f, indent=2, default=str)
 
-        return snapshot_id
+        return {"snapshot_id": snapshot_id, "deduped": False, "record": record}
 
     def get(self, snapshot_id: str, source: str, date: str) -> dict | None:
         """Retrieve a snapshot by id, source, and date."""

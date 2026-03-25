@@ -1,0 +1,9 @@
+{
+  "directAwait": true,
+  "pollIntervalMs": 2000,
+  "timeoutMs": 20000,
+  "maxRequestsPerRun": 2,
+  "openQuestionThreshold": 1,
+  "defaultRequestKind": "run_source",
+  "defaultPriority": "normal"
+}

@@ -61,6 +61,56 @@ export function createRoutes(
     }
   });
 
+  // POST /runs/from-candidate
+  router.post('/runs/from-candidate', async (req, res) => {
+    try {
+      const result = await orchestrator.runFromCandidate({
+        entity: String(req.body.entity ?? ''),
+        providers: Array.isArray(req.body.providers) ? req.body.providers : undefined,
+        maxRounds:
+          typeof req.body.max_rounds === 'number' ? req.body.max_rounds : undefined,
+        plan: Array.isArray(req.body.plan) ? req.body.plan : undefined,
+      });
+      res.json(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  // POST /runs/:id/research
+  router.post('/runs/:id/research', async (req, res) => {
+    try {
+      const result = await orchestrator.rerunResearch(req.params.id!);
+      res.json(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  // POST /runs/:id/verdict
+  router.post('/runs/:id/verdict', async (req, res) => {
+    try {
+      const result = await orchestrator.rerunVerdict(req.params.id!);
+      res.json(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  // GET /runs/:id/research-requests
+  router.get('/runs/:id/research-requests', (req, res) => {
+    try {
+      const result = orchestrator.listResearchRequests(req.params.id!);
+      res.json({ run_id: req.params.id, requests: result, count: result.length });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(404).json({ error: message });
+    }
+  });
+
   // GET /runs/:id/state
   router.get('/runs/:id/state', (req, res) => {
     try {
@@ -122,6 +172,56 @@ export function createRoutes(
   router.get('/reports', (_req, res) => {
     const reports = orchestrator.getReports();
     res.json({ reports, count: reports.length });
+  });
+
+  // GET /runs
+  router.get('/runs', (_req, res) => {
+    try {
+      res.json(orchestrator.listHighLevelRuns());
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  // GET /runs/:id
+  router.get('/runs/:id', (req, res) => {
+    try {
+      res.json(orchestrator.getHighLevelRun(req.params.id!));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(404).json({ error: message });
+    }
+  });
+
+  // GET /runs/:id/research
+  router.get('/runs/:id/research', (req, res) => {
+    try {
+      res.json(orchestrator.getRunResearch(req.params.id!));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(404).json({ error: message });
+    }
+  });
+
+  // GET /runs/:id/verdict
+  router.get('/runs/:id/verdict', (req, res) => {
+    try {
+      res.json(orchestrator.getRunVerdict(req.params.id!));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(404).json({ error: message });
+    }
+  });
+
+  // GET /runs/:id/provider-executions
+  router.get('/runs/:id/provider-executions', (req, res) => {
+    try {
+      res.json(orchestrator.getProviderExecutions(req.params.id!));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(404).json({ error: message });
+    }
   });
 
   return router;

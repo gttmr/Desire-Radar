@@ -4,7 +4,10 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "dist",
-    "rootDir": ".",
+    "baseUrl": "../..",
+    "paths": {
+      "@agentic/shared-types": ["packages/shared-types/src/index.ts"]
+    },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
