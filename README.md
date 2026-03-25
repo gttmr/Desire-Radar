@@ -51,6 +51,7 @@ Discord human input / slash commands
 - collector 후보를 받아 phase-aware 의사결정 파이프라인으로 처리한다.
 - research 부족분은 collector submission API를 통해 다시 요청한다.
 - 최종 verdict는 premium model policy를 분리해 사용한다.
+- 기본 provider 경로는 `codex, claude, gemini`이며, `OPENAI_API_KEY`가 있을 때만 OpenAI provider를 추가 등록한다.
 
 ### Discord Bot
 - 하나의 human input 채널만 본다.
@@ -68,13 +69,18 @@ cp .env.example .env
 최소 권장값:
 - `DISCORD_TOKEN`
 - `DISCORD_CLIENT_ID`
-- `OPENAI_API_KEY`
 - `DISCORD_HUMAN_INPUT_CHANNEL_IDS`
 
 선택값:
 - `DISCORD_GUILD_ID`
 - `DEFAULT_TEXT_CHANNEL_ID`
+- `OPENAI_API_KEY`
 - collector connector API key들
+
+기본 런타임 전제:
+- collector와 orchestrator는 CLI provider를 기본 경로로 사용한다.
+- Docker Compose를 쓰려면 호스트에서 `codex`, `claude`, `gemini` 중 필요한 CLI 로그인이 이미 되어 있어야 한다.
+- `OPENAI_API_KEY`는 OpenAI provider를 추가로 켤 때만 필요하다.
 
 ### 2. Discord 설정
 
@@ -193,6 +199,7 @@ human input 라우팅도 별도 domain에서 CLI JSON 분류를 사용한다.
 중요:
 - collector와 orchestrator는 둘 다 호스트의 CLI 인증 디렉터리와 npm global package mount를 사용한다.
 - Docker Compose 기준으로 `${HOME}/.codex`, `${HOME}/.claude`, `${HOME}/.gemini` 및 관련 package 경로가 유효해야 한다.
+- orchestrator는 기본적으로 CLI provider만으로 부팅되며, `OPENAI_API_KEY`가 있을 때만 OpenAI provider를 registry에 추가한다.
 
 벤치:
 
@@ -265,7 +272,7 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 | `LLM_HUMAN_ROUTING_ENABLED` | collector | human input collector-side routing on/off |
 | `LLM_HUMAN_ROUTING_MODEL` | collector | human input routing model |
 | `DEFAULT_PROVIDERS` | mcp-orchestrator | 기본 provider 우선순위 |
-| `OPENAI_API_KEY` | mcp-orchestrator | OpenAI provider key |
+| `OPENAI_API_KEY` | mcp-orchestrator | optional OpenAI fallback provider key |
 
 전체 목록과 기본값은 `.env.example`를 기준으로 본다.
 

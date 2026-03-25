@@ -18,8 +18,8 @@
     },
     "verdict": {
       "providers": [
-        "openai",
-        "codex"
+        "codex",
+        "openai"
       ],
       "modelProfile": "premium",
       "responseFormat": "json"
@@ -119,8 +119,8 @@
     "investment_verdict": {
       "phase": "verdict",
       "providers": [
-        "openai",
-        "codex"
+        "codex",
+        "openai"
       ],
       "modelProfile": "premium",
       "responseFormat": "json"
