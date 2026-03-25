@@ -1,110 +1,204 @@
 # Agentic-World — 욕망 레이더
 
-소비자 욕구 탐지 및 투자 신호 생성 시스템. 다중 소스에서 트렌드 데이터를 수집하고, AI 에이전트가 토론하여 일일 분석 리포트를 생성한다.
+사람들의 욕망과 초기 행동 신호를 수집하고, 여러 에이전트의 토론을 통해 투자 가능한 해석으로 바꾸는 시스템이다.
+
+현재 기본 런타임은 `discord-bot`, `collector`, `mcp-orchestrator` 3개 서비스다. `packages/predictor-legacy/`는 리포지토리에 남아 있지만 기본 Docker Compose 런타임에는 포함하지 않는다.
 
 ## 아키텍처
 
-4개 서비스가 Docker Compose로 실행된다.
-
-| 서비스 | 경로 | 언어 | 설명 |
+| 서비스 | 경로 | 언어 | 역할 |
 |--------|------|------|------|
-| **discord-bot** | `packages/discord-bot/` | TypeScript | Discord 슬래시 커맨드, 스케줄링, 길드 설정 |
-| **collector** | `packages/collector/` | Python | 다중 소스 데이터 수집, evidence 생산, 신호 후보 생성 |
-| **mcp-orchestrator** | `packages/mcp-orchestrator/` | TypeScript | 세션형 다중 프로바이더 MCP 오케스트레이터, 에이전트 토론 |
-| **predictor-legacy** | `packages/predictor-legacy/` | Python | 기존 KRX 주식 리포트 파이프라인 (점진적 축소 예정) |
+| `discord-bot` | `packages/discord-bot/` | TypeScript | Discord 명령, 스케줄 리포트, 단일 human input 채널 수집 |
+| `collector` | `packages/collector/` | Python | 다중 소스 ingestion, source registry, submission tracking, candidate 생성, collector-side CLI 분석 |
+| `mcp-orchestrator` | `packages/mcp-orchestrator/` | TypeScript | `triage -> debate -> research-loop -> verdict -> report` 투자 판단 파이프라인 |
+| `shared-types` | `packages/shared-types/` | TypeScript | 서비스 간 공용 타입 |
 
-공유 타입은 `packages/shared-types/`에서 관리한다.
-
+```text
+Discord human input / slash commands
+        |
+        v
+  discord-bot
+        |
+        v
+    collector
+  - pull / push / human / derived sources
+  - source registry + dynamic tier/validity
+  - submissions + human input routing
+  - batch CLI analysis
+        |
+        v
+ mcp-orchestrator
+  - triage
+  - debate
+  - research-loop
+  - verdict
+  - report
 ```
-┌──────────────┐     ┌────────────┐     ┌───────────────────┐
-│  Discord Bot │────▶│  Collector  │────▶│  MCP Orchestrator │
-│  (commands,  │     │  (8 source  │     │  (multi-provider  │
-│   schedule)  │     │  connectors)│     │   agent debate)   │
-└──────┬───────┘     └────────────┘     └───────────────────┘
-       │
-       ▼
-┌──────────────┐
-│  Predictor   │
-│  (legacy)    │
-└──────────────┘
-```
 
-## Collector 데이터 소스
+## 핵심 동작
 
-| 커넥터 | 주기 | 설명 |
-|--------|------|------|
-| Google Trends | 6h | 검색 트렌드 변화 감지 |
-| Reddit Mentions | 1h | 서브레딧 언급 급증 탐지 |
-| Naver DataLab | 12h | 네이버 검색어 트렌드 |
-| App Store Top Charts | 1h | 앱스토어 순위 변동 |
-| SteamDB Top Sellers | 1h | Steam 판매 순위 |
-| TikTok Creative Center | 1h | TikTok 트렌드 |
-| SimilarWeb Movers | 24h | 웹 트래픽 급증 사이트 |
-| Manual Observation | — | 수동 입력 |
+### Collector
+- 공개 API, 사람 입력, agent push, pull connector를 모두 공통 ingestion pipeline으로 처리한다.
+- source registry가 각 source의 `kind`, `ingestion_mode`, `configured_tier`, `effective_tier`, validity 상태를 관리한다.
+- candidate 분석은 기본적으로 `batch` 모드로 돌아가며, 상위 후보를 묶어 CLI 기반 LLM 호출을 수행한다.
+- `POST /ingest/human-input`는 free-form 입력을 받아 collector 내부에서 다음 중 하나로 라우팅한다.
+  - `manual_observation`
+  - `human_analyst_note`
+  - `human_curated_dataset`
+  - `needs_review`
 
-## MCP 오케스트레이터 에이전트
+### Orchestrator
+- collector 후보를 받아 phase-aware 의사결정 파이프라인으로 처리한다.
+- research 부족분은 collector submission API를 통해 다시 요청한다.
+- 최종 verdict는 premium model policy를 분리해 사용한다.
 
-`search_intent` · `ranking_momentum` · `conversion_proxy` · `scarcity` · `diffusion` · `human_intel` · `theme_mapper` · `synthesis` · `report`
-
-핵심 에이전트는 2개 이상 provider(Codex, Claude, Gemini)로 병렬 실행 후 비교/합성한다.
+### Discord Bot
+- 하나의 human input 채널만 본다.
+- 메시지 내용을 bot이 직접 분류하지 않고 raw envelope 그대로 collector에 전달한다.
+- `/human-queue`로 `pending_human` 요청을 조회할 수 있다.
 
 ## 빠른 시작
 
-### 1. 환경 변수 설정
+### 1. 환경 변수 준비
 
 ```bash
 cp .env.example .env
 ```
 
-최소 필수 값:
+최소 권장값:
 - `DISCORD_TOKEN`
 - `DISCORD_CLIENT_ID`
+- `OPENAI_API_KEY`
+- `DISCORD_HUMAN_INPUT_CHANNEL_IDS`
 
-### 2. Docker Compose 실행
+선택값:
+- `DISCORD_GUILD_ID`
+- `DEFAULT_TEXT_CHANNEL_ID`
+- collector connector API key들
+
+### 2. Discord 설정
+
+필수:
+- Bot scope: `bot`, `applications.commands`
+- Intent: `MESSAGE CONTENT INTENT`
+- 권한: `View Channels`, `Send Messages`, `Read Message History`, `Add Reactions`, `Use Slash Commands`
+
+### 3. Docker Compose 실행
 
 ```bash
 docker compose up --build
 ```
 
-4개 서비스가 함께 기동된다:
-- discord-bot: `:3000/health`
-- collector: `:5002`
-- mcp-orchestrator: `:5003`
-- predictor-legacy: `:5001`
+기동 서비스:
+- `discord-bot` : `http://localhost:3000/health`
+- `collector` : `http://localhost:5002`
+- `mcp-orchestrator` : `http://localhost:5003`
 
-### 3. 개발 모드 (개별 실행)
+## Human Input 운영 방식
 
-```bash
-# TypeScript 패키지 빌드
-npm install
-npm run build
+human input 채널은 하나만 둔다.
 
-# discord-bot 핫 리로드
-npm run dev:bot
+권장 예시:
+- `DISCORD_HUMAN_INPUT_CHANNEL_IDS=123456789012345678`
 
-# mcp-orchestrator 핫 리로드
-npm run dev:orchestrator
+채널에 입력 가능한 형태:
 
-# collector 테스트
-cd packages/collector && pytest
+### 1. 빠른 관측
+
+```text
+title: Cursor adoption spike
+entities: Cursor, OpenAI
+
+개발팀에서 seat 확대 언급이 이번 주에 급증했다.
 ```
 
-### Collector CLI 분석 벤치
+### 2. 분석/스터디 결과
 
-collector는 기본적으로 `batch` 실행 모드에서 상위 후보 3개를 한 번의 Codex 호출로 묶어 분석한다. `resume` 경로는 비교용 fallback으로만 남아 있고 기본 비활성화다.
+```text
+title: Developer workflow study
+entities: Cursor
+why_now: team-wide rollout expanded this month
+supporting_points: review workflow lock-in; repeat seat expansion
 
-실제 Codex 실측 벤치:
+코드 리뷰 워크플로우 중심으로 유입이 강하다.
+```
+
+### 3. 구조화된 데이터
+
+```json
+{
+  "evidence_items": [
+    {
+      "evidence_id": "local-1",
+      "entity_candidates": ["Cursor"],
+      "signal_type": "channel_check",
+      "title_or_label": "Three teams added paid seats",
+      "trust_score": 0.9
+    }
+  ]
+}
+```
+
+collector는 이를 `human_input_inbox` source로 받고 내부 라우터가 적절한 ingestion 타입으로 fan-out 한다.
+
+## 주요 API
+
+### Collector public
+- `POST /collect/run`
+- `GET /candidates/emerging`
+- `GET /evidence/bundles/{entity}`
+- `GET /sources/status`
+- `GET /sources/catalog`
+- `GET /ingest/submissions`
+- `GET /ingest/submissions/{submission_id}`
+- `POST /ingest/human-input`
+- `POST /ingest/human-observation`
+- `POST /ingest/human-study-result`
+- `POST /ingest/human-data-source`
+- `POST /ingest/human-analyst-request`
+
+### Collector internal
+- `GET /internal/next-candidates`
+- `POST /internal/build-bundle`
+- `POST /internal/analysis/run`
+- `GET /internal/analysis/status/{entity}`
+- `GET /internal/analysis/preview/{entity}`
+- `GET /internal/analysis/preview-batch`
+- `POST /internal/sources/run/{source_id}`
+- `PATCH /internal/sources/{source_id}/tier`
+- `PATCH /internal/sources/{source_id}/enable`
+- `GET /internal/sources/{source_id}/validity`
+
+### Orchestrator
+- `POST /runs/from-candidate`
+- `POST /runs/:id/research`
+- `POST /runs/:id/verdict`
+- `GET /runs/:id/research-requests`
+- `GET /runs/:id/state`
+- `GET /runs/:id/verdict`
+- `GET /health`
+
+## Collector CLI 분석
+
+collector는 Docker 안에서도 CLI 기반 분석을 수행할 수 있게 구성되어 있다.
+
+기본값:
+- execution mode: `batch`
+- batch size: `3`
+- provider: `codex`
+- default model: `gpt-5.4-mini`
+
+human input 라우팅도 별도 domain에서 CLI JSON 분류를 사용한다.
+
+중요:
+- collector와 orchestrator는 둘 다 호스트의 CLI 인증 디렉터리와 npm global package mount를 사용한다.
+- Docker Compose 기준으로 `${HOME}/.codex`, `${HOME}/.claude`, `${HOME}/.gemini` 및 관련 package 경로가 유효해야 한다.
+
+벤치:
 
 ```bash
 cd packages/collector
 PYTHONPATH=. RUN_REAL_CODEX_SMOKE=1 python3 -m src.analysis.benchmark
-```
-
-mock 벤치:
-
-```bash
-cd packages/collector
-PYTHONPATH=. LLM_CLI_EXEC_PATH=mock python3 -m src.analysis.benchmark
 ```
 
 프롬프트 미리보기:
@@ -112,6 +206,25 @@ PYTHONPATH=. LLM_CLI_EXEC_PATH=mock python3 -m src.analysis.benchmark
 ```bash
 curl http://localhost:5002/internal/analysis/preview-batch
 curl http://localhost:5002/internal/analysis/preview/ChatGPT
+```
+
+## 개발 명령
+
+```bash
+# TypeScript workspace install
+npm install
+
+# discord-bot dev
+npm run dev:bot
+
+# orchestrator dev
+npm run dev:orchestrator
+
+# collector tests
+cd packages/collector && pytest
+
+# shared-types build
+npm exec tsc -b packages/shared-types/tsconfig.json
 ```
 
 ## Discord 명령어
@@ -122,48 +235,50 @@ curl http://localhost:5002/internal/analysis/preview/ChatGPT
 | `/watchlist-add ticker:<코드>` | 관심 종목 추가 |
 | `/watchlist-remove ticker:<코드>` | 관심 종목 제거 |
 | `/watchlist-list` | 관심 종목 목록 |
-| `/report-summary` | 요약 리포트 |
-| `/report-full` | 전체 리포트 |
-| `/report-status` | 리포트 상태 |
+| `/report-summary` | 요약 리포트 생성 |
+| `/report-full` | 전체 리포트 생성 |
+| `/report-status` | 리포트 설정 및 최근 실행 상태 |
+| `/agent-status` | 에이전트 상태 조회 |
+| `/agent-run` | 에이전트 실행 |
+| `/radar-status` | source 상태 조회 |
+| `/radar-emerging` | 떠오르는 후보 조회 |
+| `/human-queue` | 대기 중인 사람 입력 요청 조회 |
 | `/voice-start [channel]` | 음성 수집 시작 |
 | `/voice-stop` | 음성 수집 중단 |
 
-## 환경 변수
+## 주요 환경 변수
 
-| 변수 | 서비스 | 필수 | 설명 |
-|------|--------|------|------|
-| `DISCORD_TOKEN` | discord-bot | O | Discord 봇 토큰 |
-| `DISCORD_CLIENT_ID` | discord-bot | O | Discord 앱 클라이언트 ID |
-| `DISCORD_GUILD_ID` | discord-bot | | 테스트 길드 ID |
-| `ANALYSIS_BACKEND` | discord-bot | | `predictor` (기본) 또는 `orchestrator` |
-| `COLLECTOR_PORT` | collector | | 기본 5002 |
-| `LLM_ANALYSIS_EXECUTION_MODE` | collector | | 기본 `batch`, 허용값 `batch \| fresh \| resume` |
-| `LLM_ANALYSIS_BATCH_SIZE` | collector | | 기본 3, batch prompt에 묶는 후보 수 |
-| `LLM_CLI_EXEC_PATH` | collector | | 기본 `codex` |
-| `LLM_CLI_INITIAL_ARGS` | collector | | 기본 fresh/batch Codex 실행 인자 |
-| `LLM_CLI_RESUME_ARGS` | collector | | resume 비교용 Codex 실행 인자 |
-| `LLM_CONTEXT_CHAR_BUDGET` | collector | | 단건 prompt 문자 budget |
-| `LLM_BATCH_CHAR_BUDGET` | collector | | batch prompt 문자 budget |
-| `ORCHESTRATOR_PORT` | mcp-orchestrator | | 기본 5003 |
-| `DEFAULT_PROVIDERS` | mcp-orchestrator | | 기본 `codex,claude` |
-| `KIS_APP_KEY` / `KIS_APP_SECRET` | predictor-legacy | | 한국투자증권 API |
-| `DART_API_KEY` | predictor-legacy | | DART 공시 API |
-| `AZURE_OPENAI_*` | predictor-legacy | | Azure OpenAI 설정 |
+| 변수 | 서비스 | 설명 |
+|------|--------|------|
+| `DISCORD_TOKEN` | discord-bot | Discord bot token |
+| `DISCORD_CLIENT_ID` | discord-bot | Discord app client id |
+| `DISCORD_HUMAN_INPUT_CHANNEL_IDS` | discord-bot | human input 단일 채널 allowlist |
+| `DISCORD_HUMAN_QUEUE_CHANNEL_IDS` | discord-bot | `/human-queue` 허용 채널 |
+| `ANALYSIS_BACKEND` | discord-bot | 현재 `orchestrator`만 사용 |
+| `COLLECTOR_BASE_URL` | discord-bot/orchestrator | collector base URL |
+| `ORCHESTRATOR_BASE_URL` | discord-bot | orchestrator base URL |
+| `LLM_ANALYSIS_ENABLED` | collector | candidate batch analysis on/off |
+| `LLM_ANALYSIS_EXECUTION_MODE` | collector | 기본 `batch` |
+| `LLM_ANALYSIS_BATCH_SIZE` | collector | batch prompt 후보 수 |
+| `LLM_CLI_EXEC_PATH` | collector | 기본 `codex` |
+| `LLM_DEFAULT_MODEL` | collector | 기본 `gpt-5.4-mini` |
+| `LLM_HUMAN_ROUTING_ENABLED` | collector | human input collector-side routing on/off |
+| `LLM_HUMAN_ROUTING_MODEL` | collector | human input routing model |
+| `DEFAULT_PROVIDERS` | mcp-orchestrator | 기본 provider 우선순위 |
+| `OPENAI_API_KEY` | mcp-orchestrator | OpenAI provider key |
 
-전체 목록은 `.env.example` 참조.
+전체 목록과 기본값은 `.env.example`를 기준으로 본다.
 
 ## 프로젝트 구조
 
-```
+```text
 packages/
-  shared-types/       # @agentic/shared-types — 모듈 간 공유 타입
-  discord-bot/        # @agentic/discord-bot — Discord 인터페이스
-  collector/          # agentic-collector — Python 수집 서비스
-  mcp-orchestrator/   # @agentic/mcp-orchestrator — 에이전트 오케스트레이션
-  predictor-legacy/   # 기존 predictor (호환 유지)
+  shared-types/       공용 타입
+  discord-bot/        Discord 인터페이스
+  collector/          ingestion + source registry + candidate analysis
+  mcp-orchestrator/   phase-aware 투자 판단 파이프라인
+  predictor-legacy/   리포지토리에는 남아 있지만 기본 런타임에서는 미사용
 ```
-
-npm workspaces로 TypeScript 패키지를 관리한다. Python 패키지(collector, predictor-legacy)는 독립 관리.
 
 ## 라이선스
 
