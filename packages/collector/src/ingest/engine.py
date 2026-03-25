@@ -11,6 +11,8 @@ from typing import Any
 from ..analysis.engine import AnalysisEngine
 from ..connectors.base import BaseConnector, RawPayload
 from ..ingest.derived import build_derived_evidence
+from ..ingest.human_input_models import HumanInputEnvelope, HumanInputRoutingDecision
+from ..ingest.human_input_router import HumanInputRouter
 from ..ingest.models import SubmissionRecord
 from ..ingest.store import SubmissionStore
 from ..normalizer.evidence_schema import Evidence
@@ -32,6 +34,7 @@ class IngestionEngine:
         normalizer_fn: Any,
         connectors: dict[str, BaseConnector],
         analysis_engine: AnalysisEngine | None = None,
+        human_input_router: HumanInputRouter | None = None,
     ) -> None:
         self.source_registry = source_registry
         self.submission_store = submission_store
@@ -41,6 +44,7 @@ class IngestionEngine:
         self.normalizer_fn = normalizer_fn
         self.connectors = connectors
         self.analysis_engine = analysis_engine
+        self.human_input_router = human_input_router
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._worker: asyncio.Task | None = None
         self._running = False
@@ -216,11 +220,31 @@ class IngestionEngine:
     async def submit_human_evidence_batch(
         self,
         payload: dict[str, Any],
+        *,
+        async_mode: bool = True,
     ) -> SubmissionRecord:
-        return await self.enqueue_evidence(
-            "human_curated_dataset",
-            payload.get("evidence_items", []),
+        if async_mode:
+            return await self.enqueue_evidence(
+                "human_curated_dataset",
+                payload.get("evidence_items", []),
+                producer_ref=payload.get("producer_ref") or "human-data",
+                parent_evidence_ids=payload.get("parent_evidence_ids", []),
+                metadata={
+                    "dataset_name": payload.get("dataset_name"),
+                    "channel": payload.get("channel", "human-data"),
+                    "notes": payload.get("notes", ""),
+                    "request_submission_id": payload.get("request_submission_id"),
+                },
+            )
+        record = SubmissionRecord(
+            submission_id=self._gen_id(),
+            source_id="human_curated_dataset",
+            source_kind="human",
+            ingestion_mode="evidence",
+            status="pending",
             producer_ref=payload.get("producer_ref") or "human-data",
+            received_at=self._now(),
+            evidence_payloads=payload.get("evidence_items", []),
             parent_evidence_ids=payload.get("parent_evidence_ids", []),
             metadata={
                 "dataset_name": payload.get("dataset_name"),
@@ -229,6 +253,41 @@ class IngestionEngine:
                 "request_submission_id": payload.get("request_submission_id"),
             },
         )
+        self.submission_store.create(record)
+        self.source_registry.record_submission("human_curated_dataset")
+        return await self._process_evidence_submission(record, is_submission=True)
+
+    async def submit_human_input(
+        self,
+        payload: dict[str, Any],
+    ) -> SubmissionRecord:
+        envelope = HumanInputEnvelope.model_validate(payload)
+        record = SubmissionRecord(
+            submission_id=self._gen_id(),
+            source_id="human_input_inbox",
+            source_kind="human",
+            ingestion_mode="raw",
+            status="running",
+            producer_ref=envelope.producer_ref or "human-input",
+            received_at=self._now(),
+            payloads=[envelope.model_dump()],
+            metadata={
+                "message_url": envelope.message_url,
+                "attachment_urls": envelope.attachment_urls,
+                "author_id": envelope.author_id,
+                "author_name": envelope.author_name,
+                "guild_id": envelope.guild_id,
+                "channel_id": envelope.channel_id,
+                "channel_name": envelope.channel_name,
+                "message_id": envelope.message_id,
+                "thread_id": envelope.thread_id,
+                "thread_name": envelope.thread_name,
+                "request_submission_id": envelope.request_submission_id,
+            },
+        )
+        self.submission_store.create(record)
+        self.source_registry.record_submission("human_input_inbox")
+        return await self._process_human_input_submission(record, envelope)
 
     async def request_human_analyst_note(self, payload: dict[str, Any]) -> SubmissionRecord:
         record = SubmissionRecord(
@@ -529,6 +588,95 @@ class IngestionEngine:
             )
             return updated
 
+    async def _process_human_input_submission(
+        self,
+        record: SubmissionRecord,
+        envelope: HumanInputEnvelope,
+    ) -> SubmissionRecord:
+        self.submission_store.update(record.submission_id, status="running")
+        snapshot_ids: list[str] = []
+        evidence_ids: list[str] = []
+        try:
+            saved = self.snapshot_store.save_record(
+                source=record.source_id,
+                payload=envelope.model_dump(),
+                request_params={},
+                metadata={
+                    "source_kind": record.source_kind,
+                    "producer_ref": record.producer_ref,
+                    **record.metadata,
+                },
+            )
+            snapshot_ids.append(saved["snapshot_id"])
+            preferred_route = self._preferred_route_for_request(envelope.request_submission_id)
+            if self.human_input_router is None:
+                raise RuntimeError("human input router not configured")
+            decision = await self.human_input_router.classify(
+                envelope,
+                preferred_route=preferred_route,
+            )
+            metadata = {
+                **record.metadata,
+                "classification": decision.model_dump(mode="json"),
+            }
+            if decision.route == "needs_review":
+                updated = self.submission_store.update(
+                    record.submission_id,
+                    status="rejected",
+                    snapshot_ids=snapshot_ids,
+                    processed_at=self._now(),
+                    metadata=metadata,
+                )
+                self.source_registry.record_processing(
+                    record.source_id,
+                    success=True,
+                    snapshot_total=1,
+                    is_submission=True,
+                )
+                return updated
+
+            routed = await self._dispatch_human_input(decision, envelope)
+            evidence_ids = list(routed.evidence_ids)
+            metadata.update(
+                {
+                    "routed_submission_id": routed.submission_id,
+                    "routed_source_id": routed.source_id,
+                }
+            )
+            updated = self.submission_store.update(
+                record.submission_id,
+                status="completed" if routed.status == "completed" else routed.status,
+                snapshot_ids=snapshot_ids,
+                evidence_ids=evidence_ids,
+                processed_at=self._now(),
+                metadata=metadata,
+            )
+            self.source_registry.record_processing(
+                record.source_id,
+                success=routed.status == "completed",
+                snapshot_total=1,
+                evidence_total=len(evidence_ids),
+                is_submission=True,
+            )
+            return updated
+        except Exception as exc:
+            updated = self.submission_store.update(
+                record.submission_id,
+                status="failed",
+                error_message=str(exc),
+                snapshot_ids=snapshot_ids,
+                evidence_ids=evidence_ids,
+                processed_at=self._now(),
+            )
+            self.source_registry.record_processing(
+                record.source_id,
+                success=False,
+                snapshot_total=1,
+                evidence_total=len(evidence_ids),
+                is_submission=True,
+            )
+            return updated
+
     async def _process_derived_submission(
         self,
         record: SubmissionRecord,
@@ -647,6 +795,77 @@ class IngestionEngine:
                 evidence_total=len(evidence_ids),
                 is_submission=True,
             )
+
+    async def _dispatch_human_input(
+        self,
+        decision: HumanInputRoutingDecision,
+        envelope: HumanInputEnvelope,
+    ) -> SubmissionRecord:
+        producer_ref = envelope.producer_ref or "human-input"
+        request_submission_id = decision.request_submission_id or envelope.request_submission_id
+        if decision.route == "manual_observation":
+            return await self.submit_human_observation(
+                {
+                    "title": decision.title,
+                    "entities": decision.entities,
+                    "signal_type": decision.signal_type,
+                    "metric_value": decision.metric_value,
+                    "metric_delta": decision.metric_delta,
+                    "rank": decision.rank,
+                    "geo": decision.geo,
+                    "url": decision.url,
+                    "trust_score": decision.trust_score,
+                    "freshness_ttl": decision.freshness_ttl,
+                    "reporter": producer_ref,
+                },
+                async_mode=False,
+            )
+        if decision.route == "human_analyst_note":
+            return await self.submit_human_analyst_note(
+                {
+                    "title": decision.title,
+                    "observation": decision.observation or envelope.content,
+                    "entity_candidates": decision.entities,
+                    "why_now": decision.why_now,
+                    "confidence": decision.confidence or 0.8,
+                    "geo": decision.geo,
+                    "channel": envelope.channel_name or "human-input",
+                    "study_type": decision.study_type,
+                    "producer_ref": producer_ref,
+                    "beneficiary_hints": decision.beneficiary_hints,
+                    "research_questions": decision.research_questions,
+                    "source_refs": decision.source_refs,
+                    "supporting_points": decision.supporting_points,
+                    "request_submission_id": request_submission_id,
+                },
+                async_mode=False,
+            )
+        if decision.route == "human_curated_dataset":
+            return await self.submit_human_evidence_batch(
+                {
+                    "evidence_items": decision.evidence_items,
+                    "producer_ref": producer_ref,
+                    "dataset_name": decision.dataset_name,
+                    "channel": envelope.channel_name or "human-input",
+                    "notes": decision.notes,
+                    "request_submission_id": request_submission_id,
+                },
+                async_mode=False,
+            )
+        raise ValueError(f"Unsupported routed human input: {decision.route}")
+
+    def _preferred_route_for_request(self, request_submission_id: str | None) -> str | None:
+        if not request_submission_id:
+            return None
+        request = self.submission_store.get(request_submission_id)
+        if request is None:
+            return None
+        requested_kind = request.metadata.get("requested_input_kind")
+        if requested_kind == "data_source":
+            return "human_curated_dataset"
+        if requested_kind == "study_result":
+            return "human_analyst_note"
+        return None
 
     async def _trigger_analysis(self, evidences: list[Evidence]) -> None:
         if self.analysis_engine is None or not evidences:

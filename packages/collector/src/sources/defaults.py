@@ -28,6 +28,20 @@ def build_default_sources(connectors: dict[str, BaseConnector]) -> list[SourceDe
     defaults.extend(
         [
             SourceDefinition(
+                source_id="human_input_inbox",
+                kind="human",
+                ingestion_mode="raw",
+                configured_tier=1,
+                effective_tier=1,
+                enabled=True,
+                adapter_name="human_input_inbox",
+                default_producer_ref="human-input",
+                cadence_seconds=0,
+                runnable=False,
+                scheduled=False,
+                description="Free-form human input inbox routed into structured ingest",
+            ),
+            SourceDefinition(
                 source_id="manual_observation",
                 kind="human",
                 ingestion_mode="raw",

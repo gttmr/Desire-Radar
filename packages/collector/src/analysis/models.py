@@ -93,6 +93,14 @@ class ExecutionResult(BaseModel):
     raw_text: str = ""
 
 
+class RawExecutionResult(BaseModel):
+    session_id: str
+    model: str | None = None
+    payload: object | None = None
+    usage: ExecutionUsage = Field(default_factory=ExecutionUsage)
+    raw_text: str = ""
+
+
 class AnalysisProjection(BaseModel):
     entity: str
     status: AnalysisStatus = "pending"

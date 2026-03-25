@@ -56,6 +56,23 @@ class HumanEvidenceBatchRequest(BaseModel):
     request_submission_id: str | None = None
 
 
+class HumanInputMessageRequest(BaseModel):
+    content: str = ""
+    message_url: str = ""
+    attachment_urls: list[str] = Field(default_factory=list)
+    producer_ref: str | None = None
+    author_id: str | None = None
+    author_name: str | None = None
+    guild_id: str | None = None
+    channel_id: str | None = None
+    channel_name: str | None = None
+    message_id: str | None = None
+    thread_id: str | None = None
+    thread_name: str | None = None
+    request_submission_id: str | None = None
+    posted_at: str | None = None
+
+
 class HumanAnalystRequestRequest(BaseModel):
     entity_candidates: list[str] = Field(default_factory=list)
     question: str
@@ -188,24 +205,6 @@ async def get_submission(submission_id: str) -> dict:
 
 @router.get("/ingest/submissions")
 async def list_submissions(
-    status_filter: str | None = None,
-    source_id: str | None = None,
-    limit: int = 50,
-) -> dict:
-    submission_store = _deps["submission_store"]
-    submissions = submission_store.query(
-        status=status_filter,
-        source_id=source_id,
-        limit=limit,
-    )
-    return {
-        "count": len(submissions),
-        "submissions": [_sanitize_submission(record) for record in submissions],
-    }
-
-
-@router.get("/ingest/submissions")
-async def list_submissions(
     submission_status: str | None = Query(default=None, alias="status"),
     source_id: str | None = None,
     limit: int = 50,
@@ -298,6 +297,16 @@ async def ingest_human_study_result(body: HumanAnalystNoteRequest) -> dict:
 async def ingest_human_evidence_batch(body: HumanEvidenceBatchRequest) -> dict:
     ingestion_engine = _deps["ingestion_engine"]
     record = await ingestion_engine.submit_human_evidence_batch(body.model_dump())
+    return _sanitize_submission(record)
+
+
+@router.post(
+    "/ingest/human-input",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def ingest_human_input(body: HumanInputMessageRequest) -> dict:
+    ingestion_engine = _deps["ingestion_engine"]
+    record = await ingestion_engine.submit_human_input(body.model_dump())
     return _sanitize_submission(record)
 
 

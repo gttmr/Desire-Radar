@@ -48,6 +48,13 @@ from .config import (
     LLM_PROMPT_INCLUDE_PREVIOUS_ANALYSIS,
     LLM_PROMPT_INCLUDE_URLS,
     LLM_PROMPT_TITLE_MAX_CHARS,
+    LLM_HUMAN_ROUTING_AUTO_THRESHOLD,
+    LLM_HUMAN_ROUTING_ENABLED,
+    LLM_HUMAN_ROUTING_EXECUTION_MODE,
+    LLM_HUMAN_ROUTING_MAX_INPUT_CHARS,
+    LLM_HUMAN_ROUTING_MODEL,
+    LLM_HUMAN_ROUTING_REVIEW_THRESHOLD,
+    LLM_HUMAN_ROUTING_SESSION_DOMAIN,
     LLM_REVIEW_CONFIDENCE_THRESHOLD,
     LLM_SESSION_DOMAIN,
     LLM_SESSION_MAX_IDLE_MINUTES,
@@ -60,6 +67,7 @@ from .config import (
 )
 from .connectors import build_connector_registry
 from .ingest import IngestionEngine, SubmissionStore
+from .ingest.human_input_router import HumanInputRouter
 from .normalizer import normalize
 from .resolver.entity_resolver import EntityResolver
 from .scheduler.cadence_runner import CadenceRunner
@@ -157,6 +165,36 @@ async def lifespan(app: FastAPI):
         prompt_flag=LLM_CLI_PROMPT_FLAG,
         continue_flag=LLM_CLI_CONTINUE_FLAG,
     )
+    human_input_session_pool = SessionPool(
+        exec_path=LLM_CLI_EXEC_PATH,
+        provider=LLM_CLI_PROVIDER,
+        initial_args=LLM_CLI_INITIAL_ARGS,
+        resume_args=LLM_CLI_RESUME_ARGS,
+        model=LLM_HUMAN_ROUTING_MODEL,
+        model_flag=LLM_CLI_MODEL_FLAG,
+        timeout_seconds=LLM_TIMEOUT_SECONDS,
+        memory_char_budget=LLM_SESSION_MEMORY_CHAR_BUDGET,
+        memory_entry_count=LLM_SESSION_MEMORY_ENTRY_COUNT,
+        memory_entry_char_budget=LLM_SESSION_MEMORY_ENTRY_CHAR_BUDGET,
+        max_idle_minutes=LLM_SESSION_MAX_IDLE_MINUTES,
+        max_turns=LLM_SESSION_MAX_TURNS,
+        max_uncached_input_tokens=LLM_SESSION_MAX_UNCACHED_INPUT_TOKENS,
+        parse_error_snippet_chars=LLM_PARSE_ERROR_SNIPPET_CHARS,
+        use_stdin=LLM_CLI_USE_STDIN,
+        base_args=LLM_CLI_ARGS,
+        prompt_mode=LLM_CLI_PROMPT_MODE,
+        prompt_flag=LLM_CLI_PROMPT_FLAG,
+        continue_flag=LLM_CLI_CONTINUE_FLAG,
+    )
+    human_input_router = HumanInputRouter(
+        session_pool=human_input_session_pool,
+        enabled=LLM_HUMAN_ROUTING_ENABLED,
+        execution_mode=LLM_HUMAN_ROUTING_EXECUTION_MODE,
+        session_domain=LLM_HUMAN_ROUTING_SESSION_DOMAIN,
+        auto_threshold=LLM_HUMAN_ROUTING_AUTO_THRESHOLD,
+        review_threshold=LLM_HUMAN_ROUTING_REVIEW_THRESHOLD,
+        max_input_chars=LLM_HUMAN_ROUTING_MAX_INPUT_CHARS,
+    )
     analysis_engine = AnalysisEngine(
         evidence_sink=evidence_sink,
         signal_builder=signal_builder,
@@ -179,6 +217,7 @@ async def lifespan(app: FastAPI):
         normalizer_fn=normalize,
         connectors=connectors,
         analysis_engine=analysis_engine,
+        human_input_router=human_input_router,
     )
 
     if LLM_ANALYSIS_ENABLED:
@@ -192,6 +231,13 @@ async def lifespan(app: FastAPI):
         )
     else:
         logger.info("Collector analysis disabled — candidates will remain unanalyzed")
+    logger.info(
+        "Collector human routing %s (model=%s, mode=%s, domain=%s)",
+        "enabled" if LLM_HUMAN_ROUTING_ENABLED else "disabled",
+        LLM_HUMAN_ROUTING_MODEL or "(default)",
+        LLM_HUMAN_ROUTING_EXECUTION_MODE,
+        LLM_HUMAN_ROUTING_SESSION_DOMAIN,
+    )
 
     # Initialize scheduler with entity resolver and analysis engine
     cadence_runner = CadenceRunner(

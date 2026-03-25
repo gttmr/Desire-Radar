@@ -4,6 +4,7 @@ import pytest
 
 from src.connectors.base import BaseConnector, RawPayload
 from src.ingest.engine import IngestionEngine
+from src.ingest.human_input_models import HumanInputRoutingDecision
 from src.ingest.store import SubmissionStore
 from src.normalizer.evidence_schema import Evidence
 from src.resolver.entity_resolver import EntityResolver
@@ -39,6 +40,16 @@ class StubAnalysisEngine:
         return []
 
 
+class StubHumanInputRouter:
+    def __init__(self, decision: HumanInputRoutingDecision) -> None:
+        self.decision = decision
+        self.calls: list[tuple[object, str | None]] = []
+
+    async def classify(self, envelope, *, preferred_route=None):
+        self.calls.append((envelope, preferred_route))
+        return self.decision
+
+
 def _normalizer(source: str, raw_payload: dict, snapshot_ref: str) -> list[Evidence]:
     entity = raw_payload.get("entities", ["Cursor"])[0]
     return [
@@ -57,7 +68,7 @@ def _normalizer(source: str, raw_payload: dict, snapshot_ref: str) -> list[Evide
     ]
 
 
-def _build_engine(tmp_path):
+def _build_engine(tmp_path, human_input_router=None):
     connectors = {DummyConnector.name: DummyConnector()}
     registry = SourceRegistry(
         str(tmp_path / "sources.json"),
@@ -73,6 +84,7 @@ def _build_engine(tmp_path):
         normalizer_fn=_normalizer,
         connectors=connectors,
         analysis_engine=analysis_engine,
+        human_input_router=human_input_router,
     )
     return engine, registry, analysis_engine
 
@@ -305,3 +317,158 @@ async def test_human_curated_dataset_can_fulfill_pending_request(tmp_path):
     assert fulfilled_request.metadata["fulfilled_by_submission_id"] == record.submission_id
     assert fulfilled_request.metadata["fulfilled_by_source_id"] == "human_curated_dataset"
     assert registry.status()["human_analyst_note"]["pending_submissions"] == 0
+
+
+@pytest.mark.asyncio
+async def test_human_input_inbox_routes_manual_observation(tmp_path):
+    router = StubHumanInputRouter(
+        HumanInputRoutingDecision(
+            route="manual_observation",
+            confidence=0.9,
+            title="Cursor adoption spike",
+            entities=["Cursor"],
+            signal_type="manual",
+            geo="global",
+            url="https://discord.example/message",
+            trust_score=0.92,
+            freshness_ttl=7200,
+        )
+    )
+    engine, registry, _ = _build_engine(tmp_path, human_input_router=router)
+
+    record = await engine.submit_human_input(
+        {
+            "content": "Cursor adoption spike",
+            "message_url": "https://discord.example/message",
+            "producer_ref": "discord:123",
+            "author_id": "123",
+            "author_name": "operator",
+            "channel_name": "human-input",
+            "message_id": "msg-1",
+        }
+    )
+
+    stored = await engine.get_submission(record.submission_id)
+    assert stored is not None
+    assert stored.status == "completed"
+    assert stored.metadata["routed_source_id"] == "manual_observation"
+    assert stored.evidence_ids
+    evidence = engine.evidence_sink.get_all()[0]
+    assert evidence.source == "manual_observation"
+    assert evidence.producer_ref == "discord:123"
+    assert registry.status()["human_input_inbox"]["pending_submissions"] == 0
+    assert router.calls[0][1] is None
+
+
+@pytest.mark.asyncio
+async def test_human_input_inbox_routes_note_and_fulfills_request(tmp_path):
+    router = StubHumanInputRouter(
+        HumanInputRoutingDecision(
+            route="human_analyst_note",
+            confidence=0.88,
+            title="Cursor field study",
+            observation="Teams are expanding usage for code review workflows.",
+            entities=["Cursor"],
+            why_now="Adoption accelerated after broader IDE rollout.",
+            supporting_points=["Three teams increased seats in one week"],
+            request_submission_id="",
+        )
+    )
+    engine, registry, _ = _build_engine(tmp_path, human_input_router=router)
+    request = await engine.request_human_analyst_note(
+        {
+            "entity_candidates": ["Cursor"],
+            "question": "What workflow is driving seat growth?",
+            "requested_by_agent": "human_intel",
+        }
+    )
+
+    record = await engine.submit_human_input(
+        {
+            "content": "why_now: rollout widened\nTeams are expanding usage for code review workflows.",
+            "message_url": "https://discord.example/study",
+            "producer_ref": "discord:321",
+            "channel_name": "human-input",
+            "message_id": "msg-2",
+            "request_submission_id": request.submission_id,
+        }
+    )
+
+    stored = await engine.get_submission(record.submission_id)
+    fulfilled_request = await engine.get_submission(request.submission_id)
+    assert stored is not None
+    assert stored.status == "completed"
+    assert stored.metadata["routed_source_id"] == "human_analyst_note"
+    assert fulfilled_request is not None
+    assert fulfilled_request.status == "completed"
+    assert fulfilled_request.metadata["fulfilled_by_source_id"] == "human_analyst_note"
+    assert registry.status()["human_input_inbox"]["pending_submissions"] == 0
+    assert router.calls[0][1] == "human_analyst_note"
+
+
+@pytest.mark.asyncio
+async def test_human_input_inbox_routes_dataset_batch(tmp_path):
+    router = StubHumanInputRouter(
+        HumanInputRoutingDecision(
+            route="human_curated_dataset",
+            confidence=0.97,
+            dataset_name="Discord channel checks",
+            evidence_items=[
+                {
+                    "evidence_id": "discord-1",
+                    "entity_candidates": ["Cursor"],
+                    "signal_type": "channel_check",
+                    "title_or_label": "Three teams added paid seats",
+                    "trust_score": 0.9,
+                }
+            ],
+        )
+    )
+    engine, registry, _ = _build_engine(tmp_path, human_input_router=router)
+
+    record = await engine.submit_human_input(
+        {
+            "content": "```json\n{\"evidence_items\":[{\"evidence_id\":\"discord-1\",\"entity_candidates\":[\"Cursor\"],\"signal_type\":\"channel_check\",\"title_or_label\":\"Three teams added paid seats\",\"trust_score\":0.9}]}\n```",
+            "message_url": "https://discord.example/data",
+            "producer_ref": "discord:999",
+            "channel_name": "human-input",
+            "message_id": "msg-3",
+        }
+    )
+
+    stored = await engine.get_submission(record.submission_id)
+    assert stored is not None
+    assert stored.status == "completed"
+    assert stored.metadata["routed_source_id"] == "human_curated_dataset"
+    evidence = engine.evidence_sink.get_all()[0]
+    assert evidence.source == "human_curated_dataset"
+    assert evidence.producer_ref == "discord:999"
+    assert registry.status()["human_input_inbox"]["pending_submissions"] == 0
+
+
+@pytest.mark.asyncio
+async def test_human_input_inbox_rejects_needs_review(tmp_path):
+    router = StubHumanInputRouter(
+        HumanInputRoutingDecision(
+            route="needs_review",
+            confidence=0.2,
+            rationale="too_vague",
+            user_message="형식을 더 구체화해 주세요.",
+        )
+    )
+    engine, registry, _ = _build_engine(tmp_path, human_input_router=router)
+
+    record = await engine.submit_human_input(
+        {
+            "content": "",
+            "producer_ref": "discord:404",
+            "message_id": "msg-4",
+        }
+    )
+
+    stored = await engine.get_submission(record.submission_id)
+    assert stored is not None
+    assert stored.status == "rejected"
+    assert stored.evidence_ids == []
+    assert stored.metadata["classification"]["route"] == "needs_review"
+    assert registry.status()["human_input_inbox"]["pending_submissions"] == 0

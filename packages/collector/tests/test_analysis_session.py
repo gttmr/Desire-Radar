@@ -86,3 +86,45 @@ def test_session_parses_batch_response_objects():
 
     assert [item.entity for item in responses] == ["ChatGPT", "Cursor"]
     assert [item.summary for item in responses] == ["a", "b"]
+
+
+def test_session_extracts_generic_json_payload_from_codex_jsonl():
+    session = _session()
+    payload = "\n".join(
+        [
+            json.dumps({"type": "thread.started", "thread_id": "thread-router"}),
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "agent_message",
+                        "text": json.dumps(
+                            {
+                                "route": "human_analyst_note",
+                                "confidence": 0.88,
+                                "title": "Field study",
+                            }
+                        ),
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "turn.completed",
+                    "usage": {
+                        "input_tokens": 60,
+                        "cached_input_tokens": 10,
+                        "output_tokens": 15,
+                    },
+                }
+            ),
+        ]
+    )
+
+    message_text, usage, thread_id = session._extract_codex_message(payload)
+    parsed = session._parse_json_payload(message_text)
+
+    assert thread_id == "thread-router"
+    assert isinstance(parsed, dict)
+    assert parsed["route"] == "human_analyst_note"
+    assert usage.uncached_input_tokens == 50

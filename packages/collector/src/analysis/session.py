@@ -12,7 +12,14 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from .models import AnalysisResponse, ExecutionResult, ExecutionUsage, PackedContext, SessionState
+from .models import (
+    AnalysisResponse,
+    ExecutionResult,
+    ExecutionUsage,
+    PackedContext,
+    RawExecutionResult,
+    SessionState,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +103,54 @@ class CliSession:
         self.state.session_id = result.session_id
         return result
 
+    async def execute_json(
+        self,
+        prompt: str,
+        *,
+        execution_mode: str,
+    ) -> RawExecutionResult:
+        if not self.exec_path or self.exec_path == "mock":
+            payload = {"route": "needs_review", "confidence": 0.0, "reason": "mock_cli"}
+            result = RawExecutionResult(
+                session_id=self.state.session_id,
+                model=self.model,
+                payload=payload,
+                usage=ExecutionUsage(),
+                raw_text=json.dumps(payload),
+            )
+        elif self.provider == "codex":
+            message_text, usage, thread_id, raw_text = await self._invoke_codex(
+                prompt,
+                execution_mode=execution_mode,
+            )
+            result = RawExecutionResult(
+                session_id=thread_id or self.state.session_id,
+                model=self.model,
+                payload=self._parse_json_payload(message_text),
+                usage=usage,
+                raw_text=raw_text,
+            )
+        else:
+            message_text, usage, session_id, raw_text = await self._invoke_generic(
+                prompt,
+                execution_mode=execution_mode,
+            )
+            result = RawExecutionResult(
+                session_id=session_id,
+                model=self.model,
+                payload=self._parse_json_payload(message_text),
+                usage=usage,
+                raw_text=raw_text,
+            )
+
+        self.state.turn_count += 1
+        self.state.last_active_at = _now_iso()
+        self.state.total_input_tokens += result.usage.input_tokens
+        self.state.total_cached_input_tokens += result.usage.cached_input_tokens
+        self.state.total_uncached_input_tokens += result.usage.uncached_input_tokens
+        self.state.session_id = result.session_id
+        return result
+
     def is_stale(self) -> bool:
         last_active = datetime.fromisoformat(self.state.last_active_at)
         idle_cutoff = datetime.now(timezone.utc) - timedelta(minutes=self.max_idle_minutes)
@@ -120,35 +175,11 @@ class CliSession:
         *,
         execution_mode: str,
     ) -> ExecutionResult:
-        args, stdin_data = self._build_codex_invocation(prompt, execution_mode=execution_mode)
-
-        proc = await asyncio.create_subprocess_exec(
-            self.exec_path,
-            *args,
-            stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env={**os.environ},
+        message_text, usage, thread_id, raw_text = await self._invoke_codex(
+            prompt,
+            execution_mode=execution_mode,
         )
-        started = time.perf_counter()
-        try:
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(stdin_data),
-                timeout=self.timeout_seconds,
-            )
-        except TimeoutError as exc:
-            proc.kill()
-            raise RuntimeError(f"analysis CLI timed out after {self.timeout_seconds}s") from exc
-
-        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
-        if proc.returncode != 0:
-            raise RuntimeError(
-                f"analysis CLI failed ({proc.returncode}): {stderr.decode('utf-8', errors='ignore').strip()}"
-            )
-
-        raw_text = stdout.decode("utf-8", errors="ignore").strip()
-        responses, usage, thread_id = self._parse_codex_jsonl(raw_text, context.response_mode)
-        usage.elapsed_ms = elapsed_ms
+        responses = self._parse_response_payload(message_text, context.response_mode)
         return ExecutionResult(
             session_id=thread_id or self.state.session_id,
             model=self.model,
@@ -207,6 +238,62 @@ class CliSession:
         *,
         execution_mode: str,
     ) -> ExecutionResult:
+        message_text, usage, session_id, raw_text = await self._invoke_generic(
+            prompt,
+            execution_mode=execution_mode,
+        )
+        responses = self._parse_response_payload(message_text, context.response_mode)
+        return ExecutionResult(
+            session_id=session_id,
+            model=self.model,
+            responses=responses,
+            usage=usage,
+            raw_text=raw_text,
+        )
+
+    async def _invoke_codex(
+        self,
+        prompt: str,
+        *,
+        execution_mode: str,
+    ) -> tuple[str, ExecutionUsage, str | None, str]:
+        args, stdin_data = self._build_codex_invocation(prompt, execution_mode=execution_mode)
+
+        proc = await asyncio.create_subprocess_exec(
+            self.exec_path,
+            *args,
+            stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env={**os.environ},
+        )
+        started = time.perf_counter()
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(stdin_data),
+                timeout=self.timeout_seconds,
+            )
+        except TimeoutError as exc:
+            proc.kill()
+            raise RuntimeError(f"analysis CLI timed out after {self.timeout_seconds}s") from exc
+
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"analysis CLI failed ({proc.returncode}): {stderr.decode('utf-8', errors='ignore').strip()}"
+            )
+
+        raw_text = stdout.decode("utf-8", errors="ignore").strip()
+        message_text, usage, thread_id = self._extract_codex_message(raw_text)
+        usage.elapsed_ms = elapsed_ms
+        return message_text, usage, thread_id, raw_text
+
+    async def _invoke_generic(
+        self,
+        prompt: str,
+        *,
+        execution_mode: str,
+    ) -> tuple[str, ExecutionUsage, str, str]:
         args = list(self.base_args)
         if self.model and self.model_flag:
             args.extend([self.model_flag, self.model])
@@ -248,20 +335,20 @@ class CliSession:
             )
 
         raw_text = stdout.decode("utf-8", errors="ignore").strip()
-        responses = self._parse_response_payload(raw_text, context.response_mode)
-        return ExecutionResult(
-            session_id=self.state.session_id,
-            model=self.model,
-            responses=responses,
-            usage=ExecutionUsage(elapsed_ms=elapsed_ms),
-            raw_text=raw_text,
-        )
+        return raw_text, ExecutionUsage(elapsed_ms=elapsed_ms), self.state.session_id, raw_text
 
     def _parse_codex_jsonl(
         self,
         raw_text: str,
         response_mode: str,
     ) -> tuple[list[AnalysisResponse], ExecutionUsage, str | None]:
+        message_text, usage, thread_id = self._extract_codex_message(raw_text)
+        return self._parse_response_payload(message_text, response_mode), usage, thread_id
+
+    def _extract_codex_message(
+        self,
+        raw_text: str,
+    ) -> tuple[str, ExecutionUsage, str | None]:
         thread_id: str | None = None
         message_text: str | None = None
         usage = ExecutionUsage()
@@ -290,13 +377,9 @@ class CliSession:
             snippet = raw_text[: self.parse_error_snippet_chars]
             raise RuntimeError(f"codex JSONL did not include agent_message: {snippet}")
 
-        return self._parse_response_payload(message_text, response_mode), usage, thread_id
+        return message_text, usage, thread_id
 
-    def _parse_response_payload(
-        self,
-        raw_text: str,
-        response_mode: str,
-    ) -> list[AnalysisResponse]:
+    def _parse_json_payload(self, raw_text: str) -> object:
         cleaned = raw_text.strip()
         if cleaned.startswith("```"):
             first_newline = cleaned.find("\n")
@@ -305,10 +388,17 @@ class CliSession:
                 cleaned = cleaned[first_newline + 1:last_fence].strip()
 
         try:
-            data = json.loads(cleaned)
+            return json.loads(cleaned)
         except json.JSONDecodeError as exc:
             snippet = cleaned[: self.parse_error_snippet_chars]
             raise RuntimeError(f"analysis CLI returned invalid JSON: {snippet}") from exc
+
+    def _parse_response_payload(
+        self,
+        raw_text: str,
+        response_mode: str,
+    ) -> list[AnalysisResponse]:
+        data = self._parse_json_payload(raw_text)
 
         if response_mode == "batch":
             if not isinstance(data, list):
@@ -452,6 +542,31 @@ class SessionPool:
             session = self._new_session(domain)
 
         result = await session.execute(context, execution_mode=execution_mode)
+
+        if execution_mode == "resume":
+            if session.is_stale():
+                self._sessions.pop(domain, None)
+            else:
+                self._sessions[domain] = session
+
+        return result
+
+    async def execute_json(
+        self,
+        prompt: str,
+        *,
+        domain: str,
+        execution_mode: str,
+    ) -> RawExecutionResult:
+        if execution_mode == "resume":
+            session = self._sessions.get(domain)
+            if session is None or session.is_stale():
+                session = self._new_session(domain)
+                self._sessions[domain] = session
+        else:
+            session = self._new_session(domain)
+
+        result = await session.execute_json(prompt, execution_mode=execution_mode)
 
         if execution_mode == "resume":
             if session.is_stale():
