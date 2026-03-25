@@ -1,0 +1,137 @@
+{
+  "defaults": {
+    "triage": {
+      "providers": [
+        "codex"
+      ],
+      "modelProfile": "cheap",
+      "responseFormat": "json"
+    },
+    "debate": {
+      "providers": [
+        "codex",
+        "claude",
+        "gemini"
+      ],
+      "modelProfile": "cheap",
+      "responseFormat": "json"
+    },
+    "verdict": {
+      "providers": [
+        "openai",
+        "codex"
+      ],
+      "modelProfile": "premium",
+      "responseFormat": "json"
+    },
+    "report": {
+      "providers": [
+        "codex"
+      ],
+      "modelProfile": "balanced",
+      "responseFormat": "json"
+    }
+  },
+  "agents": {
+    "triage": {
+      "phase": "triage",
+      "providers": [
+        "codex"
+      ],
+      "modelProfile": "cheap",
+      "responseFormat": "json"
+    },
+    "search_intent": {
+      "phase": "debate",
+      "providers": [
+        "codex",
+        "claude",
+        "gemini"
+      ],
+      "modelProfile": "cheap",
+      "responseFormat": "json"
+    },
+    "ranking_momentum": {
+      "phase": "debate",
+      "providers": [
+        "codex",
+        "claude",
+        "gemini"
+      ],
+      "modelProfile": "cheap",
+      "responseFormat": "json"
+    },
+    "conversion_proxy": {
+      "phase": "debate",
+      "providers": [
+        "codex",
+        "claude"
+      ],
+      "modelProfile": "cheap",
+      "responseFormat": "json"
+    },
+    "scarcity": {
+      "phase": "debate",
+      "providers": [
+        "codex",
+        "claude"
+      ],
+      "modelProfile": "cheap",
+      "responseFormat": "json"
+    },
+    "diffusion": {
+      "phase": "debate",
+      "providers": [
+        "codex",
+        "claude",
+        "gemini"
+      ],
+      "modelProfile": "cheap",
+      "responseFormat": "json"
+    },
+    "human_intel": {
+      "phase": "debate",
+      "providers": [
+        "claude",
+        "codex"
+      ],
+      "modelProfile": "balanced",
+      "responseFormat": "json"
+    },
+    "theme_mapper": {
+      "phase": "debate",
+      "providers": [
+        "codex",
+        "gemini"
+      ],
+      "modelProfile": "balanced",
+      "responseFormat": "json"
+    },
+    "synthesis": {
+      "phase": "debate",
+      "providers": [
+        "codex",
+        "claude"
+      ],
+      "modelProfile": "balanced",
+      "responseFormat": "json"
+    },
+    "investment_verdict": {
+      "phase": "verdict",
+      "providers": [
+        "openai",
+        "codex"
+      ],
+      "modelProfile": "premium",
+      "responseFormat": "json"
+    },
+    "report": {
+      "phase": "report",
+      "providers": [
+        "codex"
+      ],
+      "modelProfile": "balanced",
+      "responseFormat": "json"
+    }
+  }
+}

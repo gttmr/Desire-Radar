@@ -2,19 +2,50 @@
 // Collector REST API request/response types
 // ---------------------------------------------------------------
 
-import type { EvidenceBundle, SignalCandidate, SourceStatus, ManualObservation } from './evidence.js';
+import type { Evidence, SignalCandidate, SourceStatus, SourceTier } from './evidence.js';
+
+export type CollectorSubmissionStatus = 'submitted' | 'approved' | 'rejected';
+
+export type CollectorSourceCatalogEntry = {
+  source: string;
+  source_tier: SourceTier;
+  cadence_seconds: number;
+  scheduled: boolean;
+  enabled?: boolean;
+  description?: string;
+  category?: string;
+};
+
+export type CollectorSourceCatalogResponse = {
+  count: number;
+  sources: CollectorSourceCatalogEntry[];
+};
+
+export type CollectorAnalysisStatusSummary = {
+  enabled: boolean;
+  queue_size: number;
+  execution_mode?: string;
+};
 
 // POST /collect/run
 export type CollectRunRequest = {
-  sources?: string[]; // specific sources to run, or all if omitted
-  force?: boolean;    // ignore cadence cooldown
+  connector?: string;
+  // Legacy field retained for older callers. The current collector only
+  // accepts a single connector name.
+  sources?: string[];
+  force?: boolean;
 };
-export type CollectRunResponse = {
-  ok: boolean;
-  sources_executed: string[];
+export type CollectRunConnectorResponse = {
+  connector: string;
   evidence_count: number;
-  candidates_created: number;
 };
+export type CollectRunAllResponse = {
+  total_evidence_count: number;
+  per_connector: Record<string, number>;
+};
+export type CollectRunResponse =
+  | CollectRunConnectorResponse
+  | CollectRunAllResponse;
 
 // GET /candidates/emerging
 export type EmergingCandidatesResponse = {
@@ -24,67 +55,189 @@ export type EmergingCandidatesResponse = {
 
 // GET /evidence/bundles/:entity
 export type EvidenceBundleResponse = {
-  bundle: EvidenceBundle | null;
   entity: string;
+  count: number;
+  evidence: Evidence[];
 };
 
 // GET /sources/status
 export type SourcesStatusResponse = {
-  sources: SourceStatus[];
+  sources: Record<string, SourceStatus>;
+  analysis: CollectorAnalysisStatusSummary;
+  catalog?: CollectorSourceCatalogEntry[];
 };
 
 // POST /review/approve
 export type ReviewApproveRequest = {
-  evidence_id: string;
-  reviewer?: string;
+  raw_text: string;
+  canonical_name: string;
 };
 export type ReviewApproveResponse = {
-  ok: boolean;
-  evidence_id: string;
+  status: 'approved';
+  raw_text: string;
+  canonical_name: string;
 };
 
 // POST /review/reject
 export type ReviewRejectRequest = {
-  evidence_id: string;
-  reason?: string;
-  reviewer?: string;
+  raw_text: string;
 };
 export type ReviewRejectResponse = {
-  ok: boolean;
-  evidence_id: string;
+  status: 'rejected';
+  raw_text: string;
+};
+
+export type ManualObservationSubmission = {
+  title: string;
+  entities?: string[];
+  signal_type?: string;
+  metric_value?: number | null;
+  metric_delta?: number | null;
+  rank?: number | null;
+  geo?: string;
+  url?: string;
+  trust_score?: number;
+  freshness_ttl?: number;
 };
 
 // POST /manual-observation (human input connector)
-export type ManualObservationRequest = ManualObservation;
+export type ManualObservationRequest = ManualObservationSubmission;
 export type ManualObservationResponse = {
-  ok: boolean;
-  evidence_id: string;
-  entity_candidates: string[];
+  status: 'submitted';
+  evidence_count: number;
 };
 
 // --- Internal APIs (MCP orchestrator consumption) ---
 
 // GET /internal/next-candidates
 export type NextCandidatesResponse = {
+  count: number;
   candidates: SignalCandidate[];
 };
 
 // POST /internal/build-bundle
 export type BuildBundleRequest = {
   entity: string;
-  time_window?: { start: string; end: string };
+  max_evidence?: number;
 };
 export type BuildBundleResponse = {
-  bundle: EvidenceBundle;
+  entity: string;
+  evidence_count: number;
+  evidence: Evidence[];
+  sources: string[];
 };
 
 // GET /internal/entity-history/:entity
 export type EntityHistoryResponse = {
   entity: string;
-  history: Array<{
-    date: string;
-    evidence_count: number;
-    emergence_score: number;
-    sources: string[];
-  }>;
+  total_evidence: number;
+  history: Evidence[];
 };
+
+export type CollectorAnalysisTask = {
+  task_id: string;
+  entity: string;
+  session_domain: string;
+  reason: string;
+  emergence_score: number;
+  velocity_score: number;
+  source_count: number;
+  evidence_ids: string[];
+  sources: string[];
+  first_seen: string;
+  last_seen: string;
+  enqueued_at: string;
+};
+
+export type CollectorAnalysisProjection = {
+  entity: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'needs_review' | 'skipped';
+  session_domain: string;
+  session_id?: string | null;
+  model?: string | null;
+  summary?: string | null;
+  confidence?: number | null;
+  desire_types?: string[];
+  behavioral_signals?: string[];
+  demographic_hints?: string[];
+  avg_intensity?: number | null;
+  open_questions?: string[];
+  reason?: string | null;
+  evidence_ids?: string[];
+  sources?: string[];
+  source_count?: number;
+  last_emergence_score?: number | null;
+  last_velocity_score?: number | null;
+  first_enqueued_at?: string | null;
+  analyzed_at?: string | null;
+  last_execution_mode?: 'batch' | 'fresh' | 'resume' | null;
+  last_prompt_char_count?: number | null;
+  last_estimated_input_tokens?: number | null;
+  last_input_tokens?: number | null;
+  last_cached_input_tokens?: number | null;
+  last_uncached_input_tokens?: number | null;
+  last_output_tokens?: number | null;
+  last_batch_size?: number | null;
+  updated_at: string;
+};
+
+export type CollectorSessionState = {
+  session_id: string;
+  domain: string;
+  model?: string | null;
+  turn_count: number;
+  last_active_at: string;
+  rolling_memory: string;
+  total_input_tokens: number;
+  total_cached_input_tokens: number;
+  total_uncached_input_tokens: number;
+};
+
+export type AnalysisRunRequest = {
+  entity: string;
+};
+
+export type AnalysisRunResponse = {
+  entity: string;
+  queued: boolean;
+  tasks: CollectorAnalysisTask[];
+};
+
+export type AnalysisStatusResponse = {
+  entity: string;
+  queued: boolean;
+  queue_size: number;
+  execution_mode: 'batch' | 'fresh' | 'resume';
+  projection: CollectorAnalysisProjection | null;
+  sessions: CollectorSessionState[];
+};
+
+export type AnalysisPreviewResponse =
+  | {
+      entity: string;
+      execution_mode: 'batch' | 'fresh' | 'resume';
+      found: false;
+    }
+  | {
+      entity: string | null;
+      entities: string[];
+      execution_mode: 'batch' | 'fresh' | 'resume';
+      prompt_format: 'json' | 'markdown';
+      prompt_char_count: number;
+      estimated_input_tokens: number;
+      selected_evidence_count: number;
+      selected_sources: string[];
+      omitted_fields: string[];
+      prompt_preview: string;
+      model: string | null;
+      batch_size: number;
+      response_mode: 'single' | 'batch';
+      count?: number;
+      candidates?: Array<{
+        entity: string;
+        reason: string;
+        source_count: number;
+        emergence_score: number;
+        velocity_score: number;
+      }>;
+    };

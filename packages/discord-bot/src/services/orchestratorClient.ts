@@ -7,7 +7,17 @@ import type {
   SynthesizeReportResponse,
   RunStateResponse,
   ListSessionsResponse,
-  OrchestratorHealthResponse
+  OrchestratorHealthResponse,
+  RunFromCandidateRequest,
+  RunFromCandidateResponse,
+  ListHighLevelRunsResponse,
+  GetHighLevelRunResponse,
+  GetRunResearchResponse,
+  GetRunVerdictResponse,
+  GetRunProviderExecutionsResponse,
+  RunResearchLoopResponse,
+  RunVerdictResponse,
+  ListResearchRequestsResponse,
 } from '@agentic/shared-types';
 
 export class OrchestratorClient {
@@ -20,6 +30,10 @@ export class OrchestratorClient {
     return this.post('/runs/submit-evidence', req);
   }
 
+  async runFromCandidate(req: RunFromCandidateRequest): Promise<RunFromCandidateResponse> {
+    return this.post('/runs/from-candidate', req);
+  }
+
   async runDebate(req: RunDebateRequest): Promise<RunDebateResponse> {
     return this.post('/runs/debate', req);
   }
@@ -30,6 +44,38 @@ export class OrchestratorClient {
 
   async getRunState(runId: string): Promise<RunStateResponse> {
     return this.get(`/runs/${encodeURIComponent(runId)}/state`);
+  }
+
+  async listRuns(): Promise<ListHighLevelRunsResponse> {
+    return this.get('/runs');
+  }
+
+  async getRun(runId: string): Promise<GetHighLevelRunResponse> {
+    return this.get(`/runs/${encodeURIComponent(runId)}`);
+  }
+
+  async getRunResearch(runId: string): Promise<GetRunResearchResponse> {
+    return this.get(`/runs/${encodeURIComponent(runId)}/research`);
+  }
+
+  async getRunVerdict(runId: string): Promise<GetRunVerdictResponse> {
+    return this.get(`/runs/${encodeURIComponent(runId)}/verdict`);
+  }
+
+  async getRunProviderExecutions(runId: string): Promise<GetRunProviderExecutionsResponse> {
+    return this.get(`/runs/${encodeURIComponent(runId)}/provider-executions`);
+  }
+
+  async rerunResearch(runId: string): Promise<RunResearchLoopResponse> {
+    return this.post(`/runs/${encodeURIComponent(runId)}/research`, {});
+  }
+
+  async rerunVerdict(runId: string): Promise<RunVerdictResponse> {
+    return this.post(`/runs/${encodeURIComponent(runId)}/verdict`, {});
+  }
+
+  async getResearchRequests(runId: string): Promise<ListResearchRequestsResponse> {
+    return this.get(`/runs/${encodeURIComponent(runId)}/research-requests`);
   }
 
   async listSessions(agentName?: string): Promise<ListSessionsResponse> {

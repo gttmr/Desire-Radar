@@ -472,7 +472,14 @@ export class BotApp {
         await interaction.deferReply({ ephemeral: true });
         try {
           const status = await this.collector.getSourcesStatus();
-          const entries = Object.entries(status.sources);
+          const entries = Object.entries(
+            status.sources as Record<string, {
+              cadence_seconds: number;
+              source_tier: number;
+              last_run: string | null;
+              scheduled: boolean;
+            }>
+          );
           if (entries.length === 0) {
             await interaction.editReply({ content: '등록된 소스가 없습니다.' });
             return;
@@ -499,14 +506,22 @@ export class BotApp {
             return;
           }
           // Show top 15 candidates sorted by emergence_score (desc)
-          const top = result.candidates
+          const top = (result.candidates as Array<{
+            entity: string;
+            status: string;
+            emergence_score: number;
+            velocity_score: number;
+            source_count: number;
+            sources: string[];
+            primary_sources?: string[];
+          }>)
             .sort((a, b) => b.emergence_score - a.emergence_score)
             .slice(0, 15);
           const header = `📡 **떠오르는 신호 후보** (상위 ${top.length}개 / 전체 ${result.candidates.length}개)\n`;
           const lines = top.map((c, i) => {
             const score = Math.round(c.emergence_score * 100);
             const velocity = Math.round(c.velocity_score * 100);
-            const sources = c.sources.join(', ');
+            const sources = (c.sources.length > 0 ? c.sources : (c.primary_sources ?? [])).join(', ');
             return `${i + 1}. **${c.entity}** [${c.status}] | 출현: ${score}% | 속도: ${velocity}% | 소스(${c.source_count}): ${sources}`;
           });
           const content = header + lines.join('\n');

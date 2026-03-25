@@ -1,10 +1,16 @@
 import type {
+  CollectRunRequest,
   CollectRunResponse,
+  CollectorSourceCatalogResponse,
   EmergingCandidatesResponse,
   EvidenceBundleResponse,
   SourcesStatusResponse,
   ManualObservationRequest,
-  ManualObservationResponse
+  ManualObservationResponse,
+  ReviewApproveRequest,
+  ReviewApproveResponse,
+  ReviewRejectRequest,
+  ReviewRejectResponse,
 } from '@agentic/shared-types';
 
 export class CollectorClient {
@@ -25,12 +31,31 @@ export class CollectorClient {
     return this.get('/sources/status');
   }
 
+  async getSourcesCatalog(): Promise<CollectorSourceCatalogResponse> {
+    return this.get('/sources/catalog');
+  }
+
   async submitManualObservation(obs: ManualObservationRequest): Promise<ManualObservationResponse> {
     return this.post('/manual-observation', obs);
   }
 
-  async triggerCollect(sources?: string[]): Promise<CollectRunResponse> {
-    return this.post('/collect/run', { sources });
+  async approveReview(req: ReviewApproveRequest): Promise<ReviewApproveResponse> {
+    return this.post('/review/approve', req);
+  }
+
+  async rejectReview(req: ReviewRejectRequest): Promise<ReviewRejectResponse> {
+    return this.post('/review/reject', req);
+  }
+
+  async triggerCollect(connector?: string | string[]): Promise<CollectRunResponse> {
+    const body: CollectRunRequest = {};
+    if (typeof connector === 'string') {
+      body.connector = connector;
+    } else if (Array.isArray(connector) && connector.length > 0) {
+      body.connector = connector[0];
+      body.sources = connector;
+    }
+    return this.post('/collect/run', body);
   }
 
   private async get<T>(path: string): Promise<T> {

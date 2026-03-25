@@ -25,6 +25,7 @@ describe('PromptComposer', () => {
     });
     expect(prompt).toContain('You are an analytical agent');
     expect(prompt).toContain('Respond ONLY with valid JSON');
+    expect(prompt).toContain('phase: debate');
   });
 
   it('should include agent system prompt', async () => {
@@ -72,7 +73,7 @@ describe('PromptComposer', () => {
       evidenceBundle: bundle,
     });
 
-    expect(prompt).toContain('Evidence Bundle');
+    expect(prompt).toContain('Evidence Summary');
     expect(prompt).toContain('ev-001');
     expect(prompt).toContain('TestEntity');
   });
@@ -114,9 +115,9 @@ describe('PromptComposer', () => {
     });
 
     expect(prompt).toContain('Messages From Other Agents');
-    expect(prompt).toContain('**ranking_momentum**');
+    expect(prompt).toContain('- ranking_momentum:');
     expect(prompt).toContain('App moved to top-10');
-    expect(prompt).toContain('**scarcity**');
+    expect(prompt).toContain('- scarcity:');
   });
 
   it('should compose sections in correct order', async () => {
