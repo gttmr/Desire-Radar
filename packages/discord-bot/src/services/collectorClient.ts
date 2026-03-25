@@ -6,6 +6,7 @@ import type {
   EvidenceBundleResponse,
   HumanAnalystNoteRequest,
   HumanEvidenceBatchRequest,
+  HumanInputMessageRequest,
   IngestSubmissionListResponse,
   IngestSubmission,
   SourcesStatusResponse,
@@ -66,6 +67,10 @@ export class CollectorClient {
 
   async submitHumanDataSource(batch: HumanEvidenceBatchRequest): Promise<IngestSubmission> {
     return this.post('/ingest/human-data-source', batch);
+  }
+
+  async submitHumanInput(message: HumanInputMessageRequest): Promise<IngestSubmission> {
+    return this.post('/ingest/human-input', message);
   }
 
   async approveReview(req: ReviewApproveRequest): Promise<ReviewApproveResponse> {

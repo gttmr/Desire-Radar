@@ -197,6 +197,23 @@ export type HumanEvidenceBatchRequest = {
   request_submission_id?: string;
 };
 
+export type HumanInputMessageRequest = {
+  content: string;
+  message_url?: string;
+  attachment_urls?: string[];
+  producer_ref?: string;
+  author_id?: string;
+  author_name?: string;
+  guild_id?: string;
+  channel_id?: string;
+  channel_name?: string;
+  message_id?: string;
+  thread_id?: string;
+  thread_name?: string;
+  request_submission_id?: string;
+  posted_at?: string;
+};
+
 export type SubmissionListResponse = {
   count: number;
   submissions: IngestSubmission[];

@@ -27,14 +27,14 @@ function todayInTimeZone(timeZone: string): string {
 }
 
 export class ReportService {
-  readonly predictor: AnalysisGateway;
+  readonly analysis: AnalysisGateway;
 
   constructor(
     private readonly store: GuildConfigStore,
-    predictor: AnalysisGateway,
+    analysis: AnalysisGateway,
     private readonly defaultTimeZone: string
   ) {
-    this.predictor = predictor;
+    this.analysis = analysis;
   }
 
   async getStatus(guildId: string): Promise<GuildReportConfig | undefined> {
@@ -73,7 +73,7 @@ export class ReportService {
       throw new Error('관심 종목이 없습니다. `/watchlist-add ticker:005930` 형태로 먼저 등록하세요.');
     }
 
-    const response = await this.predictor.generateReport({
+    const response = await this.analysis.generateReport({
       guildId,
       tickers: config.tickers,
       asOfDate: todayInTimeZone(config.timezone),

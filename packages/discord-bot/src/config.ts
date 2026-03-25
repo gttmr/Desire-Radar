@@ -22,14 +22,11 @@ const envSchema = z.object({
   HEALTH_PORT: z.coerce.number().int().positive().default(3000),
   STT_PROVIDER: z.enum(['mock']).default('mock'),
   CONFIG_STORE_PATH: z.string().default('data/guild-report-config.json'),
-  PREDICTOR_BASE_URL: z.string().url().default('http://predictor:5001'),
   COLLECTOR_BASE_URL: z.string().url().default('http://collector:5002'),
   ORCHESTRATOR_BASE_URL: z.string().url().default('http://mcp-orchestrator:5003'),
-  DISCORD_HUMAN_OBSERVATION_CHANNEL_IDS: z.string().optional().transform(parseIdSet),
-  DISCORD_HUMAN_STUDY_CHANNEL_IDS: z.string().optional().transform(parseIdSet),
-  DISCORD_HUMAN_DATA_CHANNEL_IDS: z.string().optional().transform(parseIdSet),
+  DISCORD_HUMAN_INPUT_CHANNEL_IDS: z.string().optional().transform(parseIdSet),
   DISCORD_HUMAN_QUEUE_CHANNEL_IDS: z.string().optional().transform(parseIdSet),
-  ANALYSIS_BACKEND: z.enum(['predictor', 'orchestrator']).default('predictor'),
+  ANALYSIS_BACKEND: z.enum(['orchestrator']).default('orchestrator'),
   REPORT_TIME_KST: z
     .string()
     .regex(/^\d{2}:\d{2}$/)

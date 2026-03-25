@@ -10,9 +10,8 @@ import type {
 } from '@agentic/shared-types';
 import type { CollectorClient } from './collectorClient.js';
 import type { OrchestratorClient } from './orchestratorClient.js';
-import type { PredictorClient } from './predictorClient.js';
 
-export type AnalysisBackend = 'predictor' | 'orchestrator';
+export type AnalysisBackend = 'orchestrator';
 
 export interface AnalysisGateway {
   generateReport(request: PredictorRequest): Promise<PredictorResponse>;
@@ -325,13 +324,9 @@ export class OrchestratorGatewayAdapter implements AnalysisGateway {
  */
 export function createAnalysisGateway(
   backend: AnalysisBackend,
-  predictor: PredictorClient,
   orchestrator: OrchestratorClient,
   collector: CollectorClient
 ): AnalysisGateway {
-  if (backend === 'orchestrator') {
-    console.log('ANALYSIS_BACKEND=orchestrator — using OrchestratorGatewayAdapter');
-    return new OrchestratorGatewayAdapter(orchestrator, collector);
-  }
-  return predictor;
+  console.log(`ANALYSIS_BACKEND=${backend} — using OrchestratorGatewayAdapter`);
+  return new OrchestratorGatewayAdapter(orchestrator, collector);
 }

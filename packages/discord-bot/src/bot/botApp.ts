@@ -406,7 +406,7 @@ export class BotApp {
       case 'agent-status': {
         await interaction.deferReply({ ephemeral: true });
         try {
-          const signals = await this.reports.predictor.getAgentSignals();
+          const signals = await this.reports.analysis.getAgentSignals();
           if (signals.length === 0) {
             await interaction.editReply({ content: '저장된 에이전트 신호가 없습니다. `/agent-run`으로 먼저 실행하세요.' });
             return;
@@ -425,7 +425,7 @@ export class BotApp {
         await interaction.deferReply({ ephemeral: true });
         const agentName = interaction.options.getString('agent') ?? undefined;
         try {
-          const signals = await this.reports.predictor.runAgents(agentName ? [agentName] : undefined);
+          const signals = await this.reports.analysis.runAgents(agentName ? [agentName] : undefined);
           const names = signals.map((s) => s.agent).join(', ');
           await interaction.editReply({ content: `에이전트 실행 완료: ${names}\n\n결과를 확인하려면 \`/agent-status\`를 사용하세요.` });
         } catch (err) {
@@ -439,7 +439,7 @@ export class BotApp {
         const tagsRaw = interaction.options.getString('tags') ?? '';
         const tags = tagsRaw ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) : [];
         try {
-          const entry = await this.reports.predictor.addKnowledge(content, tags);
+          const entry = await this.reports.analysis.addKnowledge(content, tags);
           const tagStr = entry.tags.length > 0 ? ` [${entry.tags.join(', ')}]` : '';
           await interaction.reply({
             content: `지식 추가 완료 (ID: \`${entry.id}\`)\n> ${content}${tagStr}`,
@@ -454,7 +454,7 @@ export class BotApp {
       case 'knowledge-list': {
         await interaction.deferReply({ ephemeral: true });
         try {
-          const entries = await this.reports.predictor.listKnowledge();
+          const entries = await this.reports.analysis.listKnowledge();
           if (entries.length === 0) {
             await interaction.editReply({ content: '저장된 지식이 없습니다. `/knowledge-add`로 추가하세요.' });
             return;
@@ -473,7 +473,7 @@ export class BotApp {
       case 'knowledge-remove': {
         const id = interaction.options.getString('id', true).trim();
         try {
-          await this.reports.predictor.removeKnowledge(id);
+          await this.reports.analysis.removeKnowledge(id);
           await interaction.reply({ content: `삭제 완료: \`${id}\``, ephemeral: true });
         } catch (err) {
           const msg = err instanceof Error ? err.message : '알 수 없는 오류';
