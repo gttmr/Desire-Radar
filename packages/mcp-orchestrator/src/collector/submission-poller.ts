@@ -9,14 +9,15 @@ export class SubmissionPoller {
   ) {}
 
   async awaitCompletion(result: ResearchResult): Promise<ResearchResult> {
-    if (result.submissionId.startsWith('legacy-')) {
-      return result;
-    }
-
     const startedAt = Date.now();
     while (Date.now() - startedAt < this.timeoutMs) {
       const submission = await this.client.getSubmission(result.submissionId);
-      if (submission.status === 'completed' || submission.status === 'failed' || submission.status === 'rejected') {
+      if (
+        submission.status === 'completed' ||
+        submission.status === 'failed' ||
+        submission.status === 'rejected' ||
+        submission.status === 'pending_human'
+      ) {
         return {
           ...result,
           status: submission.status,

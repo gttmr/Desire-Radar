@@ -122,7 +122,7 @@ export class RunOrchestrator {
     }
 
     const sourceStatus = this.options.candidateService
-      ? await this.options.candidateService.getSourcesStatus()
+      ? await this.options.candidateService.getSourcesCatalog()
       : undefined;
 
     const result = await this.options.debateService.run({
@@ -199,7 +199,7 @@ export class RunOrchestrator {
           plan: params.plan,
           maxRounds: params.maxRounds,
           providers: params.providers ?? this.defaultProviders,
-          sourceStatus: await this.options.candidateService.getSourcesStatus(),
+          sourceStatus: await this.options.candidateService.getSourcesCatalog(),
         })
       : undefined;
 

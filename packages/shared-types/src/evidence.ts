@@ -33,6 +33,7 @@ export type Evidence = {
   source_kind?: 'pull' | 'push' | 'agent' | 'human' | 'derived';
   producer_ref?: string;
   parent_evidence_ids?: string[];
+  submission_ref?: string;
   collected_at: string;
   entity_candidates: string[];
   signal_type: string;

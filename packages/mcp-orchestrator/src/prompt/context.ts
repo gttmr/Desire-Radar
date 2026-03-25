@@ -72,7 +72,9 @@ function buildDebateContext(input: PromptContextInput): string[] {
         if (!status) {
           return `- ${source}: status unavailable`;
         }
-        return `- ${source}: T${status.effective_tier ?? status.configured_tier ?? status.source_tier}, scheduled=${status.scheduled}, last_run=${status.last_run ?? 'never'}${status.validity_status ? `, validity=${status.validity_status}` : ''}`;
+        const tier = status.effective_tier ?? status.configured_tier ?? status.source_tier;
+        const pending = status.pending_submissions ?? 0;
+        return `- ${source}: kind=${status.kind ?? 'unknown'}, mode=${status.ingestion_mode ?? 'unknown'}, T${tier}, enabled=${status.enabled ?? true}, runnable=${status.runnable ?? false}, pending=${pending}, last_run=${status.last_run ?? 'never'}${status.validity_status ? `, validity=${status.validity_status}` : ''}`;
       });
     if (lines.length > 0) {
       sections.push(`## Source Status\n${lines.join('\n')}`);

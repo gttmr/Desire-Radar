@@ -4,21 +4,37 @@
 
 import type { Evidence, SignalCandidate, SourceStatus, SourceTier } from './evidence.js';
 
-export type CollectorSubmissionStatus = 'submitted' | 'approved' | 'rejected';
+export type CollectorSubmissionStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'rejected'
+  | 'pending_human';
 
 export type CollectorSourceCatalogEntry = {
-  source: string;
-  source_tier: SourceTier;
+  source_id: string;
+  kind: 'pull' | 'push' | 'agent' | 'human' | 'derived';
+  ingestion_mode: 'raw' | 'evidence';
+  configured_tier: SourceTier;
+  effective_tier: SourceTier;
   cadence_seconds: number;
+  runnable: boolean;
   scheduled: boolean;
-  enabled?: boolean;
-  description?: string;
-  category?: string;
+  enabled: boolean;
+  adapter_name: string;
+  default_producer_ref?: string | null;
+  tier_override_reason?: string | null;
+  validity_status?: string | null;
+  validity_score?: number | null;
+  recommended_tier?: SourceTier | null;
+  recommended_tier_reason?: string | null;
+  description?: string | null;
 };
 
 export type CollectorSourceCatalogResponse = {
   count: number;
-  sources: CollectorSourceCatalogEntry[];
+  sources: Record<string, CollectorSourceCatalogEntry>;
 };
 
 export type CollectorAnalysisStatusSummary = {
@@ -38,10 +54,12 @@ export type CollectRunRequest = {
 export type CollectRunConnectorResponse = {
   connector: string;
   evidence_count: number;
+  submission_id?: string;
 };
 export type CollectRunAllResponse = {
   total_evidence_count: number;
   per_connector: Record<string, number>;
+  submission_ids?: Record<string, string>;
 };
 export type CollectRunResponse =
   | CollectRunConnectorResponse
@@ -105,6 +123,58 @@ export type ManualObservationRequest = ManualObservationSubmission;
 export type ManualObservationResponse = {
   status: 'submitted';
   evidence_count: number;
+  submission_id: string;
+};
+
+export type IngestSubmission = {
+  submission_id: string;
+  source_id: string;
+  source_kind: 'pull' | 'push' | 'agent' | 'human' | 'derived';
+  ingestion_mode: 'raw' | 'evidence';
+  status: CollectorSubmissionStatus;
+  snapshot_ids: string[];
+  evidence_ids: string[];
+  error_message?: string | null;
+  producer_ref?: string | null;
+  received_at: string;
+  processed_at?: string | null;
+  parent_evidence_ids?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type RawEnvelopeRequest = {
+  payloads: Record<string, unknown>[];
+  producer_ref?: string;
+  request_params?: Record<string, unknown>;
+};
+
+export type EvidenceEnvelopeRequest = {
+  evidence_items: Record<string, unknown>[];
+  producer_ref?: string;
+  parent_evidence_ids?: string[];
+};
+
+export type HumanAnalystNoteRequest = {
+  title: string;
+  observation: string;
+  entity_candidates?: string[];
+  why_now?: string;
+  confidence?: number;
+  geo?: string;
+  channel?: string;
+  producer_ref?: string;
+  beneficiary_hints?: string[];
+  research_questions?: string[];
+};
+
+export type HumanAnalystRequest = {
+  entity_candidates?: string[];
+  question: string;
+  why_now?: string;
+  priority?: 'low' | 'normal' | 'high';
+  producer_ref?: string;
+  requested_by_agent?: string;
+  run_id?: string;
 };
 
 // --- Internal APIs (MCP orchestrator consumption) ---

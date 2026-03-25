@@ -24,17 +24,27 @@ export type CollectorCandidate = {
 };
 
 export type CollectorSourceStatus = {
+  kind?: 'pull' | 'push' | 'agent' | 'human' | 'derived';
+  ingestion_mode?: 'raw' | 'evidence';
   scheduled: boolean;
+  enabled?: boolean;
   last_run: string | null;
+  last_submission?: string | null;
   cadence_seconds: number;
+  runnable?: boolean;
   source_tier: 1 | 2 | 3;
   configured_tier?: 1 | 2 | 3;
   effective_tier?: 1 | 2 | 3;
   validity_status?: string | null;
   validity_score?: number | null;
   recommended_tier?: 1 | 2 | 3 | null;
+  recommended_tier_reason?: string | null;
   pending_submissions?: number;
   failure_count?: number;
+  adapter_name?: string;
+  default_producer_ref?: string | null;
+  tier_override_reason?: string | null;
+  description?: string | null;
 };
 
 export type CollectorBuildBundleResponse = {
@@ -98,7 +108,7 @@ export class CollectorClient {
     const response = await this.get<{ sources: Record<string, CollectorSourceStatus> }>(
       '/sources/status',
     );
-    return response.sources ?? {};
+    return this.normalizeSourceMap(response.sources ?? {});
   }
 
   async getSourcesCatalog(): Promise<Record<string, CollectorSourceStatus>> {
@@ -106,23 +116,14 @@ export class CollectorClient {
       const response = await this.get<{ sources: Record<string, CollectorSourceStatus> }>(
         '/sources/catalog',
       );
-      return response.sources ?? {};
+      return this.normalizeSourceMap(response.sources ?? {});
     } catch {
       return this.getSourcesStatus();
     }
   }
 
   async triggerSource(sourceId: string): Promise<CollectorSubmission> {
-    await this.post('/collect/run', { connector: sourceId });
-    const now = new Date().toISOString();
-    return {
-      submission_id: `legacy-run-source:${sourceId}:${Date.now()}`,
-      source_id: sourceId,
-      status: 'completed',
-      evidence_ids: [],
-      received_at: now,
-      processed_at: now,
-    };
+    return this.post<CollectorSubmission>(`/internal/sources/run/${encodeURIComponent(sourceId)}`, {});
   }
 
   async submitManualObservation(note: {
@@ -134,8 +135,9 @@ export class CollectorClient {
     trust_score?: number;
     metric_value?: number | null;
     metric_delta?: number | null;
+    reporter?: string;
   }): Promise<CollectorSubmission> {
-    await this.post('/manual-observation', {
+    return this.post<CollectorSubmission>('/ingest/human-observation', {
       title: note.title,
       entities: note.entities,
       signal_type: note.signal_type,
@@ -144,16 +146,32 @@ export class CollectorClient {
       trust_score: note.trust_score ?? 0.8,
       metric_value: note.metric_value ?? null,
       metric_delta: note.metric_delta ?? null,
+      reporter: note.reporter ?? 'orchestrator',
     });
-    const now = new Date().toISOString();
-    return {
-      submission_id: `legacy-manual:${Date.now()}`,
-      status: 'completed',
-      evidence_ids: [],
-      received_at: now,
-      processed_at: now,
-      producer_ref: 'orchestrator',
-    };
+  }
+
+  async submitAgentEvidence(body: {
+    evidence_items: Array<Record<string, unknown>>;
+    producer_ref?: string;
+    parent_evidence_ids?: string[];
+  }): Promise<CollectorSubmission> {
+    return this.post<CollectorSubmission>('/ingest/evidence/agent_evidence', {
+      evidence_items: body.evidence_items,
+      producer_ref: body.producer_ref ?? 'orchestrator-agent',
+      parent_evidence_ids: body.parent_evidence_ids ?? [],
+    });
+  }
+
+  async requestHumanAnalystNote(body: {
+    entity_candidates: string[];
+    question: string;
+    why_now: string;
+    priority: 'low' | 'normal' | 'high';
+    producer_ref?: string;
+    requested_by_agent?: string;
+    run_id?: string;
+  }): Promise<CollectorSubmission> {
+    return this.post<CollectorSubmission>('/ingest/human-analyst-request', body);
   }
 
   async getSubmission(submissionId: string): Promise<CollectorSubmission> {
@@ -183,6 +201,27 @@ export class CollectorClient {
       .join(' | ');
 
     return `${response.entity} has ${response.evidence_count} evidence items across ${response.sources.length} sources. ${highlights}`;
+  }
+
+  private normalizeSourceMap(
+    sources: Record<string, CollectorSourceStatus>,
+  ): Record<string, CollectorSourceStatus> {
+    return Object.fromEntries(
+      Object.entries(sources).map(([sourceId, source]) => [
+        sourceId,
+        {
+          ...source,
+          source_tier:
+            source.source_tier ??
+            source.effective_tier ??
+            source.configured_tier ??
+            3,
+          last_run: source.last_run ?? null,
+          cadence_seconds: source.cadence_seconds ?? 0,
+          scheduled: source.scheduled ?? false,
+        },
+      ]),
+    );
   }
 
   private async get<T>(path: string): Promise<T> {
