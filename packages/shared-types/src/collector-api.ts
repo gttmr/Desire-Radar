@@ -142,6 +142,11 @@ export type IngestSubmission = {
   metadata?: Record<string, unknown>;
 };
 
+export type IngestSubmissionListResponse = {
+  count: number;
+  submissions: IngestSubmission[];
+};
+
 export type RawEnvelopeRequest = {
   payloads: Record<string, unknown>[];
   producer_ref?: string;
@@ -162,9 +167,13 @@ export type HumanAnalystNoteRequest = {
   confidence?: number;
   geo?: string;
   channel?: string;
+  study_type?: string;
   producer_ref?: string;
   beneficiary_hints?: string[];
   research_questions?: string[];
+  source_refs?: string[];
+  supporting_points?: string[];
+  request_submission_id?: string;
 };
 
 export type HumanAnalystRequest = {
@@ -175,6 +184,21 @@ export type HumanAnalystRequest = {
   producer_ref?: string;
   requested_by_agent?: string;
   run_id?: string;
+};
+
+export type HumanEvidenceBatchRequest = {
+  evidence_items: Record<string, unknown>[];
+  producer_ref?: string;
+  dataset_name?: string;
+  channel?: string;
+  notes?: string;
+  parent_evidence_ids?: string[];
+  request_submission_id?: string;
+};
+
+export type SubmissionListResponse = {
+  count: number;
+  submissions: IngestSubmission[];
 };
 
 // --- Internal APIs (MCP orchestrator consumption) ---

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 router = APIRouter()
@@ -37,9 +37,23 @@ class HumanAnalystNoteRequest(BaseModel):
     confidence: float = 0.8
     geo: str = "global"
     channel: str = "analyst"
+    study_type: str = "analysis_note"
     producer_ref: str | None = None
     beneficiary_hints: list[str] = Field(default_factory=list)
     research_questions: list[str] = Field(default_factory=list)
+    source_refs: list[str] = Field(default_factory=list)
+    supporting_points: list[str] = Field(default_factory=list)
+    request_submission_id: str | None = None
+
+
+class HumanEvidenceBatchRequest(BaseModel):
+    evidence_items: list[dict]
+    producer_ref: str | None = None
+    dataset_name: str | None = None
+    channel: str = "human-data"
+    notes: str = ""
+    parent_evidence_ids: list[str] = Field(default_factory=list)
+    request_submission_id: str | None = None
 
 
 class HumanAnalystRequestRequest(BaseModel):
@@ -171,6 +185,42 @@ async def get_submission(submission_id: str) -> dict:
     return _sanitize_submission(submission_store.get(submission_id))
 
 
+@router.get("/ingest/submissions")
+async def list_submissions(
+    status_filter: str | None = None,
+    source_id: str | None = None,
+    limit: int = 50,
+) -> dict:
+    submission_store = _deps["submission_store"]
+    submissions = submission_store.query(
+        status=status_filter,
+        source_id=source_id,
+        limit=limit,
+    )
+    return {
+        "count": len(submissions),
+        "submissions": [_sanitize_submission(record) for record in submissions],
+    }
+
+
+@router.get("/ingest/submissions")
+async def list_submissions(
+    submission_status: str | None = Query(default=None, alias="status"),
+    source_id: str | None = None,
+    limit: int = 50,
+) -> dict:
+    submission_store = _deps["submission_store"]
+    records = submission_store.query(
+        status=submission_status,
+        source_id=source_id,
+        limit=max(1, min(limit, 200)),
+    )
+    return {
+        "count": len(records),
+        "submissions": [_sanitize_submission(record) for record in records],
+    }
+
+
 @router.post(
     "/ingest/envelopes/{source_id}",
     status_code=status.HTTP_202_ACCEPTED,
@@ -224,6 +274,39 @@ async def ingest_human_analyst_note(body: HumanAnalystNoteRequest) -> dict:
         body.model_dump(),
         async_mode=True,
     )
+    return _sanitize_submission(record)
+
+
+@router.post(
+    "/ingest/human-study-result",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def ingest_human_study_result(body: HumanAnalystNoteRequest) -> dict:
+    ingestion_engine = _deps["ingestion_engine"]
+    record = await ingestion_engine.submit_human_analyst_note(
+        body.model_dump(),
+        async_mode=True,
+    )
+    return _sanitize_submission(record)
+
+
+@router.post(
+    "/ingest/human-evidence-batch",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def ingest_human_evidence_batch(body: HumanEvidenceBatchRequest) -> dict:
+    ingestion_engine = _deps["ingestion_engine"]
+    record = await ingestion_engine.submit_human_evidence_batch(body.model_dump())
+    return _sanitize_submission(record)
+
+
+@router.post(
+    "/ingest/human-data-source",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def ingest_human_data_source(body: HumanEvidenceBatchRequest) -> dict:
+    ingestion_engine = _deps["ingestion_engine"]
+    record = await ingestion_engine.submit_human_evidence_batch(body.model_dump())
     return _sanitize_submission(record)
 
 

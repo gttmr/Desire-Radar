@@ -195,3 +195,112 @@ async def test_request_human_analyst_note_creates_pending_human_submission(tmp_p
     assert stored.metadata["requested_by_agent"] == "human_intel"
     assert stored.metadata["run_id"] == "run-123"
     assert registry.status()["human_analyst_note"]["pending_submissions"] == 1
+
+
+@pytest.mark.asyncio
+async def test_human_analyst_note_fulfills_pending_request_and_sets_submission_ref(tmp_path):
+    engine, registry, _ = _build_engine(tmp_path)
+
+    request = await engine.request_human_analyst_note(
+        {
+            "entity_candidates": ["Cursor"],
+            "question": "What specific workflow is driving adoption?",
+            "requested_by_agent": "human_intel",
+        }
+    )
+
+    note = await engine.submit_human_analyst_note(
+        {
+            "title": "Cursor field study",
+            "observation": "Developers are adopting it for code review workflows.",
+            "entity_candidates": ["Cursor"],
+            "request_submission_id": request.submission_id,
+            "beneficiary_hints": ["Microsoft"],
+            "supporting_points": ["Repeated mentions in team adoption logs"],
+        },
+        async_mode=False,
+    )
+
+    fulfilled_request = await engine.get_submission(request.submission_id)
+    assert fulfilled_request is not None
+    assert fulfilled_request.status == "completed"
+    assert fulfilled_request.metadata["fulfilled_by_submission_id"] == note.submission_id
+    evidence = engine.evidence_sink.get_all()[0]
+    assert evidence.submission_ref == note.submission_id
+    assert registry.status()["human_analyst_note"]["pending_submissions"] == 0
+
+
+@pytest.mark.asyncio
+async def test_human_curated_dataset_ingests_as_human_source_batch(tmp_path):
+    engine, registry, _ = _build_engine(tmp_path)
+    await engine.start()
+    try:
+        record = await engine.submit_human_evidence_batch(
+            {
+                "producer_ref": "research-desk",
+                "dataset_name": "March channel checks",
+                "notes": "Hand-curated observations from operator interviews.",
+                "evidence_items": [
+                    {
+                        "evidence_id": "human-batch-1",
+                        "entity_candidates": ["Cursor"],
+                        "signal_type": "channel_check",
+                        "title_or_label": "Procurement teams are expanding seat counts",
+                        "trust_score": 0.9,
+                    }
+                ],
+            }
+        )
+        await engine._queue.join()  # type: ignore[attr-defined]
+    finally:
+        await engine.stop()
+
+    stored = await engine.get_submission(record.submission_id)
+    assert stored is not None
+    assert stored.status == "completed"
+    evidence = engine.evidence_sink.get_all()[0]
+    assert evidence.source == "human_curated_dataset"
+    assert evidence.source_kind == "human"
+    assert evidence.producer_ref == "research-desk"
+    assert evidence.submission_ref == record.submission_id
+    assert registry.status()["human_curated_dataset"]["pending_submissions"] == 0
+
+
+@pytest.mark.asyncio
+async def test_human_curated_dataset_can_fulfill_pending_request(tmp_path):
+    engine, registry, _ = _build_engine(tmp_path)
+    await engine.start()
+    try:
+        request = await engine.request_human_analyst_note(
+            {
+                "entity_candidates": ["Cursor"],
+                "question": "Provide hard datapoints from channel checks.",
+                "requested_by_agent": "research_loop",
+            }
+        )
+        record = await engine.submit_human_evidence_batch(
+            {
+                "producer_ref": "research-desk",
+                "dataset_name": "Channel checks",
+                "request_submission_id": request.submission_id,
+                "evidence_items": [
+                    {
+                        "evidence_id": "human-batch-2",
+                        "entity_candidates": ["Cursor"],
+                        "signal_type": "channel_check",
+                        "title_or_label": "Three teams increased paid seat counts this week",
+                        "trust_score": 0.9,
+                    }
+                ],
+            }
+        )
+        await engine._queue.join()  # type: ignore[attr-defined]
+    finally:
+        await engine.stop()
+
+    fulfilled_request = await engine.get_submission(request.submission_id)
+    assert fulfilled_request is not None
+    assert fulfilled_request.status == "completed"
+    assert fulfilled_request.metadata["fulfilled_by_submission_id"] == record.submission_id
+    assert fulfilled_request.metadata["fulfilled_by_source_id"] == "human_curated_dataset"
+    assert registry.status()["human_analyst_note"]["pending_submissions"] == 0

@@ -65,6 +65,7 @@ class IngestionEngine:
         *,
         producer_ref: str | None = None,
         request_params: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> SubmissionRecord:
         source = self.source_registry.require(source_id)
         if not source.enabled:
@@ -82,6 +83,7 @@ class IngestionEngine:
             received_at=self._now(),
             payloads=payloads,
             request_params=request_params or {},
+            metadata=metadata or {},
         )
         self.submission_store.create(record)
         self.source_registry.record_submission(source_id)
@@ -95,6 +97,7 @@ class IngestionEngine:
         *,
         producer_ref: str | None = None,
         parent_evidence_ids: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> SubmissionRecord:
         source = self.source_registry.require(source_id)
         if not source.enabled:
@@ -112,6 +115,7 @@ class IngestionEngine:
             received_at=self._now(),
             evidence_payloads=evidence_payloads,
             parent_evidence_ids=parent_evidence_ids or [],
+            metadata=metadata or {},
         )
         self.submission_store.create(record)
         self.source_registry.record_submission(source_id)
@@ -170,6 +174,18 @@ class IngestionEngine:
                 "human_analyst_note",
                 [evidence_payload],
                 producer_ref=payload.get("producer_ref") or "human-analyst",
+                metadata={
+                    "observation": payload.get("observation", ""),
+                    "why_now": payload.get("why_now", ""),
+                    "beneficiary_hints": payload.get("beneficiary_hints", []),
+                    "research_questions": payload.get("research_questions", []),
+                    "source_refs": payload.get("source_refs", []),
+                    "supporting_points": payload.get("supporting_points", []),
+                    "channel": payload.get("channel", "analyst"),
+                    "geo": payload.get("geo", "global"),
+                    "study_type": payload.get("study_type", "analysis_note"),
+                    "request_submission_id": payload.get("request_submission_id"),
+                },
             )
         record = SubmissionRecord(
             submission_id=self._gen_id(),
@@ -185,13 +201,34 @@ class IngestionEngine:
                 "why_now": payload.get("why_now", ""),
                 "beneficiary_hints": payload.get("beneficiary_hints", []),
                 "research_questions": payload.get("research_questions", []),
+                "source_refs": payload.get("source_refs", []),
+                "supporting_points": payload.get("supporting_points", []),
                 "channel": payload.get("channel", "analyst"),
                 "geo": payload.get("geo", "global"),
+                "study_type": payload.get("study_type", "analysis_note"),
+                "request_submission_id": payload.get("request_submission_id"),
             },
         )
         self.submission_store.create(record)
         self.source_registry.record_submission("human_analyst_note")
         return await self._process_evidence_submission(record, is_submission=True)
+
+    async def submit_human_evidence_batch(
+        self,
+        payload: dict[str, Any],
+    ) -> SubmissionRecord:
+        return await self.enqueue_evidence(
+            "human_curated_dataset",
+            payload.get("evidence_items", []),
+            producer_ref=payload.get("producer_ref") or "human-data",
+            parent_evidence_ids=payload.get("parent_evidence_ids", []),
+            metadata={
+                "dataset_name": payload.get("dataset_name"),
+                "channel": payload.get("channel", "human-data"),
+                "notes": payload.get("notes", ""),
+                "request_submission_id": payload.get("request_submission_id"),
+            },
+        )
 
     async def request_human_analyst_note(self, payload: dict[str, Any]) -> SubmissionRecord:
         record = SubmissionRecord(
@@ -329,6 +366,7 @@ class IngestionEngine:
                         "source_kind": source_kind,
                         "producer_ref": record.producer_ref,
                         "url_or_ref": payload.url_or_ref,
+                        **record.metadata,
                     },
                 )
                 snapshot_ids.append(saved["snapshot_id"])
@@ -341,7 +379,11 @@ class IngestionEngine:
                     snapshot_ref=saved["snapshot_id"],
                 )
                 resolved_evidences, hit_count, miss_count = self._resolve_evidence(
-                    source_id, source_kind, record.producer_ref, evidences
+                    source_id,
+                    source_kind,
+                    record.producer_ref,
+                    record.submission_id,
+                    evidences,
                 )
                 resolve_success += hit_count
                 resolve_miss += miss_count
@@ -415,6 +457,7 @@ class IngestionEngine:
                     metadata={
                         "source_kind": record.source_kind,
                         "producer_ref": record.producer_ref,
+                        **record.metadata,
                     },
                 )
                 snapshot_ids.append(saved["snapshot_id"])
@@ -434,6 +477,7 @@ class IngestionEngine:
                     record.source_id,
                     record.source_kind,
                     record.producer_ref,
+                    record.submission_id,
                     [evidence],
                 )
                 resolve_success += hit_count
@@ -449,6 +493,11 @@ class IngestionEngine:
                 snapshot_ids=snapshot_ids,
                 evidence_ids=evidence_ids,
                 processed_at=self._now(),
+            )
+            self._finalize_human_request(
+                request_submission_id=record.metadata.get("request_submission_id"),
+                fulfillment_submission_id=record.submission_id,
+                evidence_ids=evidence_ids,
             )
             self.source_registry.record_processing(
                 record.source_id,
@@ -497,6 +546,7 @@ class IngestionEngine:
                 record.source_id,
                 source.kind,
                 record.producer_ref,
+                record.submission_id,
                 evidences,
             )
             self.evidence_sink.extend(resolved_evidences)
@@ -537,6 +587,7 @@ class IngestionEngine:
         source_id: str,
         source_kind: str,
         producer_ref: str | None,
+        submission_id: str,
         evidences: list[Evidence],
     ) -> tuple[list[Evidence], int, int]:
         source = self.source_registry.require(source_id)
@@ -560,9 +611,41 @@ class IngestionEngine:
             evidence.source_tier = source.effective_tier
             evidence.source_kind = source_kind
             evidence.producer_ref = producer_ref
+            evidence.submission_ref = submission_id
             resolved_evidences.append(evidence)
 
         return resolved_evidences, success_count, miss_count
+
+    def _finalize_human_request(
+        self,
+        *,
+        request_submission_id: Any,
+        fulfillment_submission_id: str,
+        evidence_ids: list[str],
+    ) -> None:
+        if not isinstance(request_submission_id, str) or not request_submission_id:
+            return
+        request = self.submission_store.get(request_submission_id)
+        if request is None:
+            return
+        fulfilled = self.submission_store.get(fulfillment_submission_id)
+        metadata = dict(request.metadata)
+        metadata["fulfilled_by_submission_id"] = fulfillment_submission_id
+        metadata["fulfilled_by_source_id"] = fulfilled.source_id if fulfilled is not None else None
+        updated = self.submission_store.update(
+            request_submission_id,
+            status="completed",
+            evidence_ids=evidence_ids,
+            processed_at=self._now(),
+            metadata=metadata,
+        )
+        if request.status == "pending_human":
+            self.source_registry.record_processing(
+                updated.source_id,
+                success=True,
+                evidence_total=len(evidence_ids),
+                is_submission=True,
+            )
 
     async def _trigger_analysis(self, evidences: list[Evidence]) -> None:
         if self.analysis_engine is None or not evidences:

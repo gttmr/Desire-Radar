@@ -33,6 +33,23 @@ class SubmissionStore:
     def list(self) -> list[SubmissionRecord]:
         return [record.model_copy(deep=True) for record in self._records.values()]
 
+    def query(
+        self,
+        *,
+        status: str | None = None,
+        source_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[SubmissionRecord]:
+        records = list(self._records.values())
+        if status is not None:
+            records = [record for record in records if record.status == status]
+        if source_id is not None:
+            records = [record for record in records if record.source_id == source_id]
+        records.sort(key=lambda record: record.received_at, reverse=True)
+        if limit is not None:
+            records = records[:limit]
+        return [record.model_copy(deep=True) for record in records]
+
     def _load(self) -> None:
         if not os.path.exists(self.path):
             return
