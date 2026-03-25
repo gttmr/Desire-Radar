@@ -1,6 +1,21 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { ProviderAdapter, ProviderExecutionRequest, ProviderResult } from './base.js';
+import type {
+  ProviderAdapter,
+  ProviderExecutionRequest,
+  ProviderHealthProbe,
+  ProviderResult,
+} from './base.js';
+
+export function classifyGeminiError(message: string): string {
+  if (/MODEL_CAPACITY_EXHAUSTED|RESOURCE_EXHAUSTED|status 429|Too Many Requests/i.test(message)) {
+    return 'Gemini reachable but temporarily unavailable (capacity/rate limit).';
+  }
+  if (/unauthorized|forbidden|auth|credential|login/i.test(message)) {
+    return 'Gemini authentication failed.';
+  }
+  return message;
+}
 
 export class GeminiProvider implements ProviderAdapter {
   readonly name = 'gemini';
@@ -43,11 +58,16 @@ export class GeminiProvider implements ProviderAdapter {
   }
 
   async health(): Promise<boolean> {
+    return (await this.probeHealth()).available;
+  }
+
+  async probeHealth(): Promise<ProviderHealthProbe> {
     try {
-      await this.run(['--version'], 10_000);
-      return true;
-    } catch {
-      return false;
+      await this.run(['-p', 'Reply with exactly OK'], 20_000);
+      return { available: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { available: false, error: classifyGeminiError(message) };
     }
   }
 

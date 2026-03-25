@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { ProviderAdapter, ProviderExecutionRequest, ProviderResult } from './base.js';
+import type {
+  ProviderAdapter,
+  ProviderExecutionRequest,
+  ProviderHealthProbe,
+  ProviderResult,
+} from './base.js';
 
 export class OpenAIProvider implements ProviderAdapter {
   readonly name = 'openai';
@@ -81,7 +86,13 @@ export class OpenAIProvider implements ProviderAdapter {
   }
 
   async health(): Promise<boolean> {
-    if (!this.apiKey) return false;
+    return (await this.probeHealth()).available;
+  }
+
+  async probeHealth(): Promise<ProviderHealthProbe> {
+    if (!this.apiKey) {
+      return { available: false, error: 'OPENAI_API_KEY is not configured' };
+    }
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 10_000);
@@ -90,9 +101,16 @@ export class OpenAIProvider implements ProviderAdapter {
         signal: controller.signal,
       });
       clearTimeout(timer);
-      return response.ok;
-    } catch {
-      return false;
+      if (response.ok) {
+        return { available: true };
+      }
+      return {
+        available: false,
+        error: `OpenAI API health check failed with status ${response.status}`,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { available: false, error: message };
     }
   }
 }

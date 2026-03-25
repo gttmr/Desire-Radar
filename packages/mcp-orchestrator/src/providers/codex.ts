@@ -1,6 +1,92 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { ProviderAdapter, ProviderExecutionRequest, ProviderResult } from './base.js';
+import type {
+  ProviderAdapter,
+  ProviderExecutionRequest,
+  ProviderHealthProbe,
+  ProviderResult,
+} from './base.js';
+
+type CodexUsage = {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  uncachedInputTokens?: number;
+};
+
+type CodexExecResult = {
+  messageText: string;
+  threadId?: string;
+  usage?: CodexUsage;
+};
+
+export function extractCodexExecResult(stdout: string): CodexExecResult {
+  let messageText: string | undefined;
+  let threadId: string | undefined;
+  let usage: CodexUsage | undefined;
+
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line.startsWith('{')) {
+      continue;
+    }
+
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    if (payload.type === 'thread.started' && typeof payload.thread_id === 'string') {
+      threadId = payload.thread_id;
+      continue;
+    }
+
+    if (payload.type === 'item.completed') {
+      const item =
+        payload.item && typeof payload.item === 'object'
+          ? (payload.item as Record<string, unknown>)
+          : undefined;
+      if (item?.type === 'agent_message' && typeof item.text === 'string') {
+        messageText = item.text;
+      }
+      continue;
+    }
+
+    if (payload.type === 'turn.completed') {
+      const rawUsage =
+        payload.usage && typeof payload.usage === 'object'
+          ? (payload.usage as Record<string, unknown>)
+          : undefined;
+      if (rawUsage) {
+        const inputTokens =
+          typeof rawUsage.input_tokens === 'number' ? rawUsage.input_tokens : undefined;
+        const cachedInputTokens =
+          typeof rawUsage.cached_input_tokens === 'number'
+            ? rawUsage.cached_input_tokens
+            : undefined;
+        const outputTokens =
+          typeof rawUsage.output_tokens === 'number' ? rawUsage.output_tokens : undefined;
+        usage = {
+          inputTokens,
+          cachedInputTokens,
+          outputTokens,
+          uncachedInputTokens:
+            typeof inputTokens === 'number' && typeof cachedInputTokens === 'number'
+              ? inputTokens - cachedInputTokens
+              : undefined,
+        };
+      }
+    }
+  }
+
+  if (!messageText) {
+    throw new Error(`Codex response missing agent_message: ${stdout.slice(0, 500)}`);
+  }
+
+  return { messageText, threadId, usage };
+}
 
 export class CodexProvider implements ProviderAdapter {
   readonly name = 'codex';
@@ -16,12 +102,28 @@ export class CodexProvider implements ProviderAdapter {
     const model = request.model;
 
     try {
-      const args = ['exec', '--quiet'];
+      const args = [
+        'exec',
+        '--skip-git-repo-check',
+        '--ephemeral',
+        '-C',
+        '/tmp',
+        '-s',
+        'read-only',
+        '--json',
+        '-',
+      ];
       if (model) {
-        args.push('-m', model);
+        args.splice(1, 0, '-m', model);
       }
-      const text = await this.run(args, request.prompt, request.timeoutMs);
-      return { text, sessionId: sid, durationMs: Date.now() - start, model };
+      const stdout = await this.run(args, request.prompt, request.timeoutMs);
+      const parsed = extractCodexExecResult(stdout);
+      return {
+        text: parsed.messageText,
+        sessionId: parsed.threadId ?? sid,
+        durationMs: Date.now() - start,
+        model,
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[codex] execution failed: ${message}`);
@@ -43,11 +145,22 @@ export class CodexProvider implements ProviderAdapter {
   }
 
   async health(): Promise<boolean> {
+    return (await this.probeHealth()).available;
+  }
+
+  async probeHealth(): Promise<ProviderHealthProbe> {
     try {
-      await this.run(['--version'], undefined, 10_000);
-      return true;
-    } catch {
-      return false;
+      const output = await this.run(['login', 'status'], undefined, 10_000);
+      if (/logged in/i.test(output)) {
+        return { available: true };
+      }
+      return {
+        available: false,
+        error: `Codex login status did not confirm authentication: ${output.trim()}`,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { available: false, error: message };
     }
   }
 

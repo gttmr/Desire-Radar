@@ -147,15 +147,23 @@ export function createRoutes(
       providers.map(async (name) => {
         const adapter = registry.get(name);
         let available = false;
+        let error: string | undefined;
         try {
-          available = adapter ? await adapter.health() : false;
-        } catch {
-          // unhealthy
+          if (adapter?.probeHealth) {
+            const result = await adapter.probeHealth();
+            available = result.available;
+            error = result.error;
+          } else {
+            available = adapter ? await adapter.health() : false;
+          }
+        } catch (err: unknown) {
+          error = err instanceof Error ? err.message : 'Unknown health probe error';
         }
         return {
           provider: name,
           available,
           last_checked_at: new Date().toISOString(),
+          ...(error ? { error } : {}),
         };
       }),
     );

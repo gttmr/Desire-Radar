@@ -1,6 +1,29 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { ProviderAdapter, ProviderExecutionRequest, ProviderResult } from './base.js';
+import type {
+  ProviderAdapter,
+  ProviderExecutionRequest,
+  ProviderHealthProbe,
+  ProviderResult,
+} from './base.js';
+
+export function parseClaudeAuthStatus(stdout: string): ProviderHealthProbe {
+  try {
+    const payload = JSON.parse(stdout) as { loggedIn?: boolean; authMethod?: string };
+    if (payload.loggedIn) {
+      return { available: true };
+    }
+    return {
+      available: false,
+      error: `Claude auth status reported loggedIn=false${payload.authMethod ? ` (${payload.authMethod})` : ''}`,
+    };
+  } catch {
+    return {
+      available: false,
+      error: `Claude auth status returned non-JSON output: ${stdout.trim()}`,
+    };
+  }
+}
 
 export class ClaudeProvider implements ProviderAdapter {
   readonly name = 'claude';
@@ -46,11 +69,16 @@ export class ClaudeProvider implements ProviderAdapter {
   }
 
   async health(): Promise<boolean> {
+    return (await this.probeHealth()).available;
+  }
+
+  async probeHealth(): Promise<ProviderHealthProbe> {
     try {
-      await this.run(['--version'], 10_000);
-      return true;
-    } catch {
-      return false;
+      const output = await this.run(['auth', 'status'], 10_000);
+      return parseClaudeAuthStatus(output);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { available: false, error: message };
     }
   }
 

@@ -15,7 +15,10 @@ export class ProviderRegistry {
     const results: ProviderAdapter[] = [];
     for (const adapter of this.adapters.values()) {
       try {
-        if (await adapter.health()) {
+        const probe = adapter.probeHealth
+          ? await adapter.probeHealth()
+          : { available: await adapter.health() };
+        if (probe.available) {
           results.push(adapter);
         }
       } catch {

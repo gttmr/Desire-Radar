@@ -14,10 +14,16 @@ export type ProviderExecutionRequest = {
   timeoutMs?: number;
 };
 
+export type ProviderHealthProbe = {
+  available: boolean;
+  error?: string;
+};
+
 export interface ProviderAdapter {
   readonly name: string;
   execute(request: ProviderExecutionRequest): Promise<ProviderResult>;
   health(): Promise<boolean>;
+  probeHealth?(): Promise<ProviderHealthProbe>;
 }
 
 export type ProviderResult = {
