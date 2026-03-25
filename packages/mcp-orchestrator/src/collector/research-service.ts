@@ -15,6 +15,7 @@ export type ResearchRequest = {
   requestedByAgent: string;
   requestKind: ResearchRequestKind;
   targetSourceId?: string;
+  requestedInputKind?: 'study_result' | 'data_source';
   question: string;
   whyNow: string;
   priority: ResearchPriority;
@@ -64,6 +65,7 @@ export class ResearchService {
             producer_ref: 'orchestrator',
             requested_by_agent: request.requestedByAgent,
             run_id: request.runId,
+            requested_input_kind: request.requestedInputKind,
           });
     return this.toResult(request, submission);
   }

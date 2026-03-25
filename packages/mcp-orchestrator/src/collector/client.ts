@@ -170,12 +170,34 @@ export class CollectorClient {
     producer_ref?: string;
     requested_by_agent?: string;
     run_id?: string;
+    requested_input_kind?: 'study_result' | 'data_source';
   }): Promise<CollectorSubmission> {
     return this.post<CollectorSubmission>('/ingest/human-analyst-request', body);
   }
 
   async getSubmission(submissionId: string): Promise<CollectorSubmission> {
     return this.get<CollectorSubmission>(`/ingest/submissions/${encodeURIComponent(submissionId)}`);
+  }
+
+  async listSubmissions(params?: {
+    status?: CollectorSubmissionStatus;
+    source_id?: string;
+    limit?: number;
+  }): Promise<{ count: number; submissions: CollectorSubmission[] }> {
+    const search = new URLSearchParams();
+    if (params?.status) {
+      search.set('status', params.status);
+    }
+    if (params?.source_id) {
+      search.set('source_id', params.source_id);
+    }
+    if (params?.limit != null) {
+      search.set('limit', String(params.limit));
+    }
+    const query = search.size > 0 ? `?${search.toString()}` : '';
+    return this.get<{ count: number; submissions: CollectorSubmission[] }>(
+      `/ingest/submissions${query}`,
+    );
   }
 
   private deriveTimeWindow(evidence: Evidence[]): { start: string; end: string } {

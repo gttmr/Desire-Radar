@@ -149,6 +149,7 @@ describe('ResearchLoopService', () => {
       expect.objectContaining({
         requestKind: 'run_source',
         targetSourceId: 'google_trends',
+        requestedInputKind: 'study_result',
       }),
     );
     expect(awaitCompletion).toHaveBeenCalledOnce();
@@ -217,7 +218,7 @@ describe('ResearchLoopService', () => {
     const result = await service.run({
       runId: 'run-1',
       entity: 'Cursor',
-      latestDebate: makeDebate('We need a human channel check'),
+      latestDebate: makeDebate('We need human channel check datapoints'),
       providers: ['mock'],
     });
 
@@ -225,6 +226,7 @@ describe('ResearchLoopService', () => {
       expect.objectContaining({
         requestKind: 'request_human_note',
         targetSourceId: undefined,
+        requestedInputKind: 'data_source',
       }),
     );
     expect(result.reranDebate).toBe(false);

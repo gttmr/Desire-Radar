@@ -194,6 +194,7 @@ async def test_request_human_analyst_note_creates_pending_human_submission(tmp_p
     assert stored.status == "pending_human"
     assert stored.metadata["requested_by_agent"] == "human_intel"
     assert stored.metadata["run_id"] == "run-123"
+    assert stored.metadata["requested_input_kind"] == "study_result"
     assert registry.status()["human_analyst_note"]["pending_submissions"] == 1
 
 

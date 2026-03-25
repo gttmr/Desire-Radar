@@ -118,6 +118,7 @@ export type ResearchRequest = {
   requestedByAgent: string;
   requestKind: 'run_source' | 'submit_agent_evidence' | 'request_human_note';
   targetSourceId?: string;
+  requestedInputKind?: 'study_result' | 'data_source';
   question: string;
   whyNow: string;
   priority: 'low' | 'normal' | 'high';

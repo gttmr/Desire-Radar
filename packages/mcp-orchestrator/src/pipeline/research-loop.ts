@@ -45,6 +45,7 @@ export class ResearchLoopService {
             ? 'request_human_note'
             : this.researchPolicy.defaultRequestKind,
         targetSourceId: preferredSourceId,
+        requestedInputKind: this.inferRequestedInputKind(question),
         question,
         whyNow: 'Debate produced unresolved questions that need additional evidence.',
         priority: this.researchPolicy.defaultPriority,
@@ -142,6 +143,29 @@ export class ResearchLoopService {
       default:
         return 3;
     }
+  }
+
+  private inferRequestedInputKind(question: string): 'study_result' | 'data_source' {
+    const normalized = question.toLowerCase();
+    const dataLikeTerms = [
+      'data',
+      'datapoint',
+      'count',
+      'numbers',
+      'pricing',
+      'inventory',
+      'sell out',
+      'sell-out',
+      'channel check',
+      'channel',
+      'seat count',
+      'store',
+      'survey',
+    ];
+
+    return dataLikeTerms.some((term) => normalized.includes(term))
+      ? 'data_source'
+      : 'study_result';
   }
 
   private collectOpenQuestions(result: DebatePhaseResult): string[] {

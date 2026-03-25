@@ -3,6 +3,15 @@ import { z } from 'zod';
 
 config();
 
+function parseIdSet(value?: string): Set<string> {
+  return new Set(
+    (value ?? '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  );
+}
+
 const envSchema = z.object({
   DISCORD_TOKEN: z.string().min(1),
   DISCORD_CLIENT_ID: z.string().min(1),
@@ -16,6 +25,10 @@ const envSchema = z.object({
   PREDICTOR_BASE_URL: z.string().url().default('http://predictor:5001'),
   COLLECTOR_BASE_URL: z.string().url().default('http://collector:5002'),
   ORCHESTRATOR_BASE_URL: z.string().url().default('http://mcp-orchestrator:5003'),
+  DISCORD_HUMAN_OBSERVATION_CHANNEL_IDS: z.string().optional().transform(parseIdSet),
+  DISCORD_HUMAN_STUDY_CHANNEL_IDS: z.string().optional().transform(parseIdSet),
+  DISCORD_HUMAN_DATA_CHANNEL_IDS: z.string().optional().transform(parseIdSet),
+  DISCORD_HUMAN_QUEUE_CHANNEL_IDS: z.string().optional().transform(parseIdSet),
   ANALYSIS_BACKEND: z.enum(['predictor', 'orchestrator']).default('predictor'),
   REPORT_TIME_KST: z
     .string()

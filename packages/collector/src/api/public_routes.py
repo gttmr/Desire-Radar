@@ -64,6 +64,7 @@ class HumanAnalystRequestRequest(BaseModel):
     producer_ref: str | None = None
     requested_by_agent: str | None = None
     run_id: str | None = None
+    requested_input_kind: str = "study_result"
 
 
 class RawEnvelopeRequest(BaseModel):

@@ -246,6 +246,7 @@ class IngestionEngine:
                 "priority": payload.get("priority", "normal"),
                 "requested_by_agent": payload.get("requested_by_agent"),
                 "run_id": payload.get("run_id"),
+                "requested_input_kind": payload.get("requested_input_kind", "study_result"),
             },
         )
         self.submission_store.create(record)

@@ -184,6 +184,7 @@ export type HumanAnalystRequest = {
   producer_ref?: string;
   requested_by_agent?: string;
   run_id?: string;
+  requested_input_kind?: 'study_result' | 'data_source';
 };
 
 export type HumanEvidenceBatchRequest = {

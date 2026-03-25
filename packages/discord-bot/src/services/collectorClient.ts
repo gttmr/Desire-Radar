@@ -4,6 +4,10 @@ import type {
   CollectorSourceCatalogResponse,
   EmergingCandidatesResponse,
   EvidenceBundleResponse,
+  HumanAnalystNoteRequest,
+  HumanEvidenceBatchRequest,
+  IngestSubmissionListResponse,
+  IngestSubmission,
   SourcesStatusResponse,
   ManualObservationRequest,
   ManualObservationResponse,
@@ -35,8 +39,33 @@ export class CollectorClient {
     return this.get('/sources/catalog');
   }
 
+  async listSubmissions(status?: string, sourceId?: string, limit = 20): Promise<IngestSubmissionListResponse> {
+    const params = new URLSearchParams();
+    if (status) {
+      params.set('status', status);
+    }
+    if (sourceId) {
+      params.set('source_id', sourceId);
+    }
+    params.set('limit', String(limit));
+    const query = params.toString();
+    return this.get(`/ingest/submissions${query ? `?${query}` : ''}`);
+  }
+
   async submitManualObservation(obs: ManualObservationRequest): Promise<ManualObservationResponse> {
     return this.post('/manual-observation', obs);
+  }
+
+  async submitHumanObservation(obs: ManualObservationRequest & { reporter?: string }): Promise<IngestSubmission> {
+    return this.post('/ingest/human-observation', obs);
+  }
+
+  async submitHumanStudyResult(note: HumanAnalystNoteRequest): Promise<IngestSubmission> {
+    return this.post('/ingest/human-study-result', note);
+  }
+
+  async submitHumanDataSource(batch: HumanEvidenceBatchRequest): Promise<IngestSubmission> {
+    return this.post('/ingest/human-data-source', batch);
   }
 
   async approveReview(req: ReviewApproveRequest): Promise<ReviewApproveResponse> {
