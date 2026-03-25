@@ -21,6 +21,7 @@ class EvidenceSink:
 
     def __init__(self, freshness_ttl_days: int = 7) -> None:
         self._items: list[Evidence] = []
+        self._fingerprints: set[str] = set()
         self._lock = threading.Lock()
         self.freshness_ttl = timedelta(days=freshness_ttl_days)
 
@@ -31,11 +32,20 @@ class EvidenceSink:
 
     def append(self, evidence: Evidence) -> None:
         with self._lock:
+            fingerprint = self._fingerprint(evidence)
+            if fingerprint in self._fingerprints:
+                return
             self._items.append(evidence)
+            self._fingerprints.add(fingerprint)
 
     def extend(self, evidences: list[Evidence]) -> None:
         with self._lock:
-            self._items.extend(evidences)
+            for evidence in evidences:
+                fingerprint = self._fingerprint(evidence)
+                if fingerprint in self._fingerprints:
+                    continue
+                self._items.append(evidence)
+                self._fingerprints.add(fingerprint)
 
     def get_all(self) -> list[Evidence]:
         """Return a copy of all evidence items."""
@@ -81,6 +91,7 @@ class EvidenceSink:
                 except (ValueError, TypeError):
                     kept.append(ev)
             self._items = kept
+            self._fingerprints = {self._fingerprint(item) for item in self._items}
             removed = before - len(self._items)
             if removed > 0:
                 logger.info("TTL cleanup: removed %d stale evidence items", removed)
@@ -88,3 +99,17 @@ class EvidenceSink:
 
     def __len__(self) -> int:
         return self.count
+
+    def _fingerprint(self, evidence: Evidence) -> str:
+        entities = "|".join(sorted(evidence.entity_candidates))
+        parents = "|".join(sorted(evidence.parent_evidence_ids))
+        return "::".join(
+            [
+                evidence.source,
+                evidence.raw_snapshot_ref,
+                evidence.signal_type,
+                evidence.title_or_label,
+                entities,
+                parents,
+            ]
+        )

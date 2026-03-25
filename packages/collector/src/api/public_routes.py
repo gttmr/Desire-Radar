@@ -2,12 +2,11 @@
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, Field
 
 router = APIRouter()
 
-# These will be injected by the server at startup
 _deps: dict[str, Any] = {}
 
 
@@ -27,6 +26,42 @@ class ManualObservationRequest(BaseModel):
     url: str = ""
     trust_score: float = 1.0
     freshness_ttl: int = 86400
+    reporter: str | None = None
+
+
+class HumanAnalystNoteRequest(BaseModel):
+    title: str
+    observation: str
+    entity_candidates: list[str] = Field(default_factory=list)
+    why_now: str = ""
+    confidence: float = 0.8
+    geo: str = "global"
+    channel: str = "analyst"
+    producer_ref: str | None = None
+    beneficiary_hints: list[str] = Field(default_factory=list)
+    research_questions: list[str] = Field(default_factory=list)
+
+
+class HumanAnalystRequestRequest(BaseModel):
+    entity_candidates: list[str] = Field(default_factory=list)
+    question: str
+    why_now: str = ""
+    priority: str = "normal"
+    producer_ref: str | None = None
+    requested_by_agent: str | None = None
+    run_id: str | None = None
+
+
+class RawEnvelopeRequest(BaseModel):
+    payloads: list[dict]
+    producer_ref: str | None = None
+    request_params: dict[str, Any] = Field(default_factory=dict)
+
+
+class EvidenceEnvelopeRequest(BaseModel):
+    evidence_items: list[dict]
+    producer_ref: str | None = None
+    parent_evidence_ids: list[str] = Field(default_factory=list)
 
 
 class ReviewApproveRequest(BaseModel):
@@ -42,26 +77,44 @@ class CollectRunRequest(BaseModel):
     connector: str | None = None
 
 
+def _sanitize_submission(record: Any) -> dict:
+    if record is None:
+        raise HTTPException(404, "Submission not found")
+    return record.model_dump(
+        exclude={"payloads", "evidence_payloads", "request_params"},
+    )
+
+
 @router.post("/collect/run")
 async def collect_run(body: CollectRunRequest | None = None) -> dict:
-    """Trigger collection for one or all connectors."""
-    runner = _deps["cadence_runner"]
+    """Trigger collection for one or all pull connectors."""
+    ingestion_engine = _deps["ingestion_engine"]
     connectors = _deps["connectors"]
 
     if body and body.connector:
-        if body.connector not in connectors:
+        if body.connector not in connectors and body.connector not in _deps["source_registry"].as_map():
             raise HTTPException(404, f"Unknown connector: {body.connector}")
-        count = await runner.run_connector(body.connector)
-        return {"connector": body.connector, "evidence_count": count}
+        submission = await ingestion_engine.run_source(body.connector)
+        return {
+            "connector": body.connector,
+            "evidence_count": len(submission.evidence_ids),
+            "submission_id": submission.submission_id,
+        }
 
     total = 0
     results: dict[str, int] = {}
+    submission_ids: dict[str, str] = {}
     for name in connectors:
-        count = await runner.run_connector(name)
-        results[name] = count
-        total += count
+        submission = await ingestion_engine.run_source(name)
+        results[name] = len(submission.evidence_ids)
+        submission_ids[name] = submission.submission_id
+        total += len(submission.evidence_ids)
 
-    return {"total_evidence_count": total, "per_connector": results}
+    return {
+        "total_evidence_count": total,
+        "per_connector": results,
+        "submission_ids": submission_ids,
+    }
 
 
 @router.get("/candidates/emerging")
@@ -89,11 +142,11 @@ async def get_evidence_bundle(entity: str) -> dict:
 
 @router.get("/sources/status")
 async def get_sources_status() -> dict:
-    """Get status of all source connectors."""
-    runner = _deps["cadence_runner"]
+    """Get status of all configured sources."""
     analysis_engine = _deps.get("analysis_engine")
+    registry = _deps["source_registry"]
     return {
-        "sources": runner.get_status(),
+        "sources": registry.status(),
         "analysis": {
             "enabled": analysis_engine.enabled if analysis_engine is not None else False,
             "queue_size": analysis_engine.get_status("_")["queue_size"] if analysis_engine is not None else 0,
@@ -101,9 +154,91 @@ async def get_sources_status() -> dict:
     }
 
 
+@router.get("/sources/catalog")
+async def get_sources_catalog() -> dict:
+    """Return source catalog metadata."""
+    registry = _deps["source_registry"]
+    catalog = registry.catalog()
+    return {
+        "count": len(catalog),
+        "sources": {item["source_id"]: item for item in catalog},
+    }
+
+
+@router.get("/ingest/submissions/{submission_id}")
+async def get_submission(submission_id: str) -> dict:
+    submission_store = _deps["submission_store"]
+    return _sanitize_submission(submission_store.get(submission_id))
+
+
+@router.post(
+    "/ingest/envelopes/{source_id}",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def ingest_envelope(source_id: str, body: RawEnvelopeRequest) -> dict:
+    ingestion_engine = _deps["ingestion_engine"]
+    record = await ingestion_engine.enqueue_raw(
+        source_id,
+        body.payloads,
+        producer_ref=body.producer_ref,
+        request_params=body.request_params,
+    )
+    return _sanitize_submission(record)
+
+
+@router.post(
+    "/ingest/evidence/{source_id}",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def ingest_evidence(source_id: str, body: EvidenceEnvelopeRequest) -> dict:
+    ingestion_engine = _deps["ingestion_engine"]
+    record = await ingestion_engine.enqueue_evidence(
+        source_id,
+        body.evidence_items,
+        producer_ref=body.producer_ref,
+        parent_evidence_ids=body.parent_evidence_ids,
+    )
+    return _sanitize_submission(record)
+
+
+@router.post(
+    "/ingest/human-observation",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def ingest_human_observation(body: ManualObservationRequest) -> dict:
+    ingestion_engine = _deps["ingestion_engine"]
+    record = await ingestion_engine.submit_human_observation(
+        body.model_dump(),
+        async_mode=True,
+    )
+    return _sanitize_submission(record)
+
+
+@router.post(
+    "/ingest/human-analyst-note",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def ingest_human_analyst_note(body: HumanAnalystNoteRequest) -> dict:
+    ingestion_engine = _deps["ingestion_engine"]
+    record = await ingestion_engine.submit_human_analyst_note(
+        body.model_dump(),
+        async_mode=True,
+    )
+    return _sanitize_submission(record)
+
+
+@router.post(
+    "/ingest/human-analyst-request",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def ingest_human_analyst_request(body: HumanAnalystRequestRequest) -> dict:
+    ingestion_engine = _deps["ingestion_engine"]
+    record = await ingestion_engine.request_human_analyst_note(body.model_dump())
+    return _sanitize_submission(record)
+
+
 @router.post("/review/approve")
 async def approve_review(body: ReviewApproveRequest) -> dict:
-    """Approve a review queue item."""
     entity_store = _deps["entity_store"]
     entity_store.approve_review(body.raw_text, body.canonical_name)
     return {"status": "approved", "raw_text": body.raw_text, "canonical_name": body.canonical_name}
@@ -111,7 +246,6 @@ async def approve_review(body: ReviewApproveRequest) -> dict:
 
 @router.post("/review/reject")
 async def reject_review(body: ReviewRejectRequest) -> dict:
-    """Reject a review queue item."""
     entity_store = _deps["entity_store"]
     entity_store.reject_review(body.raw_text)
     return {"status": "rejected", "raw_text": body.raw_text}
@@ -119,12 +253,14 @@ async def reject_review(body: ReviewRejectRequest) -> dict:
 
 @router.post("/manual-observation")
 async def submit_manual_observation(body: ManualObservationRequest) -> dict:
-    """Submit a manual observation."""
-    manual_connector = _deps["connectors"].get("manual_observation")
-    if manual_connector is None:
-        raise HTTPException(500, "Manual observation connector not found")
-
-    manual_connector.submit(body.model_dump())
-    runner = _deps["cadence_runner"]
-    count = await runner.run_connector("manual_observation")
-    return {"status": "submitted", "evidence_count": count}
+    """Compatibility wrapper around the common human observation ingest path."""
+    ingestion_engine = _deps["ingestion_engine"]
+    record = await ingestion_engine.submit_human_observation(
+        body.model_dump(),
+        async_mode=False,
+    )
+    return {
+        "status": "submitted",
+        "evidence_count": len(record.evidence_ids),
+        "submission_id": record.submission_id,
+    }

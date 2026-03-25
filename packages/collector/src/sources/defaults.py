@@ -1,0 +1,131 @@
+"""Default source definitions seeded from connectors and platform channels."""
+
+from __future__ import annotations
+
+from ..connectors.base import BaseConnector
+from .models import SourceDefinition
+
+
+def build_default_sources(connectors: dict[str, BaseConnector]) -> list[SourceDefinition]:
+    defaults = [
+        SourceDefinition(
+            source_id=name,
+            kind="pull",
+            ingestion_mode="raw",
+            configured_tier=connector.source_tier,
+            effective_tier=connector.source_tier,
+            enabled=True,
+            adapter_name=name,
+            default_producer_ref=name,
+            cadence_seconds=connector.cadence_seconds,
+            runnable=True,
+            scheduled=connector.cadence_seconds > 0,
+            description=f"Pull connector for {name}",
+        )
+        for name, connector in connectors.items()
+    ]
+
+    defaults.extend(
+        [
+            SourceDefinition(
+                source_id="manual_observation",
+                kind="human",
+                ingestion_mode="raw",
+                configured_tier=1,
+                effective_tier=1,
+                enabled=True,
+                adapter_name="manual_observation",
+                default_producer_ref="human",
+                cadence_seconds=0,
+                runnable=False,
+                scheduled=False,
+                description="Quick human observation submission",
+            ),
+            SourceDefinition(
+                source_id="human_analyst_note",
+                kind="human",
+                ingestion_mode="evidence",
+                configured_tier=1,
+                effective_tier=1,
+                enabled=True,
+                adapter_name="human_analyst_note",
+                default_producer_ref="human-analyst",
+                cadence_seconds=0,
+                runnable=False,
+                scheduled=False,
+                description="Structured analyst note submission",
+            ),
+            SourceDefinition(
+                source_id="agent_evidence",
+                kind="agent",
+                ingestion_mode="evidence",
+                configured_tier=2,
+                effective_tier=2,
+                enabled=True,
+                adapter_name="agent_evidence",
+                default_producer_ref="orchestrator-agent",
+                cadence_seconds=0,
+                runnable=False,
+                scheduled=False,
+                description="Normalized evidence pushed by external agents",
+            ),
+            SourceDefinition(
+                source_id="co_mention_surge",
+                kind="derived",
+                ingestion_mode="evidence",
+                configured_tier=2,
+                effective_tier=2,
+                enabled=True,
+                adapter_name="co_mention_surge",
+                default_producer_ref="collector",
+                cadence_seconds=0,
+                runnable=True,
+                scheduled=False,
+                description="Derived co-mention surge signal",
+            ),
+            SourceDefinition(
+                source_id="search_rank_divergence",
+                kind="derived",
+                ingestion_mode="evidence",
+                configured_tier=2,
+                effective_tier=2,
+                enabled=True,
+                adapter_name="search_rank_divergence",
+                default_producer_ref="collector",
+                cadence_seconds=0,
+                runnable=True,
+                scheduled=False,
+                description="Derived search/rank divergence signal",
+            ),
+            SourceDefinition(
+                source_id="persistence_acceleration",
+                kind="derived",
+                ingestion_mode="evidence",
+                configured_tier=2,
+                effective_tier=2,
+                enabled=True,
+                adapter_name="persistence_acceleration",
+                default_producer_ref="collector",
+                cadence_seconds=0,
+                runnable=True,
+                scheduled=False,
+                description="Derived persistence acceleration signal",
+            ),
+            SourceDefinition(
+                source_id="supply_tightness_proxy",
+                kind="derived",
+                ingestion_mode="evidence",
+                configured_tier=2,
+                effective_tier=2,
+                enabled=True,
+                adapter_name="supply_tightness_proxy",
+                default_producer_ref="collector",
+                cadence_seconds=0,
+                runnable=True,
+                scheduled=False,
+                description="Derived supply tightness proxy signal",
+            ),
+        ]
+    )
+
+    return defaults

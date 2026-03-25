@@ -59,9 +59,13 @@ from .config import (
     LLM_TIMEOUT_SECONDS,
 )
 from .connectors import build_connector_registry
+from .ingest import IngestionEngine, SubmissionStore
 from .normalizer import normalize
 from .resolver.entity_resolver import EntityResolver
 from .scheduler.cadence_runner import CadenceRunner
+from .sources.defaults import build_default_sources
+from .sources.registry import SourceRegistry
+from .sources.validity import SourceValidityEngine
 from .store.entity_store import EntityStore
 from .store.evidence_sink import EvidenceSink
 from .store.raw_snapshot_store import RawSnapshotStore
@@ -94,9 +98,17 @@ async def lifespan(app: FastAPI):
     analysis_store = AnalysisStore(
         path=os.path.join(DATA_DIR, "analysis.json")
     )
+    submission_store = SubmissionStore(
+        path=os.path.join(DATA_DIR, "submissions.json")
+    )
 
     # Initialize connectors (with data_dir for persistence)
     connectors = build_connector_registry(data_dir=DATA_DIR)
+    source_registry = SourceRegistry(
+        path=os.path.join(DATA_DIR, "sources.json"),
+        defaults=build_default_sources(connectors),
+        validity_engine=SourceValidityEngine(),
+    )
 
     # Initialize resolver and builder
     entity_resolver = EntityResolver(entity_store)
@@ -158,6 +170,16 @@ async def lifespan(app: FastAPI):
         execution_mode=LLM_ANALYSIS_EXECUTION_MODE,
         analysis_batch_size=LLM_ANALYSIS_BATCH_SIZE,
     )
+    ingestion_engine = IngestionEngine(
+        source_registry=source_registry,
+        submission_store=submission_store,
+        snapshot_store=snapshot_store,
+        evidence_sink=evidence_sink,
+        entity_resolver=entity_resolver,
+        normalizer_fn=normalize,
+        connectors=connectors,
+        analysis_engine=analysis_engine,
+    )
 
     if LLM_ANALYSIS_ENABLED:
         logger.info(
@@ -174,16 +196,14 @@ async def lifespan(app: FastAPI):
     # Initialize scheduler with entity resolver and analysis engine
     cadence_runner = CadenceRunner(
         connectors=connectors,
-        snapshot_store=snapshot_store,
-        normalizer_fn=normalize,
-        evidence_sink=evidence_sink,
-        entity_resolver=entity_resolver,
-        analysis_engine=analysis_engine,
+        ingestion_engine=ingestion_engine,
+        source_registry=source_registry,
     )
 
     # Shared dependencies for route handlers
     deps = {
         "connectors": connectors,
+        "source_registry": source_registry,
         "snapshot_store": snapshot_store,
         "entity_store": entity_store,
         "entity_resolver": entity_resolver,
@@ -192,12 +212,15 @@ async def lifespan(app: FastAPI):
         "evidence_sink": evidence_sink,
         "analysis_store": analysis_store,
         "analysis_engine": analysis_engine,
+        "submission_store": submission_store,
+        "ingestion_engine": ingestion_engine,
     }
     public_routes.init_dependencies(deps)
     internal_routes.init_dependencies(deps)
 
     # Start cadence runner
     await analysis_engine.start()
+    await ingestion_engine.start()
     cadence_runner.start()
 
     # Schedule periodic TTL cleanup (every hour)
@@ -217,6 +240,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     cadence_runner.stop()
+    await ingestion_engine.stop()
     await analysis_engine.stop()
     if _ttl_scheduler is not None:
         _ttl_scheduler.shutdown(wait=False)

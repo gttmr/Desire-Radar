@@ -1,8 +1,8 @@
-"""Internal API routes for MCP orchestrator."""
+"""Internal API routes for MCP orchestrator and operator workflows."""
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/internal")
@@ -20,13 +20,21 @@ class BuildBundleRequest(BaseModel):
     max_evidence: int = 50
 
 
+class AnalysisRunRequest(BaseModel):
+    entity: str
+
+
+class UpdateSourceTierRequest(BaseModel):
+    configured_tier: int
+    tier_override_reason: str | None = None
+
+
+class UpdateSourceEnableRequest(BaseModel):
+    enabled: bool
+
+
 @router.get("/next-candidates")
 async def next_candidates(only_needs_analysis: bool = False) -> dict:
-    """Get next signal candidates for orchestrator consumption.
-
-    Returns top candidates sorted by emergence score, excluding already
-    processed ones.
-    """
     builder = _deps["signal_builder"]
     evidence_sink = _deps["evidence_sink"]
     candidates = builder.build_candidates(evidence_sink.get_all())
@@ -37,7 +45,6 @@ async def next_candidates(only_needs_analysis: bool = False) -> dict:
             if candidate.analysis_status in (None, "failed", "needs_review")
         ]
 
-    # Return top 20 candidates
     top = candidates[:20]
     return {
         "count": len(top),
@@ -47,15 +54,9 @@ async def next_candidates(only_needs_analysis: bool = False) -> dict:
 
 @router.post("/build-bundle")
 async def build_bundle(body: BuildBundleRequest) -> dict:
-    """Build an evidence bundle for a specific entity.
-
-    Gathers all evidence for the entity, resolves through entity resolver,
-    and returns a structured bundle.
-    """
     evidence_sink = _deps["evidence_sink"]
     resolver = _deps["entity_resolver"]
 
-    # Find all evidence mentioning this entity (or its aliases)
     canonical = resolver.resolve(body.entity) or body.entity
     matching = []
     for ev in evidence_sink.get_all():
@@ -65,7 +66,6 @@ async def build_bundle(body: BuildBundleRequest) -> dict:
                 matching.append(ev)
                 break
 
-    # Limit and sort by recency
     matching.sort(key=lambda e: e.collected_at, reverse=True)
     limited = matching[: body.max_evidence]
 
@@ -79,7 +79,6 @@ async def build_bundle(body: BuildBundleRequest) -> dict:
 
 @router.get("/entity-history/{entity}")
 async def entity_history(entity: str) -> dict:
-    """Get the full history of evidence for an entity."""
     evidence_sink = _deps["evidence_sink"]
     resolver = _deps["entity_resolver"]
 
@@ -93,7 +92,6 @@ async def entity_history(entity: str) -> dict:
                 history.append(ev.model_dump())
                 break
 
-    # Sort chronologically
     history.sort(key=lambda e: e["collected_at"])
 
     return {
@@ -103,13 +101,8 @@ async def entity_history(entity: str) -> dict:
     }
 
 
-class AnalysisRunRequest(BaseModel):
-    entity: str
-
-
 @router.post("/analysis/run")
 async def run_analysis(body: AnalysisRunRequest) -> dict:
-    """Queue analysis for a specific entity."""
     engine = _deps["analysis_engine"]
     queued = await engine.enqueue_entity(body.entity)
     return {
@@ -121,20 +114,50 @@ async def run_analysis(body: AnalysisRunRequest) -> dict:
 
 @router.get("/analysis/status/{entity}")
 async def analysis_status(entity: str) -> dict:
-    """Return analysis status for a specific entity."""
     engine = _deps["analysis_engine"]
     return engine.get_status(entity)
 
 
 @router.get("/analysis/preview/{entity}")
 async def analysis_preview(entity: str) -> dict:
-    """Return the packed prompt preview for one entity."""
     engine = _deps["analysis_engine"]
     return engine.preview_entity(entity)
 
 
 @router.get("/analysis/preview-batch")
 async def analysis_preview_batch() -> dict:
-    """Return the packed prompt preview for the next analysis batch."""
     engine = _deps["analysis_engine"]
     return engine.preview_batch()
+
+
+@router.post("/sources/run/{source_id}")
+async def run_source(source_id: str) -> dict:
+    ingestion_engine = _deps["ingestion_engine"]
+    record = await ingestion_engine.run_source(source_id)
+    return record.model_dump(
+        exclude={"payloads", "evidence_payloads", "request_params"},
+    )
+
+
+@router.patch("/sources/{source_id}/tier")
+async def update_source_tier(source_id: str, body: UpdateSourceTierRequest) -> dict:
+    registry = _deps["source_registry"]
+    source = registry.update_tier(
+        source_id,
+        body.configured_tier,
+        override_reason=body.tier_override_reason,
+    )
+    return source.model_dump()
+
+
+@router.patch("/sources/{source_id}/enable")
+async def update_source_enable(source_id: str, body: UpdateSourceEnableRequest) -> dict:
+    registry = _deps["source_registry"]
+    source = registry.set_enabled(source_id, body.enabled)
+    return source.model_dump()
+
+
+@router.get("/sources/{source_id}/validity")
+async def get_source_validity(source_id: str) -> dict:
+    registry = _deps["source_registry"]
+    return registry.validity(source_id)
