@@ -116,12 +116,12 @@ export class CodexProvider implements ProviderAdapter {
         '-s',
         'read-only',
         '--json',
-        '-',
+        request.prompt,
       ];
       if (model) {
         args.splice(1, 0, '-m', model);
       }
-      const output = await this.runDetailed(args, request.prompt, request.timeoutMs);
+      const output = await this.runDetailed(args, undefined, request.timeoutMs);
       const parsed = extractCodexExecResult(output.stdout);
       return {
         text: parsed.messageText,

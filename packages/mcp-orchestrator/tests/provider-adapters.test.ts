@@ -62,7 +62,7 @@ warn line
         '-s',
         'read-only',
         '--json',
-        '-',
+        'Reply with exactly OK',
       ]);
     });
 
