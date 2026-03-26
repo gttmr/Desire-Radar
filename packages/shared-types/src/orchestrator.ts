@@ -216,4 +216,8 @@ export type ProviderHealth = {
   available: boolean;
   last_checked_at: string;
   error?: string;
+  repair_configured?: boolean;
+  repair_command_preview?: string;
+  last_repair_at?: string;
+  last_repair_summary?: string;
 };

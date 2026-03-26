@@ -20,7 +20,15 @@ class MockOrchestratorClient {
 }
 
 function healthResponse(
-  providers: Array<{ provider: string; available: boolean; error?: string }>,
+  providers: Array<{
+    provider: string;
+    available: boolean;
+    error?: string;
+    repair_configured?: boolean;
+    repair_command_preview?: string;
+    last_repair_at?: string;
+    last_repair_summary?: string;
+  }>,
 ): OrchestratorHealthResponse {
   return {
     ok: true,
@@ -57,8 +65,18 @@ describe('ProviderHealthMonitor', () => {
     await monitor.pollOnce(sink);
 
     expect(messages).toEqual([
-      '[provider-health] codex unavailable: login expired',
-      '[provider-health] codex recovered',
+      [
+        '[provider-health] codex unavailable',
+        'error: login expired',
+        'checked: 2026-03-26T00:00:00Z',
+        'down since: 2026-03-26T00:00:00Z',
+        'repair: not configured',
+      ].join('\n'),
+      [
+        '[provider-health] codex recovered',
+        'checked: 2026-03-26T00:00:00Z',
+        'downtime: unknown',
+      ].join('\n'),
     ]);
   });
 
@@ -81,7 +99,13 @@ describe('ProviderHealthMonitor', () => {
     });
 
     expect(messages).toEqual([
-      '[provider-health] claude unavailable: auth expired',
+      [
+        '[provider-health] claude unavailable',
+        'error: auth expired',
+        'checked: 2026-03-26T00:00:00Z',
+        'down since: 2026-03-26T00:00:00Z',
+        'repair: not configured',
+      ].join('\n'),
     ]);
   });
 
@@ -104,8 +128,8 @@ describe('ProviderHealthMonitor', () => {
     });
 
     expect(messages).toEqual([
-      '[provider-health] orchestrator unreachable: connection refused',
-      '[provider-health] orchestrator recovered',
+      '[provider-health] orchestrator unreachable\nerror: connection refused',
+      '[provider-health] orchestrator recovered\nprevious error: connection refused',
     ]);
   });
 
@@ -132,8 +156,8 @@ describe('ProviderHealthMonitor', () => {
     });
 
     expect(messages).toEqual([
-      '[provider-health] orchestrator unreachable: connection refused',
-      '[provider-health] orchestrator unreachable: timeout',
+      '[provider-health] orchestrator unreachable\nerror: connection refused',
+      '[provider-health] orchestrator unreachable\nerror: timeout',
     ]);
   });
 
@@ -151,5 +175,42 @@ describe('ProviderHealthMonitor', () => {
         throw new Error('discord send failed');
       }),
     ).rejects.toThrow('discord send failed');
+  });
+
+  it('includes repair configuration and repair result in provider alerts', async () => {
+    const orchestrator = new MockOrchestratorClient([
+      healthResponse([
+        {
+          provider: 'codex',
+          available: false,
+          error: 'login expired',
+          repair_configured: true,
+          repair_command_preview: 'printenv OPENAI_API_KEY | codex login --with-api-key',
+          last_repair_at: '2026-03-26T00:00:30Z',
+          last_repair_summary: 'codex: command completed',
+        },
+      ]),
+    ]);
+
+    const monitor = new ProviderHealthMonitor(orchestrator as never, {
+      pollIntervalMs: 60_000,
+    });
+
+    const messages: string[] = [];
+    await monitor.pollOnce(async (message) => {
+      messages.push(message);
+    });
+
+    expect(messages).toEqual([
+      [
+        '[provider-health] codex unavailable',
+        'error: login expired',
+        'checked: 2026-03-26T00:00:00Z',
+        'down since: 2026-03-26T00:00:00Z',
+        'repair: configured (printenv OPENAI_API_KEY | codex login --with-api-key)',
+        'last repair: 2026-03-26T00:00:30Z',
+        'repair result: codex: command completed',
+      ].join('\n'),
+    ]);
   });
 });

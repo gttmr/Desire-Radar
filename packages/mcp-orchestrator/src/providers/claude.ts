@@ -32,6 +32,7 @@ export function extractClaudePrintResult(stdout: string): string {
   }
 
   const assistantChunks: string[] = [];
+  let resultText: string | undefined;
   for (const rawLine of trimmed.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line.startsWith('{')) {
@@ -42,11 +43,20 @@ export function extractClaudePrintResult(stdout: string): string {
       const payload = JSON.parse(line) as {
         type?: string;
         is_error?: boolean;
+        result?: string;
         message?: { content?: Array<{ type?: string; text?: string }> };
       };
 
       if (payload.type === 'result' && payload.is_error) {
-        throw new Error(`Claude CLI returned error output: ${line.slice(0, 500)}`);
+        const detail =
+          typeof payload.result === 'string' && payload.result.trim()
+            ? payload.result.trim()
+            : line.slice(0, 500);
+        throw new Error(`Claude CLI returned error output: ${detail}`);
+      }
+
+      if (payload.type === 'result' && typeof payload.result === 'string' && payload.result.trim()) {
+        resultText = payload.result.trim();
       }
 
       if (payload.type !== 'assistant') {
@@ -69,6 +79,14 @@ export function extractClaudePrintResult(stdout: string): string {
   const text = assistantChunks.join('\n').trim();
   if (text) {
     return text;
+  }
+  if (resultText) {
+    return resultText;
+  }
+
+  // Fallback for unexpected plain-text output formats.
+  if (!trimmed.startsWith('{') && !trimmed.includes('\n')) {
+    return trimmed;
   }
 
   throw new Error(`Claude CLI returned no assistant message: ${trimmed.slice(0, 500)}`);
@@ -133,7 +151,7 @@ export class ClaudeProvider implements ProviderAdapter {
 
   private run(args: string[], timeoutOverride?: number): Promise<string> {
     return new Promise((resolve, reject) => {
-      execFile(
+      const proc = execFile(
         this.execPath,
         args,
         {
@@ -147,12 +165,16 @@ export class ClaudeProvider implements ProviderAdapter {
         },
         (err, stdout, stderr) => {
           if (err) {
+            if (stdout.trim()) {
+              return resolve(stdout.trim());
+            }
             const detail = stderr?.trim() ? `${err.message}: ${stderr.trim()}` : err.message;
             return reject(new Error(detail));
           }
           resolve(stdout.trim());
         },
       );
+      proc.stdin?.end();
     });
   }
 }

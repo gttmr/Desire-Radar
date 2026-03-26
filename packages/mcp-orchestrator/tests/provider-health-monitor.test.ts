@@ -45,7 +45,11 @@ describe('ProviderHealthMonitor', () => {
     await monitor.pollOnce();
 
     expect(monitor.snapshot()).toEqual([
-      expect.objectContaining({ provider: 'codex', available: true }),
+      expect.objectContaining({
+        provider: 'codex',
+        available: true,
+        repair_configured: false,
+      }),
     ]);
   });
 
@@ -70,7 +74,13 @@ describe('ProviderHealthMonitor', () => {
 
     expect(runRepairCommand).toHaveBeenCalledWith('claude', 'claude auth login');
     expect(monitor.snapshot()).toEqual([
-      expect.objectContaining({ provider: 'claude', available: true }),
+      expect.objectContaining({
+        provider: 'claude',
+        available: true,
+        repair_configured: true,
+        repair_command_preview: 'claude auth login',
+        last_repair_summary: 'claude: auth login completed',
+      }),
     ]);
   });
 
@@ -185,5 +195,27 @@ describe('ProviderHealthMonitor', () => {
     await Promise.all([monitor.pollOnce(), monitor.pollOnce(), monitor.pollOnce()]);
 
     expect(probeHealth).toHaveBeenCalledTimes(1);
+  });
+
+  it('advertises configured repair commands before the first successful probe', () => {
+    const registry = new ProviderRegistry();
+    registry.register(new ProbeProvider('codex', []));
+
+    const monitor = new ProviderHealthMonitor(registry, {
+      pollIntervalMs: 60_000,
+      repairCooldownMs: 60_000,
+      repairCommands: {
+        codex: 'printenv OPENAI_API_KEY | codex login --with-api-key',
+      },
+    });
+
+    expect(monitor.snapshot()).toEqual([
+      expect.objectContaining({
+        provider: 'codex',
+        available: false,
+        repair_configured: true,
+        repair_command_preview: 'printenv OPENAI_API_KEY | codex login --with-api-key',
+      }),
+    ]);
   });
 });

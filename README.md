@@ -83,6 +83,7 @@ cp .env.example .env
 - Docker Compose를 쓰려면 호스트에서 `codex`, `claude`, `gemini` 중 필요한 CLI 로그인이 이미 되어 있어야 한다.
 - `OPENAI_API_KEY`는 OpenAI provider를 추가로 켤 때만 필요하다.
 - provider 장애 알림은 discord-bot이 `/health`를 polling해서 보내고, optional repair command는 orchestrator가 인증/로그인 계열 실패에 한해 수행한다.
+- Discord provider alert에는 현재 에러 요약, check 시각, repair 설정 여부, 마지막 repair 결과가 같이 포함된다.
 
 CLI 상태 확인/복구 기준:
 - Codex: `codex login status`로 인증 상태를 확인한다. 비대화형 복구가 필요하면 `printenv OPENAI_API_KEY | codex login --with-api-key` 같은 wrapper command를 `PROVIDER_REPAIR_CODEX_COMMAND`에 넣는다.

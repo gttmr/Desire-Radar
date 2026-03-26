@@ -10,6 +10,10 @@ type AlertSink = (message: string) => Promise<void>;
 type ProviderState = {
   available: boolean;
   error?: string;
+  signature?: string;
+  unavailableSince?: string;
+  lastRepairAt?: string;
+  lastRepairSummary?: string;
 };
 
 export class ProviderHealthMonitor {
@@ -49,14 +53,14 @@ export class ProviderHealthMonitor {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message !== this.lastOrchestratorError) {
-        await this.emit(sink, `[provider-health] orchestrator unreachable: ${message}`);
+        await this.emit(sink, formatOrchestratorOutage(message));
         this.lastOrchestratorError = message;
       }
       return;
     }
 
     if (this.lastOrchestratorError) {
-      await this.emit(sink, '[provider-health] orchestrator recovered');
+      await this.emit(sink, formatOrchestratorRecovery(this.lastOrchestratorError));
       this.lastOrchestratorError = undefined;
     }
 
@@ -69,24 +73,36 @@ export class ProviderHealthMonitor {
   ): Promise<void> {
     for (const provider of health.providers) {
       const previous = this.states.get(provider.provider);
+      const signature = buildProviderSignature(provider);
 
       if (provider.available) {
         if (previous && !previous.available) {
-          await this.emit(sink, `[provider-health] ${provider.provider} recovered`);
+          await this.emit(sink, formatProviderRecovery(provider, previous));
         }
-        this.states.set(provider.provider, { available: true });
+        this.states.set(provider.provider, {
+          available: true,
+          signature,
+          lastRepairAt: provider.last_repair_at,
+          lastRepairSummary: provider.last_repair_summary,
+        });
         continue;
       }
 
       const currentError = provider.error ?? 'provider unavailable';
-      const changed = !previous || previous.available || previous.error !== currentError;
+      const changed = !previous || previous.available || previous.signature !== signature;
+      const unavailableSince =
+        previous && !previous.available ? previous.unavailableSince ?? provider.last_checked_at : provider.last_checked_at;
       if (changed) {
-        await this.emit(sink, `[provider-health] ${provider.provider} unavailable: ${currentError}`);
+        await this.emit(sink, formatProviderOutage(provider, currentError, unavailableSince));
       }
 
       this.states.set(provider.provider, {
         available: false,
         error: currentError,
+        signature,
+        unavailableSince,
+        lastRepairAt: provider.last_repair_at,
+        lastRepairSummary: provider.last_repair_summary,
       });
     }
   }
@@ -103,4 +119,89 @@ export class ProviderHealthMonitor {
   private async emit(sink: AlertSink, message: string): Promise<void> {
     await sink(message);
   }
+}
+
+function buildProviderSignature(provider: ProviderHealth): string {
+  return [
+    provider.available ? 'up' : 'down',
+    summarize(provider.error ?? 'provider unavailable', 240),
+    provider.last_repair_at ?? '',
+    summarize(provider.last_repair_summary ?? '', 240),
+  ].join('|');
+}
+
+function formatProviderOutage(
+  provider: ProviderHealth,
+  currentError: string,
+  unavailableSince: string,
+): string {
+  const lines = [`[provider-health] ${provider.provider} unavailable`];
+  lines.push(`error: ${summarize(currentError, 320)}`);
+  lines.push(`checked: ${provider.last_checked_at}`);
+  lines.push(`down since: ${unavailableSince}`);
+  lines.push(
+    provider.repair_configured
+      ? `repair: configured${provider.repair_command_preview ? ` (${provider.repair_command_preview})` : ''}`
+      : 'repair: not configured',
+  );
+  if (provider.last_repair_at) {
+    lines.push(`last repair: ${provider.last_repair_at}`);
+  }
+  if (provider.last_repair_summary) {
+    lines.push(`repair result: ${summarize(provider.last_repair_summary, 320)}`);
+  }
+  return lines.join('\n');
+}
+
+function formatProviderRecovery(provider: ProviderHealth, previous: ProviderState): string {
+  const lines = [`[provider-health] ${provider.provider} recovered`, `checked: ${provider.last_checked_at}`];
+  if (previous.unavailableSince) {
+    lines.push(`downtime: ${formatDuration(previous.unavailableSince, provider.last_checked_at)}`);
+  }
+  if (previous.lastRepairAt) {
+    lines.push(`last repair: ${previous.lastRepairAt}`);
+  }
+  if (previous.lastRepairSummary) {
+    lines.push(`repair result: ${summarize(previous.lastRepairSummary, 320)}`);
+  }
+  return lines.join('\n');
+}
+
+function formatOrchestratorOutage(message: string): string {
+  return `[provider-health] orchestrator unreachable\nerror: ${summarize(message, 320)}`;
+}
+
+function formatOrchestratorRecovery(previousError: string): string {
+  return [
+    '[provider-health] orchestrator recovered',
+    `previous error: ${summarize(previousError, 320)}`,
+  ].join('\n');
+}
+
+function summarize(text: string, maxLength: number): string {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxLength) {
+    return compact;
+  }
+  return `${compact.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function formatDuration(startIso: string, endIso: string): string {
+  const start = Date.parse(startIso);
+  const end = Date.parse(endIso);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return 'unknown';
+  }
+
+  const totalSeconds = Math.floor((end - start) / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
 }

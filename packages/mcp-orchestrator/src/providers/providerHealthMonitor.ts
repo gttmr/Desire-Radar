@@ -15,7 +15,7 @@ type ProviderHealthMonitorOptions = {
 };
 
 type ProviderHealthState = ProviderHealth & {
-  lastRepairAt?: number;
+  lastRepairAtMs?: number;
 };
 
 type RepairAttempt = {
@@ -58,6 +58,8 @@ export class ProviderHealthMonitor {
           available: false,
           last_checked_at: new Date(0).toISOString(),
           error: 'provider health has not been probed yet',
+          repair_configured: this.hasRepairCommand(provider),
+          repair_command_preview: this.getRepairCommandPreview(provider),
         }
       );
     });
@@ -84,12 +86,16 @@ export class ProviderHealthMonitor {
 
       let result = await this.probeProvider(adapter);
       const previous = this.states.get(provider);
-      let lastRepairAt = previous?.lastRepairAt;
+      let lastRepairAtMs = previous?.lastRepairAtMs;
+      let last_repair_at = previous?.last_repair_at;
+      let last_repair_summary = previous?.last_repair_summary;
 
       if (!result.available && this.shouldAttemptRepair(provider, result.error)) {
         const repairAttempt = await this.tryRepair(provider, previous);
         if (repairAttempt) {
-          lastRepairAt = repairAttempt.attemptedAt;
+          lastRepairAtMs = repairAttempt.attemptedAt;
+          last_repair_at = new Date(repairAttempt.attemptedAt).toISOString();
+          last_repair_summary = repairAttempt.summary;
           const afterRepair = await this.probeProvider(adapter);
           if (afterRepair.available) {
             result = afterRepair;
@@ -107,7 +113,11 @@ export class ProviderHealthMonitor {
         available: result.available,
         error: result.error,
         last_checked_at: this.now().toISOString(),
-        lastRepairAt,
+        repair_configured: this.hasRepairCommand(provider),
+        repair_command_preview: this.getRepairCommandPreview(provider),
+        last_repair_at,
+        last_repair_summary,
+        lastRepairAtMs,
       });
     }
   }
@@ -157,8 +167,8 @@ export class ProviderHealthMonitor {
 
     const attemptedAt = this.now().getTime();
     if (
-      previous?.lastRepairAt &&
-      attemptedAt - previous.lastRepairAt < this.options.repairCooldownMs
+      previous?.lastRepairAtMs &&
+      attemptedAt - previous.lastRepairAtMs < this.options.repairCooldownMs
     ) {
       return undefined;
     }
@@ -186,5 +196,17 @@ export class ProviderHealthMonitor {
 
   private now(): Date {
     return (this.options.now ?? (() => new Date()))();
+  }
+
+  private hasRepairCommand(provider: string): boolean {
+    return Boolean(this.options.repairCommands[provider]);
+  }
+
+  private getRepairCommandPreview(provider: string): string | undefined {
+    const command = this.options.repairCommands[provider];
+    if (!command) {
+      return undefined;
+    }
+    return command.replace(/\s+/g, ' ').trim().slice(0, 160);
   }
 }

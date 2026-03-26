@@ -27,7 +27,15 @@ function mockExecFile(
     callback: (error: Error | null, stdout: string, stderr: string) => void,
   ) => void,
 ): void {
-  execFileMock.mockImplementation(implementation);
+  execFileMock.mockImplementation((file, args, options, callback) => {
+    implementation(file, args, options, callback);
+    return {
+      stdin: {
+        end: vi.fn(),
+        write: vi.fn(),
+      },
+    };
+  });
 }
 
 describe('provider adapters', () => {
@@ -129,6 +137,17 @@ warn line
         ].join('\n'),
       ),
     ).toBe('OK');
+    expect(
+      extractClaudePrintResult(
+        '{"type":"result","subtype":"success","is_error":false,"result":"OK"}',
+      ),
+    ).toBe('OK');
+    expect(extractClaudePrintResult('OK')).toBe('OK');
+    expect(() =>
+      extractClaudePrintResult(
+        '{"type":"result","subtype":"success","is_error":true,"result":"rate limited"}',
+      ),
+    ).toThrow('Claude CLI returned error output: rate limited');
     expect(() =>
       extractClaudePrintResult(
         '{"type":"result","subtype":"success","is_error":false,"result":""}',
@@ -169,6 +188,60 @@ warn line
     });
 
     expect(result.text).toBe('OK');
+  });
+
+  it('closes claude stdin so headless runs do not hang waiting for piped input', async () => {
+    const end = vi.fn();
+    execFileMock.mockImplementation((_file, _args, _options, callback) => {
+      callback(
+        null,
+        [
+          '{"type":"assistant","message":{"content":[{"type":"text","text":"OK"}]}}',
+          '{"type":"result","subtype":"success","is_error":false,"result":""}',
+        ].join('\n'),
+        '',
+      );
+      return {
+        stdin: {
+          end,
+        },
+      };
+    });
+
+    const provider = new ClaudeProvider('claude', 30_000);
+    await provider.execute({
+      prompt: 'Reply with exactly OK',
+      phase: 'debate',
+      agentName: 'search_intent',
+      modelProfile: 'cheap',
+    });
+
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses claude stdout even when the CLI exits non-zero', async () => {
+    execFileMock.mockImplementation((_file, _args, _options, callback) => {
+      callback(
+        Object.assign(new Error('Command failed'), { code: 1 }),
+        '{"type":"result","subtype":"success","is_error":true,"result":"rate limited"}',
+        '',
+      );
+      return {
+        stdin: {
+          end: vi.fn(),
+        },
+      };
+    });
+
+    const provider = new ClaudeProvider('claude', 30_000);
+    const result = await provider.execute({
+      prompt: 'Reply with exactly OK',
+      phase: 'debate',
+      agentName: 'search_intent',
+      modelProfile: 'cheap',
+    });
+
+    expect(result.text).toContain('[claude-mock] Claude CLI returned error output: rate limited');
   });
 
   it('classifies gemini capacity errors distinctly from auth failures', () => {
