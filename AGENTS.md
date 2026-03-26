@@ -1,61 +1,66 @@
-# Agentic-World Repository Guide
+# Agentic-World Codex Guide
 
-## Mission
-This repository exists to detect human desire early, convert that signal into structured evidence, and determine which products, companies, or public equities may benefit before the broader market fully prices it in.
+## Purpose
+This repository builds an evidence pipeline for early desire detection and investment research. The main product path is `collector -> mcp-orchestrator -> discord-bot`. Keep work aligned with that path unless a task explicitly targets compatibility code.
 
-The end goal is not generic trend reporting. The end goal is to build an environment where we can identify monetizable demand shifts early enough to make better investment decisions, especially buying listed stocks slightly ahead of consensus.
+## Read This First
+- [README.md](README.md): runtime setup, operator workflow, API surface.
+- [ARCHITECTURE.md](ARCHITECTURE.md): service boundaries, abstractions, extension rules.
+- `packages/mcp-orchestrator/src/agents/*.md`: analysis-agent prompts used by the orchestrator.
 
-## What The System Does
-- `packages/collector/` gathers raw demand evidence from multiple sources and turns it into normalized evidence plus candidate entities.
-- `packages/mcp-orchestrator/` runs multi-agent analysis using Markdown agent prompts under `packages/mcp-orchestrator/src/agents/`.
-- `packages/discord-bot/` exposes reports, commands, and operational controls.
-- `packages/predictor-legacy/` remains for compatibility, but the strategic direction is the collector plus orchestrator path.
+Do not duplicate architecture or product rationale in this file. Keep this file focused on how Codex should work in the repo.
 
-## Core Product Principle
-Every meaningful output should move through these layers in order:
-1. Observed behavior: what people are actually doing.
-2. Inferred desire: what underlying want or pressure explains that behavior.
-3. Monetization path: who captures the value if this desire keeps growing.
-4. Investable expression: which company, ticker, asset, or adjacent beneficiary may move.
-5. Timing and risk: why the signal matters now, and what could make it false.
+## Working Rules
+- Preserve raw evidence. Do not let derived analysis overwrite source facts.
+- Respect service boundaries.
+  - `collector`: ingestion, provenance, source registry, submissions, low-cost analysis.
+  - `mcp-orchestrator`: debate, research loop, verdict, reports.
+  - `discord-bot`: human/control surface and operational alerts.
+- When schemas or APIs change, update producers and consumers in the same change.
+- Prefer small, testable changes over broad rewrites.
+- If a CLI provider changes behavior, fix the adapter layer first. Do not spread provider-specific parsing or flags across the codebase.
 
-Do not collapse these layers into vague storytelling. Keep them explicit.
+## CLI And Provider Discipline
+- Treat provider CLIs as unstable integration points.
+- Prefer structured output modes such as JSON or JSONL when available.
+- Parse outputs permissively and classify failures by category, not exact message text.
+- Do not hardcode logic to one rate-limit string, auth prompt, or warning format.
+- Keep repair commands configurable. Do not embed brittle login automation directly in business logic.
+- When changing provider adapters, add adapter-level tests and update smoke tooling if needed.
 
-## Evidence Standard
-- Prefer first-order signals over commentary: search growth, ranking changes, sales momentum, repeated mentions, waitlists, resale premium, usage behavior, and human observations tied to concrete actions.
-- Separate observed facts from inferred conclusions.
-- State confidence and unresolved questions clearly.
-- Avoid unsupported claims about revenue impact, market size, or stock implications.
-- A signal is more valuable when it is early, repeated across sources, and tied to a credible monetization path.
+## Common Commands
+- Install JS workspaces: `npm install`
+- Run Discord bot: `npm run dev:bot`
+- Run orchestrator: `npm run dev:orchestrator`
+- TypeScript build: `npm run build`
+- Collector tests:
+  - `cd packages/collector && PYTHONPATH=. python3 -m pytest -s`
+  - Prefer targeted test files when changing one subsystem.
+- Orchestrator build:
+  - `cd packages/mcp-orchestrator && npm run build`
+- Provider smoke:
+  - `npm --prefix packages/mcp-orchestrator run smoke:providers`
 
-## Investment Framing
-- The repository should increasingly answer: "What can make money from this desire signal?"
-- Prefer outputs that connect desire signals to public-market beneficiaries when possible.
-- If the direct winner is private, identify second-order public beneficiaries such as suppliers, platforms, distributors, infrastructure providers, or competing listed firms.
-- Favor slightly-early, evidence-backed positioning over dramatic predictions.
+## Documentation Expectations
+- Update [ARCHITECTURE.md](ARCHITECTURE.md) when changing service boundaries, abstractions, or extension points.
+- Update [README.md](README.md) when changing runtime setup, operator workflow, or public API expectations.
+- Keep agent prompt intent documented in the prompt file itself when adding a new orchestrator agent.
 
-## Agent Authoring
-- Strategy and debate agents are Markdown files in `packages/mcp-orchestrator/src/agents/`.
-- New agent roles should usually be added as focused `.md` files with one clear analytical lens.
-- Agent prompts should be specialized, evidence-oriented, and complementary rather than redundant.
-- When adding an agent, define what unique question it answers that existing agents do not.
-- Keep synthesis and report agents disciplined: they should aggregate evidence, not invent it.
+## Testing Expectations
+- Run the narrowest tests that prove the change.
+- For provider adapter changes, prefer:
+  - adapter unit tests
+  - health/route tests if the health payload changes
+  - real smoke only when the task depends on live CLI behavior
+- If a tool in this environment is known-broken, say so clearly and use the strongest available fallback evidence.
 
-## Codex Subagent Policy
-- Use Codex subagents aggressively for parallel exploration, verification, and bounded implementation work.
-- Delegate independent codebase questions, isolated refactors, and verification tasks whenever parallelism shortens the critical path.
-- Keep ownership clear when multiple subagents edit code.
-- Subagents should accelerate rigor, not create duplicate analysis.
+## Subagent Policy
+- Use Codex subagents aggressively for parallel exploration, bounded implementation, and verification when it shortens the critical path.
+- Keep ownership clear when multiple agents edit in parallel.
+- Use subagents to answer concrete questions or own isolated write scopes, not to duplicate the same investigation.
 
-## Engineering Priorities
-- Preserve raw evidence integrity. Derived analysis must not erase source facts.
-- Keep collection, analysis, and reporting loosely coupled.
-- Optimize for traceability: given a thesis, we should be able to trace it back to source evidence and the agent path that produced it.
-- Prefer small, testable steps over large speculative rewrites.
-- When changing schemas or APIs, update both producers and consumers in the same change.
-
-## Near-Term Direction
-- Expand desire-to-monetization mapping.
-- Improve agent specialization through new Markdown prompt files.
-- Strengthen candidate scoring, timing logic, and benchmarked low-cost analysis paths.
-- Continuously increase the system's usefulness for early investment research, not just descriptive reporting.
+## Git Hygiene
+- Keep commits scoped to one meaningful change.
+- Push progress when a work unit is stable.
+- Avoid mixing user-owned local edits into your commits.
+- If you need a branch, use the `codex/` prefix unless the user explicitly asks to work on another branch.

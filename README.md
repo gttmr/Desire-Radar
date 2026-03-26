@@ -4,6 +4,12 @@
 
 현재 기본 런타임은 `discord-bot`, `collector`, `mcp-orchestrator` 3개 서비스다. `packages/predictor-legacy/`는 리포지토리에 남아 있지만 기본 Docker Compose 런타임에는 포함하지 않는다.
 
+## 문서 가이드
+
+- [AGENTS.md](AGENTS.md): Codex CLI 작업 규칙과 저장소 작업 방식
+- [ARCHITECTURE.md](ARCHITECTURE.md): 서비스 경계, 핵심 추상화, CLI/provider 변동성 대응 원칙
+- `packages/mcp-orchestrator/src/agents/*.md`: 오케스트레이터 분석 에이전트 프롬프트
+
 ## 아키텍처
 
 | 서비스 | 경로 | 언어 | 역할 |
