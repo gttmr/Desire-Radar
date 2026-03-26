@@ -6,22 +6,21 @@ import type {
   ProviderHealthProbe,
   ProviderResult,
 } from './base.js';
+import { buildDegradedProviderResult, buildFailedHealthProbe } from './errors.js';
 
 export function parseClaudeAuthStatus(stdout: string): ProviderHealthProbe {
   try {
     const payload = JSON.parse(stdout) as { loggedIn?: boolean; authMethod?: string };
     if (payload.loggedIn) {
-      return { available: true };
+      return { available: true, status: 'healthy', recoverable: false };
     }
-    return {
-      available: false,
-      error: `Claude auth status reported loggedIn=false${payload.authMethod ? ` (${payload.authMethod})` : ''}`,
-    };
+    return buildFailedHealthProbe(
+      `Claude auth status reported loggedIn=false${payload.authMethod ? ` (${payload.authMethod})` : ''}`,
+    );
   } catch {
-    return {
-      available: false,
-      error: `Claude auth status returned non-JSON output: ${stdout.trim()}`,
-    };
+    return buildFailedHealthProbe(
+      `Claude auth status returned non-JSON output: ${stdout.trim()}`,
+    );
   }
 }
 
@@ -114,24 +113,16 @@ export class ClaudeProvider implements ProviderAdapter {
         args.push('--resume', request.sessionId);
       }
       const text = extractClaudePrintResult(await this.run(args, request.timeoutMs));
-      return { text, sessionId: sid, durationMs: Date.now() - start, model };
+      return { text, sessionId: sid, durationMs: Date.now() - start, model, status: 'completed' };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[claude] execution failed: ${message}`);
-      return {
-        text: JSON.stringify({
-          summary: `[claude-mock] ${message}`,
-          confidence: 0.5,
-          claims: [],
-          evidence_used: [],
-          open_questions: ['Claude CLI not available — mock response'],
-          messages_for_other_agents: [],
-          recommended_next_step: 'retry_with_claude',
-        }),
+      return buildDegradedProviderResult({
         sessionId: sid,
         durationMs: Date.now() - start,
         model,
-      };
+        message,
+      });
     }
   }
 
@@ -145,7 +136,7 @@ export class ClaudeProvider implements ProviderAdapter {
       return parseClaudeAuthStatus(output);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { available: false, error: message };
+      return buildFailedHealthProbe(message);
     }
   }
 

@@ -2,7 +2,17 @@
 // MCP orchestrator types
 // ---------------------------------------------------------------
 
-export type ProviderExecutionStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type ProviderExecutionStatus = 'queued' | 'running' | 'completed' | 'degraded' | 'failed';
+export type ProviderFailureKind =
+  | 'auth_failed'
+  | 'binary_missing'
+  | 'capacity_limited'
+  | 'rate_limited'
+  | 'timeout'
+  | 'parse_failed'
+  | 'unknown';
+export type ProviderExecutionState = 'completed' | 'degraded';
+export type ProviderHealthStatus = 'healthy' | 'unprobed' | ProviderFailureKind;
 export type HighLevelRunStatus =
   | 'pending'
   | 'running'
@@ -30,6 +40,10 @@ export type AgentTurn = {
   agent_name: string;
   provider: string;
   session_id: string;
+  provider_execution_status?: ProviderExecutionState;
+  provider_degraded_kind?: ProviderFailureKind;
+  provider_error?: string;
+  provider_recoverable?: boolean;
   turn_index: number;
   prompt_summary: string;
   response: AgentResponse;
@@ -60,6 +74,29 @@ export type AgentMessage = {
   content: string;
 };
 
+export type BeneficiaryCategory =
+  | 'direct_winner'
+  | 'public_beneficiary'
+  | 'second_order_beneficiary';
+
+export type BeneficiaryCandidate = {
+  name: string;
+  category: BeneficiaryCategory;
+  rationale: string;
+  supporting_evidence: string[];
+  confidence: number;
+};
+
+export type BeneficiaryMapping = {
+  summary: string;
+  direct_winners: BeneficiaryCandidate[];
+  public_beneficiaries: BeneficiaryCandidate[];
+  second_order_beneficiaries: BeneficiaryCandidate[];
+  missing_monetization_link?: string | null;
+  invalidation_point?: string | null;
+  source_agent?: string | null;
+};
+
 /** Provider execution derived from an agent/provider turn */
 export type ProviderExecution = {
   execution_id: string;
@@ -76,6 +113,8 @@ export type ProviderExecution = {
   created_at?: string;
   updated_at?: string;
   error?: string | null;
+  degraded_kind?: ProviderFailureKind | null;
+  recoverable?: boolean | null;
   turn?: AgentTurn;
 };
 
@@ -97,6 +136,10 @@ export type ResearchFinding = {
   provider?: string;
   summary: string;
   confidence: number;
+  provider_execution_status?: ProviderExecutionState;
+  provider_degraded_kind?: ProviderFailureKind;
+  provider_error?: string;
+  provider_recoverable?: boolean;
   claims: AgentClaim[];
   citations: string[];
   evidence_refs: string[];
@@ -116,9 +159,24 @@ export type ResearchRequest = {
   runId: string;
   entity: string;
   requestedByAgent: string;
+  intent:
+    | 'demand'
+    | 'ranking'
+    | 'pricing'
+    | 'supply'
+    | 'monetization'
+    | 'beneficiary'
+    | 'validation';
   requestKind: 'run_source' | 'submit_agent_evidence' | 'request_human_note';
   targetSourceId?: string;
-  requestedInputKind?: 'study_result' | 'data_source';
+  requestedInputKind?:
+    | 'study_result'
+    | 'data_source'
+    | 'channel_check'
+    | 'beneficiary_mapping'
+    | 'validation_note';
+  requiredFields?: string[];
+  preferredCapabilities?: string[];
   question: string;
   whyNow: string;
   priority: 'low' | 'normal' | 'high';
@@ -147,6 +205,7 @@ export type DailyReport = {
   final_verdicts: ReportVerdict[];
   linked_themes: string[];
   linked_entities: string[];
+  linked_beneficiaries?: string[];
   full_markdown: string;
   created_at: string;
 };
@@ -163,6 +222,7 @@ export type RunVerdict = {
   summary: string;
   confidence?: number | null;
   report_id?: string | null;
+  beneficiary_mapping?: BeneficiaryMapping | null;
   verdicts?: ReportVerdict[];
   sections?: Array<{ title: string; content: string }>;
   risks?: string[];
@@ -176,11 +236,45 @@ export type VerdictResult = {
   summary: string;
   confidence: number;
   recommendation: string;
+  beneficiary_mapping: BeneficiaryMapping | null;
   supportingAgents: string[];
   openQuestions: string[];
   primaryTurn?: AgentTurn;
   crossCheckTurn?: AgentTurn;
+  beneficiaryMappingTurn?: AgentTurn;
   createdAt: string;
+};
+
+export type RunEvaluationRecord = {
+  run_id: string;
+  entity: string;
+  fixture_path: string;
+  recorded_at: string;
+  evidence_refs: string[];
+  source_refs: string[];
+  research_requests: Array<{
+    requested_by: string;
+    request_kind: string;
+    question: string;
+    status: string;
+    requested_input_kind?: string;
+  }>;
+  provider_failures: Array<{
+    agent_name: string;
+    provider: string;
+    summary: string;
+  }>;
+  beneficiary_mapping?: BeneficiaryMapping | null;
+  final_verdict?: {
+    summary: string;
+    confidence: number;
+    recommendation: string;
+    open_questions: string[];
+  };
+  report?: {
+    report_id: string;
+    summary: string;
+  };
 };
 
 export type HighLevelRun = {
@@ -214,8 +308,10 @@ export type ProviderSession = {
 export type ProviderHealth = {
   provider: string;
   available: boolean;
+  status?: ProviderHealthStatus;
   last_checked_at: string;
   error?: string;
+  recoverable?: boolean;
   repair_configured?: boolean;
   repair_command_preview?: string;
   last_repair_at?: string;

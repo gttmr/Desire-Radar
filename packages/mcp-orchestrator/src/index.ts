@@ -118,7 +118,7 @@ async function main(): Promise<void> {
     config.policies.debate,
     runStore,
   );
-  const reportService = new ReportService(agentExecutor, contextStore);
+  const reportService = new ReportService(agentExecutor, contextStore, runStore);
 
   const orchestrator = new RunOrchestrator(agentExecutor, runStore, config.providers.defaultProviders, {
     sessionStore,

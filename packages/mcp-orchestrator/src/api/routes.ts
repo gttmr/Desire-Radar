@@ -150,22 +150,30 @@ export function createRoutes(
           registry.list().map(async (name) => {
             const adapter = registry.get(name);
             let available = false;
+            let probeStatus: string | undefined;
             let error: string | undefined;
+            let recoverable: boolean | undefined;
             try {
               if (adapter?.probeHealth) {
                 const result = await adapter.probeHealth();
                 available = result.available;
+                probeStatus = result.status;
                 error = result.error;
+                recoverable = result.recoverable;
               } else {
                 available = adapter ? await adapter.health() : false;
+                probeStatus = available ? 'healthy' : 'unknown';
               }
             } catch (err: unknown) {
+              probeStatus = 'unknown';
               error = err instanceof Error ? err.message : 'Unknown health probe error';
             }
             return {
               provider: name,
               available,
+              status: probeStatus,
               last_checked_at: new Date().toISOString(),
+              ...(typeof recoverable === 'boolean' ? { recoverable } : {}),
               ...(error ? { error } : {}),
             };
           }),

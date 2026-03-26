@@ -1,4 +1,10 @@
-import type { AgentTurn, DailyReport, EvidenceBundle } from '@agentic/shared-types';
+import type {
+  AgentTurn,
+  BeneficiaryMapping,
+  DailyReport,
+  EvidenceBundle,
+  RunEvaluationRecord,
+} from '@agentic/shared-types';
 import type { CollectorCandidate } from '../collector/client.js';
 import type { ResearchResult } from '../collector/research-service.js';
 
@@ -21,16 +27,19 @@ export type VerdictResult = {
   summary: string;
   confidence: number;
   recommendation: string;
+  beneficiary_mapping: BeneficiaryMapping | null;
   supportingAgents: string[];
   openQuestions: string[];
   primaryTurn?: AgentTurn;
   crossCheckTurn?: AgentTurn;
+  beneficiaryMappingTurn?: AgentTurn;
   createdAt: string;
 };
 
 export type ReportPhaseResult = {
   report: DailyReport;
   sections: Array<{ title: string; content: string }>;
+  evaluation: RunEvaluationRecord;
 };
 
 export type ResearchLoopResult = {

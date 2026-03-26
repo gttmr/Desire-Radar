@@ -104,6 +104,24 @@ describe('PromptComposer', () => {
     expect(prompt).toContain('2. Are there regional variations?');
   });
 
+  it('should include analytical inputs during verdict composition', async () => {
+    const prompt = await composer.compose({
+      agentName: 'investment_verdict',
+      provider: 'codex',
+      phase: 'verdict',
+      otherAgentMessages: [
+        {
+          from: 'beneficiary_mapping',
+          content: 'direct_winners: Cursor\npublic_beneficiaries: Microsoft',
+        },
+      ],
+    });
+
+    expect(prompt).toContain('Analytical Inputs');
+    expect(prompt).toContain('beneficiary_mapping');
+    expect(prompt).toContain('public_beneficiaries: Microsoft');
+  });
+
   it('should include other agent messages', async () => {
     const prompt = await composer.compose({
       agentName: 'search_intent',

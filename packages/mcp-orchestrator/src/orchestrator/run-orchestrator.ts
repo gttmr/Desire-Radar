@@ -20,6 +20,7 @@ import type { SessionStore } from '../sessions/session-store.js';
 import type { CandidateService } from '../collector/candidate-service.js';
 import type { CollectorCandidate } from '../collector/client.js';
 import type { DebateService } from '../pipeline/debate.js';
+import { buildRunEvaluationRecord } from '../pipeline/evaluation.js';
 import type { ReportService } from '../pipeline/report.js';
 import type { ResearchLoopService } from '../pipeline/research-loop.js';
 import type { TriageService } from '../pipeline/triage.js';
@@ -334,6 +335,10 @@ export class RunOrchestrator {
       provider: turn.provider,
       summary: turn.response.summary,
       confidence: turn.response.confidence,
+      provider_execution_status: turn.provider_execution_status,
+      provider_degraded_kind: turn.provider_degraded_kind,
+      provider_error: turn.provider_error,
+      provider_recoverable: turn.provider_recoverable,
       claims: turn.response.claims,
       citations: turn.citations,
       evidence_refs: turn.evidence_refs,
@@ -365,6 +370,7 @@ export class RunOrchestrator {
         run_id: runId,
         summary: verdict.summary,
         confidence: verdict.confidence,
+        beneficiary_mapping: verdict.beneficiary_mapping,
         verdicts: [
           {
             entity: verdict.entity,
@@ -386,13 +392,16 @@ export class RunOrchestrator {
       agent_name: turn.agent_name,
       provider: turn.provider,
       session_id: turn.session_id,
-      status: 'completed' as const,
+      status: turn.provider_execution_status ?? 'completed',
       turn_index: turn.turn_index,
       prompt_summary: turn.prompt_summary,
       output_summary: turn.response.summary,
       completed_at: turn.created_at,
       created_at: turn.created_at,
       updated_at: turn.created_at,
+      error: turn.provider_error,
+      degraded_kind: turn.provider_degraded_kind,
+      recoverable: turn.provider_recoverable,
       turn,
     }));
     return { run_id: runId, executions, count: executions.length };
@@ -459,7 +468,18 @@ export class RunOrchestrator {
       });
     }
 
-    return { report, sections };
+    return {
+      report,
+      sections,
+      evaluation: buildRunEvaluationRecord({
+        runId,
+        bundle: this.contextStore.getBundle(runId),
+        debateTurns: turns,
+        researchResults: this.contextStore.getResearchResults(runId),
+        verdict: this.contextStore.getVerdict(runId),
+        report,
+      }),
+    };
   }
 
   private buildAgentHighlights(runId: string): Record<string, string> {

@@ -60,7 +60,9 @@ describe('/health route', () => {
     registry.register(
       new StaticHealthProvider('claude', {
         available: false,
+        status: 'auth_failed',
         error: 'Claude auth status reported loggedIn=false (claude.ai)',
+        recoverable: true,
       }),
     );
 
@@ -76,7 +78,13 @@ describe('/health route', () => {
 
     const response = await fetch(`http://127.0.0.1:${address.port}/health`);
     const payload = (await response.json()) as {
-      providers: Array<{ provider: string; available: boolean; error?: string }>;
+      providers: Array<{
+        provider: string;
+        available: boolean;
+        status?: string;
+        recoverable?: boolean;
+        error?: string;
+      }>;
     };
 
     expect(payload.providers).toEqual(
@@ -85,6 +93,8 @@ describe('/health route', () => {
         expect.objectContaining({
           provider: 'claude',
           available: false,
+          status: 'auth_failed',
+          recoverable: true,
           error: 'Claude auth status reported loggedIn=false (claude.ai)',
         }),
       ]),

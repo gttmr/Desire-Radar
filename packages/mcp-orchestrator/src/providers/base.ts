@@ -1,6 +1,16 @@
 export type ModelProfile = 'cheap' | 'balanced' | 'premium';
 export type ExecutionPhase = 'triage' | 'debate' | 'verdict' | 'report';
 export type ResponseFormat = 'json' | 'text';
+export type ProviderFailureKind =
+  | 'auth_failed'
+  | 'binary_missing'
+  | 'capacity_limited'
+  | 'rate_limited'
+  | 'timeout'
+  | 'parse_failed'
+  | 'unknown';
+export type ProviderExecutionState = 'completed' | 'degraded';
+export type ProviderHealthStatus = 'healthy' | 'unprobed' | ProviderFailureKind;
 
 export type ProviderExecutionRequest = {
   prompt: string;
@@ -16,7 +26,9 @@ export type ProviderExecutionRequest = {
 
 export type ProviderHealthProbe = {
   available: boolean;
+  status?: ProviderHealthStatus;
   error?: string;
+  recoverable?: boolean;
 };
 
 export interface ProviderAdapter {
@@ -31,4 +43,8 @@ export type ProviderResult = {
   sessionId: string;
   durationMs: number;
   model?: string;
+  status: ProviderExecutionState;
+  degraded_kind?: ProviderFailureKind;
+  degraded_message?: string;
+  recoverable?: boolean;
 };

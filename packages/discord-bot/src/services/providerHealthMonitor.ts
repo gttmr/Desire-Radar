@@ -9,6 +9,8 @@ type AlertSink = (message: string) => Promise<void>;
 
 type ProviderState = {
   available: boolean;
+  status?: string;
+  recoverable?: boolean;
   error?: string;
   signature?: string;
   unavailableSince?: string;
@@ -81,6 +83,8 @@ export class ProviderHealthMonitor {
         }
         this.states.set(provider.provider, {
           available: true,
+          status: provider.status,
+          recoverable: provider.recoverable,
           signature,
           lastRepairAt: provider.last_repair_at,
           lastRepairSummary: provider.last_repair_summary,
@@ -98,6 +102,8 @@ export class ProviderHealthMonitor {
 
       this.states.set(provider.provider, {
         available: false,
+        status: provider.status,
+        recoverable: provider.recoverable,
         error: currentError,
         signature,
         unavailableSince,
@@ -124,6 +130,8 @@ export class ProviderHealthMonitor {
 function buildProviderSignature(provider: ProviderHealth): string {
   return [
     provider.available ? 'up' : 'down',
+    provider.status ?? 'unknown',
+    provider.recoverable ? 'recoverable' : 'terminal',
     summarize(provider.error ?? 'provider unavailable', 240),
     provider.last_repair_at ?? '',
     summarize(provider.last_repair_summary ?? '', 240),
@@ -136,9 +144,15 @@ function formatProviderOutage(
   unavailableSince: string,
 ): string {
   const lines = [`[provider-health] ${provider.provider} unavailable`];
+  if (provider.status) {
+    lines.push(`status: ${provider.status}`);
+  }
   lines.push(`error: ${summarize(currentError, 320)}`);
   lines.push(`checked: ${provider.last_checked_at}`);
   lines.push(`down since: ${unavailableSince}`);
+  if (typeof provider.recoverable === 'boolean') {
+    lines.push(`recoverable: ${provider.recoverable}`);
+  }
   lines.push(
     provider.repair_configured
       ? `repair: configured${provider.repair_command_preview ? ` (${provider.repair_command_preview})` : ''}`
@@ -155,6 +169,9 @@ function formatProviderOutage(
 
 function formatProviderRecovery(provider: ProviderHealth, previous: ProviderState): string {
   const lines = [`[provider-health] ${provider.provider} recovered`, `checked: ${provider.last_checked_at}`];
+  if (provider.status) {
+    lines.push(`status: ${provider.status}`);
+  }
   if (previous.unavailableSince) {
     lines.push(`downtime: ${formatDuration(previous.unavailableSince, provider.last_checked_at)}`);
   }

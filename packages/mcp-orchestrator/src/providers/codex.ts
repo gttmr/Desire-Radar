@@ -6,6 +6,7 @@ import type {
   ProviderHealthProbe,
   ProviderResult,
 } from './base.js';
+import { buildDegradedProviderResult, buildFailedHealthProbe } from './errors.js';
 
 type CodexUsage = {
   inputTokens?: number;
@@ -128,24 +129,17 @@ export class CodexProvider implements ProviderAdapter {
         sessionId: parsed.threadId ?? sid,
         durationMs: Date.now() - start,
         model,
+        status: 'completed',
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[codex] execution failed: ${message}`);
-      return {
-        text: JSON.stringify({
-          summary: `[codex-mock] ${message}`,
-          confidence: 0.5,
-          claims: [],
-          evidence_used: [],
-          open_questions: ['Codex CLI not available — mock response'],
-          messages_for_other_agents: [],
-          recommended_next_step: 'retry_with_codex',
-        }),
+      return buildDegradedProviderResult({
         sessionId: sid,
         durationMs: Date.now() - start,
         model,
-      };
+        message,
+      });
     }
   }
 
@@ -157,15 +151,14 @@ export class CodexProvider implements ProviderAdapter {
     try {
       const output = await this.runCombined(['login', 'status'], undefined, 10_000);
       if (/logged in/i.test(output)) {
-        return { available: true };
+        return { available: true, status: 'healthy', recoverable: false };
       }
-      return {
-        available: false,
-        error: `Codex login status did not confirm authentication: ${output.trim()}`,
-      };
+      return buildFailedHealthProbe(
+        `Codex login status did not confirm authentication: ${output.trim()}`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { available: false, error: message };
+      return buildFailedHealthProbe(message);
     }
   }
 

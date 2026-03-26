@@ -18,6 +18,7 @@ The response must be valid JSON with these fields:
 
 ## Constraints
 - Structure the report with: Executive Summary, Key Signals, Theme Analysis, Risk Factors, Action Items.
+- Include a beneficiary mapping section that distinguishes direct winners, public beneficiaries, and second-order beneficiaries.
 - Keep the executive summary under 200 words.
 - Each key signal should have a confidence indicator (high/medium/low).
 - Include a "data freshness" note indicating the age of the oldest evidence used.

@@ -5,6 +5,7 @@ import type {
   ProviderHealthProbe,
   ProviderResult,
 } from './base.js';
+import { buildDegradedProviderResult, buildFailedHealthProbe } from './errors.js';
 
 export class OpenAIProvider implements ProviderAdapter {
   readonly name = 'openai';
@@ -62,24 +63,16 @@ export class OpenAIProvider implements ProviderAdapter {
       };
       const text = data.choices[0]?.message?.content ?? '{}';
 
-      return { text, sessionId: sid, durationMs: Date.now() - start, model };
+      return { text, sessionId: sid, durationMs: Date.now() - start, model, status: 'completed' };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[openai] execution failed: ${message}`);
-      return {
-        text: JSON.stringify({
-          summary: `[openai-error] ${message}`,
-          confidence: 0,
-          claims: [],
-          evidence_used: [],
-          open_questions: ['OpenAI API call failed'],
-          messages_for_other_agents: [],
-          recommended_next_step: 'retry',
-        }),
+      return buildDegradedProviderResult({
         sessionId: sid,
         durationMs: Date.now() - start,
         model,
-      };
+        message,
+      });
     } finally {
       clearTimeout(timer);
     }
@@ -91,7 +84,7 @@ export class OpenAIProvider implements ProviderAdapter {
 
   async probeHealth(): Promise<ProviderHealthProbe> {
     if (!this.apiKey) {
-      return { available: false, error: 'OPENAI_API_KEY is not configured' };
+      return buildFailedHealthProbe('OPENAI_API_KEY is not configured');
     }
     try {
       const controller = new AbortController();
@@ -102,15 +95,14 @@ export class OpenAIProvider implements ProviderAdapter {
       });
       clearTimeout(timer);
       if (response.ok) {
-        return { available: true };
+        return { available: true, status: 'healthy', recoverable: false };
       }
-      return {
-        available: false,
-        error: `OpenAI API health check failed with status ${response.status}`,
-      };
+      return buildFailedHealthProbe(
+        `OpenAI API health check failed with status ${response.status}`,
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { available: false, error: message };
+      return buildFailedHealthProbe(message);
     }
   }
 }

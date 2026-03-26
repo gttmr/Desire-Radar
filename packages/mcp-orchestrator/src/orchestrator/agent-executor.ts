@@ -35,6 +35,32 @@ const DEFAULT_RESPONSE: AgentResponse = {
   recommended_next_step: 'retry',
 };
 
+function buildDegradedResponse(
+  provider: string,
+  errorKind: string | undefined,
+  errorMessage: string | undefined,
+): AgentResponse {
+  const label = errorKind ? `${provider}:${errorKind}` : provider;
+  const summary = `[provider-degraded] ${label}${errorMessage ? ` ${errorMessage}` : ''}`.trim();
+  const nextStep =
+    errorKind === 'auth_failed' || errorKind === 'binary_missing'
+      ? 'repair_provider'
+      : 'retry_provider';
+  return {
+    summary,
+    confidence: 0,
+    claims: [],
+    evidence_used: [],
+    open_questions: [
+      errorMessage
+        ? `${provider} execution degraded: ${errorMessage}`
+        : `${provider} execution degraded`,
+    ],
+    messages_for_other_agents: [],
+    recommended_next_step: nextStep,
+  };
+}
+
 function tryParseResponse(text: string): AgentResponse {
   try {
     // Try to extract JSON from the response (may be wrapped in markdown code fences)
@@ -129,7 +155,14 @@ export class AgentExecutor {
       });
 
       // 4. Parse response
-      const response = tryParseResponse(result.text);
+      const response =
+        result.status === 'degraded'
+          ? buildDegradedResponse(
+              providerName,
+              result.degraded_kind,
+              result.degraded_message,
+            )
+          : tryParseResponse(result.text);
 
       // 5. Create turn
       const turn: AgentTurn = {
@@ -137,6 +170,10 @@ export class AgentExecutor {
         agent_name: params.agentName,
         provider: providerName,
         session_id: result.sessionId,
+        provider_execution_status: result.status,
+        provider_degraded_kind: result.degraded_kind,
+        provider_error: result.degraded_message,
+        provider_recoverable: result.recoverable,
         turn_index: existingTurns.filter(
           (t) => t.agent_name === params.agentName && t.provider === providerName,
         ).length,

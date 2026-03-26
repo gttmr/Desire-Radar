@@ -7,6 +7,7 @@ import type {
   ProviderHealthProbe,
   ProviderResult,
 } from './base.js';
+import { buildDegradedProviderResult, buildFailedHealthProbe } from './errors.js';
 
 export function classifyGeminiError(message: string): string {
   if (/MODEL_CAPACITY_EXHAUSTED|RESOURCE_EXHAUSTED|status 429|Too Many Requests/i.test(message)) {
@@ -75,24 +76,16 @@ export class GeminiProvider implements ProviderAdapter {
         args.push('--model', model);
       }
       const text = extractGeminiPromptResult(await this.run(args, request.timeoutMs));
-      return { text, sessionId: sid, durationMs: Date.now() - start, model };
+      return { text, sessionId: sid, durationMs: Date.now() - start, model, status: 'completed' };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[gemini] execution failed: ${message}`);
-      return {
-        text: JSON.stringify({
-          summary: `[gemini-mock] ${message}`,
-          confidence: 0.5,
-          claims: [],
-          evidence_used: [],
-          open_questions: ['Gemini CLI not available — mock response'],
-          messages_for_other_agents: [],
-          recommended_next_step: 'retry_with_gemini',
-        }),
+      return buildDegradedProviderResult({
         sessionId: sid,
         durationMs: Date.now() - start,
         model,
-      };
+        message: classifyGeminiError(message),
+      });
     }
   }
 
@@ -103,10 +96,10 @@ export class GeminiProvider implements ProviderAdapter {
   async probeHealth(): Promise<ProviderHealthProbe> {
     try {
       await this.run(['-p', 'Reply with exactly OK'], 20_000);
-      return { available: true };
+      return { available: true, status: 'healthy', recoverable: false };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { available: false, error: classifyGeminiError(message) };
+      return buildFailedHealthProbe(classifyGeminiError(message));
     }
   }
 

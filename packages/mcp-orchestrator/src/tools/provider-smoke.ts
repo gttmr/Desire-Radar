@@ -8,15 +8,19 @@ import { ProviderRegistry } from '../providers/registry.js';
 type ProviderSmokeResult = {
   provider: string;
   healthAvailable: boolean;
+  healthStatus?: string;
   healthError?: string;
+  healthRecoverable?: boolean;
   executeOk: boolean;
-  usedMockFallback: boolean;
+  executeStatus: 'completed' | 'degraded';
+  degradedKind?: string;
+  degradedMessage?: string;
   durationMs: number;
   preview: string;
 };
 
-export function isMockFallback(text: string, provider: string): boolean {
-  return text.includes(`[${provider}-mock]`);
+export function isDegradedResult(status: 'completed' | 'degraded'): boolean {
+  return status === 'degraded';
 }
 
 function previewText(text: string): string {
@@ -55,9 +59,11 @@ async function smokeProvider(provider: string, registry: ProviderRegistry): Prom
     return {
       provider,
       healthAvailable: false,
+      healthStatus: 'unknown',
       healthError: 'provider not registered',
+      healthRecoverable: false,
       executeOk: false,
-      usedMockFallback: false,
+      executeStatus: 'degraded',
       durationMs: 0,
       preview: '',
     };
@@ -71,9 +77,11 @@ async function smokeProvider(provider: string, registry: ProviderRegistry): Prom
     return {
       provider,
       healthAvailable: false,
+      healthStatus: health.status,
       healthError: health.error,
+      healthRecoverable: health.recoverable,
       executeOk: false,
-      usedMockFallback: false,
+      executeStatus: 'degraded',
       durationMs: 0,
       preview: previewText(health.error ?? ''),
     };
@@ -88,16 +96,20 @@ async function smokeProvider(provider: string, registry: ProviderRegistry): Prom
     responseFormat: 'text',
     timeoutMs: 30_000,
   });
-  const usedMockFallback = isMockFallback(result.text, provider);
+  const degraded = isDegradedResult(result.status);
 
   return {
     provider,
     healthAvailable: health.available,
+    healthStatus: health.status,
     healthError: health.error,
-    executeOk: !usedMockFallback,
-    usedMockFallback,
+    healthRecoverable: health.recoverable,
+    executeOk: !degraded,
+    executeStatus: result.status,
+    degradedKind: result.degraded_kind,
+    degradedMessage: result.degraded_message,
     durationMs: Date.now() - startedAt,
-    preview: previewText(result.text),
+    preview: previewText(result.text || result.degraded_message || ''),
   };
 }
 

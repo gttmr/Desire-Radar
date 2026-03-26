@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { isMockFallback } from '../src/tools/provider-smoke.js';
+import { isDegradedResult } from '../src/tools/provider-smoke.js';
 
 describe('provider smoke helpers', () => {
-  it('detects provider mock fallback markers', () => {
-    expect(isMockFallback('{"summary":"[claude-mock] failed"}', 'claude')).toBe(true);
-    expect(isMockFallback('OK', 'claude')).toBe(false);
+  it('detects degraded provider executions', () => {
+    expect(isDegradedResult('degraded')).toBe(true);
+    expect(isDegradedResult('completed')).toBe(false);
   });
 });

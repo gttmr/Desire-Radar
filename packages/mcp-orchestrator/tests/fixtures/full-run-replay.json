@@ -1,0 +1,20 @@
+{
+  "entity": "Cursor",
+  "topic": "Developer workflow adoption",
+  "expected_sections": [
+    "Executive Summary",
+    "Verdict",
+    "Beneficiary Mapping"
+  ],
+  "expected_beneficiaries": {
+    "direct_winners": [
+      "Cursor"
+    ],
+    "public_beneficiaries": [
+      "Microsoft"
+    ],
+    "second_order_beneficiaries": [
+      "GitHub"
+    ]
+  }
+}

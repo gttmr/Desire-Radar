@@ -56,8 +56,10 @@ export class ProviderHealthMonitor {
         state ?? {
           provider,
           available: false,
+          status: 'unprobed',
           last_checked_at: new Date(0).toISOString(),
           error: 'provider health has not been probed yet',
+          recoverable: false,
           repair_configured: this.hasRepairCommand(provider),
           repair_command_preview: this.getRepairCommandPreview(provider),
         }
@@ -90,7 +92,7 @@ export class ProviderHealthMonitor {
       let last_repair_at = previous?.last_repair_at;
       let last_repair_summary = previous?.last_repair_summary;
 
-      if (!result.available && this.shouldAttemptRepair(provider, result.error)) {
+      if (!result.available && this.shouldAttemptRepair(provider, result)) {
         const repairAttempt = await this.tryRepair(provider, previous);
         if (repairAttempt) {
           lastRepairAtMs = repairAttempt.attemptedAt;
@@ -102,7 +104,9 @@ export class ProviderHealthMonitor {
           } else {
             result = {
               available: afterRepair.available,
+              status: afterRepair.status,
               error: `${afterRepair.error ?? 'provider unavailable'} | repair: ${repairAttempt.summary}`,
+              recoverable: afterRepair.recoverable,
             };
           }
         }
@@ -111,7 +115,9 @@ export class ProviderHealthMonitor {
       this.states.set(provider, {
         provider,
         available: result.available,
+        status: result.status ?? (result.available ? 'healthy' : 'unknown'),
         error: result.error,
+        recoverable: result.recoverable,
         last_checked_at: this.now().toISOString(),
         repair_configured: this.hasRepairCommand(provider),
         repair_command_preview: this.getRepairCommandPreview(provider),
@@ -135,25 +141,18 @@ export class ProviderHealthMonitor {
     try {
       return adapter.probeHealth
         ? await adapter.probeHealth()
-        : { available: await adapter.health() };
+        : { available: await adapter.health(), status: 'healthy', recoverable: false };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { available: false, error: message };
+      return { available: false, status: 'unknown', error: message, recoverable: false };
     }
   }
 
-  private shouldAttemptRepair(provider: string, error?: string): boolean {
-    if (!this.options.repairCommands[provider] || !error) {
+  private shouldAttemptRepair(provider: string, result: ProviderHealthProbe): boolean {
+    if (!this.options.repairCommands[provider]) {
       return false;
     }
-    if (
-      /capacity|rate limit|too many requests|resource exhausted|temporarily unavailable/i.test(
-        error,
-      )
-    ) {
-      return false;
-    }
-    return /auth|login|credential|token|session|expired|unauthorized|forbidden/i.test(error);
+    return result.status === 'auth_failed';
   }
 
   private async tryRepair(

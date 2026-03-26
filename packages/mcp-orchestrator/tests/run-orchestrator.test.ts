@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -60,6 +60,7 @@ class MockProvider implements ProviderAdapter {
       sessionId: request.sessionId ?? randomUUID(),
       durationMs: 50,
       model: request.model,
+      status: 'completed',
     };
   }
 
@@ -211,6 +212,33 @@ describe('RunOrchestrator', () => {
     expect(turns[0]!.provider).toBe('mock');
     expect(turns[0]!.response.summary).toContain('search_intent');
     expect(turns[0]!.response.confidence).toBeGreaterThan(0);
+  });
+
+  it('records degraded provider executions and zeroes confidence on degraded turns', async () => {
+    const bundle = makeBundle();
+    const { run_id } = await orchestrator.submitEvidence('Test', bundle);
+
+    vi.spyOn(mockProvider, 'execute').mockResolvedValueOnce({
+      text: '',
+      sessionId: 'session-degraded',
+      durationMs: 25,
+      model: 'mock-cheap',
+      status: 'degraded',
+      degraded_kind: 'rate_limited',
+      degraded_message: 'provider temporarily rate limited',
+      recoverable: true,
+    });
+
+    const turns = await orchestrator.runAgentRound(run_id, 'search_intent', ['mock']);
+    const executions = orchestrator.getProviderExecutions(run_id);
+
+    expect(turns[0]!.provider_execution_status).toBe('degraded');
+    expect(turns[0]!.provider_degraded_kind).toBe('rate_limited');
+    expect(turns[0]!.provider_error).toBe('provider temporarily rate limited');
+    expect(turns[0]!.response.confidence).toBe(0);
+    expect(turns[0]!.response.summary).toContain('[provider-degraded]');
+    expect(executions.executions[0]!.status).toBe('degraded');
+    expect(executions.executions[0]!.degraded_kind).toBe('rate_limited');
   });
 
   it('should throw for non-existent run', async () => {

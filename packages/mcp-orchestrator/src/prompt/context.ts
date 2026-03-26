@@ -110,6 +110,13 @@ function buildVerdictContext(input: PromptContextInput): string[] {
     sections.push(`## Debate Summary\n${claims}`);
   }
 
+  if (input.otherAgentMessages?.length) {
+    const messages = input.otherAgentMessages
+      .map((message) => `- ${message.from}: ${message.content}`)
+      .join('\n');
+    sections.push(`## Analytical Inputs\n${messages}`);
+  }
+
   if (input.researchResults?.length) {
     const results = input.researchResults
       .map(

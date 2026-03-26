@@ -95,6 +95,7 @@ warn line
 
     expect(result.text).toBe('OK');
     expect(result.sessionId).toBe('thread-1');
+    expect(result.status).toBe('completed');
   });
 
   it('uses codex login status for health probing', async () => {
@@ -104,16 +105,24 @@ warn line
     });
 
     const provider = new CodexProvider('codex', 30_000);
-    await expect(provider.probeHealth?.()).resolves.toEqual({ available: true });
+    await expect(provider.probeHealth?.()).resolves.toEqual({
+      available: true,
+      status: 'healthy',
+      recoverable: false,
+    });
   });
 
   it('parses claude auth status JSON', () => {
     expect(parseClaudeAuthStatus('{"loggedIn":true,"authMethod":"claude.ai"}')).toEqual({
       available: true,
+      status: 'healthy',
+      recoverable: false,
     });
     expect(parseClaudeAuthStatus('{"loggedIn":false,"authMethod":"claude.ai"}')).toEqual({
       available: false,
+      status: 'auth_failed',
       error: 'Claude auth status reported loggedIn=false (claude.ai)',
+      recoverable: true,
     });
   });
 
@@ -124,7 +133,11 @@ warn line
     });
 
     const provider = new ClaudeProvider('claude', 30_000);
-    await expect(provider.probeHealth?.()).resolves.toEqual({ available: true });
+    await expect(provider.probeHealth?.()).resolves.toEqual({
+      available: true,
+      status: 'healthy',
+      recoverable: false,
+    });
   });
 
   it('extracts claude assistant text from stream-json output', () => {
@@ -188,6 +201,7 @@ warn line
     });
 
     expect(result.text).toBe('OK');
+    expect(result.status).toBe('completed');
   });
 
   it('closes claude stdin so headless runs do not hang waiting for piped input', async () => {
@@ -219,7 +233,7 @@ warn line
     expect(end).toHaveBeenCalledTimes(1);
   });
 
-  it('uses claude stdout even when the CLI exits non-zero', async () => {
+  it('returns a structured degraded result when claude exits with an error payload', async () => {
     execFileMock.mockImplementation((_file, _args, _options, callback) => {
       callback(
         Object.assign(new Error('Command failed'), { code: 1 }),
@@ -241,7 +255,10 @@ warn line
       modelProfile: 'cheap',
     });
 
-    expect(result.text).toContain('[claude-mock] Claude CLI returned error output: rate limited');
+    expect(result.status).toBe('degraded');
+    expect(result.degraded_kind).toBe('rate_limited');
+    expect(result.degraded_message).toContain('Claude CLI returned error output: rate limited');
+    expect(result.recoverable).toBe(true);
   });
 
   it('classifies gemini capacity errors distinctly from auth failures', () => {
@@ -287,7 +304,9 @@ warn line
     const provider = new GeminiProvider('gemini', 30_000);
     await expect(provider.probeHealth?.()).resolves.toEqual({
       available: false,
+      status: 'capacity_limited',
       error: 'Gemini reachable but temporarily unavailable (capacity/rate limit).',
+      recoverable: true,
     });
   });
 
@@ -307,5 +326,6 @@ warn line
     });
 
     expect(result.text).toBe('OK');
+    expect(result.status).toBe('completed');
   });
 });
