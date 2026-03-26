@@ -24,6 +24,7 @@ import { ClaudeProvider } from './providers/claude.js';
 import { CodexProvider } from './providers/codex.js';
 import { GeminiProvider } from './providers/gemini.js';
 import { OpenAIProvider } from './providers/openai.js';
+import { ProviderHealthMonitor } from './providers/providerHealthMonitor.js';
 import { ProviderRegistry } from './providers/registry.js';
 import { SessionStore } from './sessions/session-store.js';
 
@@ -81,6 +82,12 @@ async function main(): Promise<void> {
     config.collector.COLLECTOR_BASE_URL,
     config.collector.COLLECTOR_TIMEOUT_MS,
   );
+  const providerHealthMonitor = new ProviderHealthMonitor(registry, {
+    pollIntervalMs: config.providerHealth.pollIntervalMs,
+    repairCooldownMs: config.providerHealth.repairCooldownMs,
+    repairCommands: config.providerHealth.repairCommands,
+  });
+  await providerHealthMonitor.start();
   const candidateService = new CandidateService(collectorClient);
   const researchService = new ResearchService(collectorClient);
   const submissionPoller = new SubmissionPoller(
@@ -126,12 +133,11 @@ async function main(): Promise<void> {
 
   const app = express();
   app.use(express.json({ limit: '10mb' }));
-  app.use(createRoutes(orchestrator, sessionStore, registry));
+  app.use(createRoutes(orchestrator, sessionStore, registry, providerHealthMonitor));
 
-  const available = await registry.getAvailable();
-  const availableNames = available.map((provider) => provider.name);
-  const allNames = registry.list();
-  const unavailable = allNames.filter((name) => !availableNames.includes(name));
+  const providerSnapshot = providerHealthMonitor.snapshot();
+  const availableNames = providerSnapshot.filter((provider) => provider.available).map((provider) => provider.provider);
+  const unavailable = providerSnapshot.filter((provider) => !provider.available).map((provider) => provider.provider);
 
   app.listen(config.runtime.ORCHESTRATOR_PORT, config.runtime.ORCHESTRATOR_HOST, () => {
     console.log(

@@ -74,6 +74,7 @@ cp .env.example .env
 선택값:
 - `DISCORD_GUILD_ID`
 - `DEFAULT_TEXT_CHANNEL_ID`
+- `DISCORD_PROVIDER_ALERT_CHANNEL_IDS`
 - `OPENAI_API_KEY`
 - collector connector API key들
 
@@ -81,6 +82,12 @@ cp .env.example .env
 - collector와 orchestrator는 CLI provider를 기본 경로로 사용한다.
 - Docker Compose를 쓰려면 호스트에서 `codex`, `claude`, `gemini` 중 필요한 CLI 로그인이 이미 되어 있어야 한다.
 - `OPENAI_API_KEY`는 OpenAI provider를 추가로 켤 때만 필요하다.
+- provider 장애 알림은 discord-bot이 `/health`를 polling해서 보내고, optional repair command는 orchestrator가 인증/로그인 계열 실패에 한해 수행한다.
+
+CLI 상태 확인/복구 기준:
+- Codex: `codex login status`로 인증 상태를 확인한다. 비대화형 복구가 필요하면 `printenv OPENAI_API_KEY | codex login --with-api-key` 같은 wrapper command를 `PROVIDER_REPAIR_CODEX_COMMAND`에 넣는다.
+- Claude: `claude auth status`로 상태를 확인한다. 복구는 `claude auth login --claudeai` 또는 `claude auth login --console` wrapper를 `PROVIDER_REPAIR_CLAUDE_COMMAND`에 넣는다.
+- Gemini: 현재 설치된 CLI에서는 별도 `auth status/login` 서브커맨드가 보이지 않으므로, health probe는 headless prompt 실행으로 판단하고 자동 repair는 기본 비활성으로 두는 편이 안전하다.
 
 ### 2. Discord 설정
 
@@ -261,6 +268,8 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 | `DISCORD_CLIENT_ID` | discord-bot | Discord app client id |
 | `DISCORD_HUMAN_INPUT_CHANNEL_IDS` | discord-bot | human input 단일 채널 allowlist |
 | `DISCORD_HUMAN_QUEUE_CHANNEL_IDS` | discord-bot | `/human-queue` 허용 채널 |
+| `DISCORD_PROVIDER_ALERT_CHANNEL_IDS` | discord-bot | provider 장애/복구 알림 채널 |
+| `PROVIDER_ALERT_POLL_INTERVAL_SEC` | discord-bot | provider 알림 polling 주기 |
 | `ANALYSIS_BACKEND` | discord-bot | 현재 `orchestrator`만 사용 |
 | `COLLECTOR_BASE_URL` | discord-bot/orchestrator | collector base URL |
 | `ORCHESTRATOR_BASE_URL` | discord-bot | orchestrator base URL |
@@ -272,6 +281,11 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 | `LLM_HUMAN_ROUTING_ENABLED` | collector | human input collector-side routing on/off |
 | `LLM_HUMAN_ROUTING_MODEL` | collector | human input routing model |
 | `DEFAULT_PROVIDERS` | mcp-orchestrator | 기본 provider 우선순위 |
+| `PROVIDER_HEALTH_POLL_INTERVAL_SEC` | mcp-orchestrator | provider health probe 주기 |
+| `PROVIDER_REPAIR_COOLDOWN_SEC` | mcp-orchestrator | provider repair 재시도 cooldown |
+| `PROVIDER_REPAIR_CODEX_COMMAND` | mcp-orchestrator | optional Codex repair command |
+| `PROVIDER_REPAIR_CLAUDE_COMMAND` | mcp-orchestrator | optional Claude repair command |
+| `PROVIDER_REPAIR_GEMINI_COMMAND` | mcp-orchestrator | optional Gemini repair command |
 | `OPENAI_API_KEY` | mcp-orchestrator | optional OpenAI fallback provider key |
 
 전체 목록과 기본값은 `.env.example`를 기준으로 본다.

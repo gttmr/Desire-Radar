@@ -26,7 +26,9 @@ const envSchema = z.object({
   ORCHESTRATOR_BASE_URL: z.string().url().default('http://mcp-orchestrator:5003'),
   DISCORD_HUMAN_INPUT_CHANNEL_IDS: z.string().optional().transform(parseIdSet),
   DISCORD_HUMAN_QUEUE_CHANNEL_IDS: z.string().optional().transform(parseIdSet),
+  DISCORD_PROVIDER_ALERT_CHANNEL_IDS: z.string().optional().transform(parseIdSet),
   ANALYSIS_BACKEND: z.enum(['orchestrator']).default('orchestrator'),
+  PROVIDER_ALERT_POLL_INTERVAL_SEC: z.coerce.number().int().positive().default(300),
   REPORT_TIME_KST: z
     .string()
     .regex(/^\d{2}:\d{2}$/)

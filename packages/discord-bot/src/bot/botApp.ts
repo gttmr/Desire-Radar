@@ -19,6 +19,7 @@ import { ActionOrchestrator } from '../services/actionOrchestrator.js';
 import { CollectorClient } from '../services/collectorClient.js';
 import { DiscordIngestRouter } from '../services/discordIngestRouter.js';
 import { NotificationScheduler } from '../services/notificationScheduler.js';
+import { ProviderHealthMonitor } from '../services/providerHealthMonitor.js';
 import { ReportService, type ReportDispatch } from '../services/reportService.js';
 import { SpeechSegmenter } from '../services/speechSegmenter.js';
 import { VoiceCaptureService } from '../services/voiceCaptureService.js';
@@ -64,6 +65,7 @@ export class BotApp {
   readonly reports: ReportService;
   readonly collector: CollectorClient;
   readonly ingestRouter: DiscordIngestRouter;
+  readonly providerHealthMonitor?: ProviderHealthMonitor;
   readonly segmenter: SpeechSegmenter;
   readonly stt: SttProvider;
   readonly voiceCapture: VoiceCaptureService;
@@ -72,7 +74,8 @@ export class BotApp {
     orchestrator: ActionOrchestrator,
     scheduler: NotificationScheduler,
     reports: ReportService,
-    collector: CollectorClient
+    collector: CollectorClient,
+    providerHealthMonitor?: ProviderHealthMonitor,
   ) {
     this.client = new Client({
       intents: [
@@ -88,6 +91,7 @@ export class BotApp {
     this.reports = reports;
     this.collector = collector;
     this.ingestRouter = new DiscordIngestRouter(collector);
+    this.providerHealthMonitor = providerHealthMonitor;
     this.segmenter = new SpeechSegmenter();
     this.stt = new MockSttProvider();
     this.voiceCapture = new VoiceCaptureService(this.client, async (input) => {
@@ -137,6 +141,7 @@ export class BotApp {
     this.client.once(Events.ClientReady, async () => {
       await this.registerSlashCommands();
       await this.initializeReportSchedules();
+      this.startProviderHealthMonitor();
       console.log(`Logged in as ${this.client.user?.tag}`);
     });
 
@@ -200,6 +205,7 @@ export class BotApp {
 
   async stop(): Promise<void> {
     this.scheduler.clearAll();
+    this.providerHealthMonitor?.stop();
     this.orchestrator.dispose();
     this.client.destroy();
   }
@@ -213,6 +219,7 @@ export class BotApp {
       configuredGuildReports: configs.length,
       pendingActions: this.orchestrator.stats().pendingCount,
       activeVoiceSessions: this.voiceCapture.activeCount(),
+      providerHealthMonitorRunning: this.providerHealthMonitor?.isRunning() ?? false,
       stt
     };
   }
@@ -635,6 +642,35 @@ export class BotApp {
     for (const chunk of chunkMessage(message)) {
       await text.send(chunk);
     }
+  }
+
+  private startProviderHealthMonitor(): void {
+    if (!this.providerHealthMonitor) {
+      return;
+    }
+    const channelIds = this.resolveProviderAlertChannelIds();
+    if (channelIds.length === 0) {
+      return;
+    }
+    this.providerHealthMonitor.start(async (message) => {
+      for (const channelId of channelIds) {
+        try {
+          await this.sendToTextChannel(channelId, message);
+        } catch (error) {
+          console.error(`Failed to send provider alert to channel ${channelId}`, error);
+        }
+      }
+    });
+  }
+
+  private resolveProviderAlertChannelIds(): string[] {
+    if (env.DISCORD_PROVIDER_ALERT_CHANNEL_IDS.size > 0) {
+      return [...env.DISCORD_PROVIDER_ALERT_CHANNEL_IDS];
+    }
+    if (env.DEFAULT_TEXT_CHANNEL_ID) {
+      return [env.DEFAULT_TEXT_CHANNEL_ID];
+    }
+    return [];
   }
 
   private resolveTextChannelId(guildId: string): string {

@@ -4,6 +4,10 @@ import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 import 'dotenv/config';
 import { loadCollectorConfig, type CollectorConfig } from './collector.js';
+import {
+  loadProviderHealthConfig,
+  type ProviderHealthConfig,
+} from './provider-health.js';
 import { loadProvidersConfig, type ProvidersConfig } from './providers.js';
 import { loadRuntimeConfig, type RuntimeConfig } from './runtime.js';
 
@@ -128,13 +132,17 @@ export type Config = {
   runtime: RuntimeConfig;
   collector: CollectorConfig;
   providers: ProvidersConfig;
+  providerHealth: ProviderHealthConfig;
   policies: OrchestratorPolicies;
 };
 
-function resolvePolicyDir(): string {
+export function resolvePolicyDir(baseDir: string = __dirname): string {
   const candidates = [
-    join(__dirname, '..', '..', 'policy'),
-    join(__dirname, '..', '..', '..', 'policy'),
+    join(baseDir, '..', '..', 'policy'),
+    join(baseDir, '..', '..', '..', 'policy'),
+    join(baseDir, '..', '..', '..', '..', 'policy'),
+    join(process.cwd(), 'packages', 'mcp-orchestrator', 'policy'),
+    join(process.cwd(), 'policy'),
   ];
   const matched = candidates.find((candidate) => existsSync(candidate));
   if (!matched) {
@@ -156,6 +164,7 @@ export function loadConfig(): Config {
     runtime: loadRuntimeConfig(process.env),
     collector: loadCollectorConfig(process.env),
     providers: loadProvidersConfig(process.env),
+    providerHealth: loadProviderHealthConfig(process.env),
     policies: {
       policyDir,
       modelProfiles: loadJsonFile(policyDir, 'model-profiles.json', modelProfilesSchema),

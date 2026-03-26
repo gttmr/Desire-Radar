@@ -8,6 +8,7 @@ import { GuildConfigStore } from './services/guildConfigStore.js';
 import { JobEngine } from './services/jobEngine.js';
 import { NotificationScheduler } from './services/notificationScheduler.js';
 import { OrchestratorClient } from './services/orchestratorClient.js';
+import { ProviderHealthMonitor } from './services/providerHealthMonitor.js';
 import { ReportService } from './services/reportService.js';
 
 async function bootstrap() {
@@ -21,7 +22,10 @@ async function bootstrap() {
   const gateway = createAnalysisGateway(env.ANALYSIS_BACKEND, mcpOrchestrator, collector);
   const reports = new ReportService(store, gateway, env.REPORT_TIMEZONE);
   const scheduler = new NotificationScheduler(env.REPORT_TIMEZONE, env.REPORT_TIME_KST);
-  const bot = new BotApp(orchestrator, scheduler, reports, collector);
+  const providerHealthMonitor = new ProviderHealthMonitor(mcpOrchestrator, {
+    pollIntervalMs: env.PROVIDER_ALERT_POLL_INTERVAL_SEC * 1000,
+  });
+  const bot = new BotApp(orchestrator, scheduler, reports, collector, providerHealthMonitor);
 
   await bot.start();
 

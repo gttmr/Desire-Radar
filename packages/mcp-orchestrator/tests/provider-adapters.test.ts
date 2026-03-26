@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ExecFileOptions } from 'node:child_process';
 import { CodexProvider, extractCodexExecResult } from '../src/providers/codex.js';
 import { ClaudeProvider, parseClaudeAuthStatus } from '../src/providers/claude.js';
-import { GeminiProvider, classifyGeminiError } from '../src/providers/gemini.js';
+import { GeminiProvider, buildGeminiEnv, classifyGeminiError } from '../src/providers/gemini.js';
 
 const execFileMock = vi.fn();
 
@@ -83,7 +83,7 @@ warn line
   it('uses codex login status for health probing', async () => {
     mockExecFile((_file, args, _options, callback) => {
       expect(args).toEqual(['login', 'status']);
-      callback(null, 'Logged in using ChatGPT', '');
+      callback(null, '', 'Logged in using ChatGPT');
     });
 
     const provider = new CodexProvider('codex', 30_000);
@@ -119,6 +119,18 @@ warn line
     expect(classifyGeminiError('authentication failed: login expired')).toBe(
       'Gemini authentication failed.',
     );
+  });
+
+  it('prepends the gemini executable directory to PATH', () => {
+    const env = buildGeminiEnv('/home/ilmaswsl/.nvm/versions/node/v24.13.0/bin/gemini', {
+      HOME: '/home/ilmaswsl',
+      PATH: '/usr/local/bin:/usr/bin',
+    });
+
+    expect(env.PATH).toBe(
+      '/home/ilmaswsl/.nvm/versions/node/v24.13.0/bin:/usr/local/bin:/usr/bin',
+    );
+    expect(env.HOME).toBe('/home/ilmaswsl');
   });
 
   it('surfaces gemini probe failures with classified errors', async () => {

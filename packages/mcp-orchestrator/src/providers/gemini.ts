@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type {
   ProviderAdapter,
   ProviderExecutionRequest,
@@ -15,6 +16,24 @@ export function classifyGeminiError(message: string): string {
     return 'Gemini authentication failed.';
   }
   return message;
+}
+
+export function buildGeminiEnv(
+  execPath: string,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const execDir = path.dirname(execPath);
+  const currentPath = baseEnv.PATH ?? '';
+  const pathEntries = currentPath.split(path.delimiter).filter(Boolean);
+  if (execDir && execDir !== '.' && !pathEntries.includes(execDir)) {
+    pathEntries.unshift(execDir);
+  }
+
+  return {
+    ...baseEnv,
+    HOME: baseEnv.HOME ?? '/home/node',
+    PATH: pathEntries.join(path.delimiter),
+  };
 }
 
 export class GeminiProvider implements ProviderAdapter {
@@ -79,10 +98,7 @@ export class GeminiProvider implements ProviderAdapter {
         {
           timeout: timeoutOverride ?? this.timeoutMs,
           maxBuffer: 10 * 1024 * 1024,
-          env: {
-            ...process.env,
-            HOME: process.env.HOME ?? '/home/node',
-          },
+          env: buildGeminiEnv(this.execPath),
         },
         (err, stdout, stderr) => {
           if (err) {

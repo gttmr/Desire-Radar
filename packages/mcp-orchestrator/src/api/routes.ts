@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { RunOrchestrator } from '../orchestrator/run-orchestrator.js';
 import type { SessionStore } from '../sessions/session-store.js';
 import type { ProviderRegistry } from '../providers/registry.js';
+import type { ProviderHealthMonitor } from '../providers/providerHealthMonitor.js';
 import { submitEvidence } from '../tools/submit-evidence.js';
 import { runAgentRound } from '../tools/run-agent-round.js';
 import { runDebate } from '../tools/run-debate.js';
@@ -14,6 +15,7 @@ export function createRoutes(
   orchestrator: RunOrchestrator,
   sessionStore: SessionStore,
   registry: ProviderRegistry,
+  providerHealthMonitor?: ProviderHealthMonitor,
 ): Router {
   const router = Router();
 
@@ -142,31 +144,32 @@ export function createRoutes(
 
   // GET /health
   router.get('/health', async (_req, res) => {
-    const providers = registry.list();
-    const providerHealths = await Promise.all(
-      providers.map(async (name) => {
-        const adapter = registry.get(name);
-        let available = false;
-        let error: string | undefined;
-        try {
-          if (adapter?.probeHealth) {
-            const result = await adapter.probeHealth();
-            available = result.available;
-            error = result.error;
-          } else {
-            available = adapter ? await adapter.health() : false;
-          }
-        } catch (err: unknown) {
-          error = err instanceof Error ? err.message : 'Unknown health probe error';
-        }
-        return {
-          provider: name,
-          available,
-          last_checked_at: new Date().toISOString(),
-          ...(error ? { error } : {}),
-        };
-      }),
-    );
+    const providerHealths = providerHealthMonitor
+      ? providerHealthMonitor.snapshot()
+      : await Promise.all(
+          registry.list().map(async (name) => {
+            const adapter = registry.get(name);
+            let available = false;
+            let error: string | undefined;
+            try {
+              if (adapter?.probeHealth) {
+                const result = await adapter.probeHealth();
+                available = result.available;
+                error = result.error;
+              } else {
+                available = adapter ? await adapter.health() : false;
+              }
+            } catch (err: unknown) {
+              error = err instanceof Error ? err.message : 'Unknown health probe error';
+            }
+            return {
+              provider: name,
+              available,
+              last_checked_at: new Date().toISOString(),
+              ...(error ? { error } : {}),
+            };
+          }),
+        );
 
     res.json({
       ok: true,

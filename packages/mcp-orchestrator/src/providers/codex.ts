@@ -20,6 +20,11 @@ type CodexExecResult = {
   usage?: CodexUsage;
 };
 
+type CommandOutput = {
+  stdout: string;
+  stderr: string;
+};
+
 export function extractCodexExecResult(stdout: string): CodexExecResult {
   let messageText: string | undefined;
   let threadId: string | undefined;
@@ -116,8 +121,8 @@ export class CodexProvider implements ProviderAdapter {
       if (model) {
         args.splice(1, 0, '-m', model);
       }
-      const stdout = await this.run(args, request.prompt, request.timeoutMs);
-      const parsed = extractCodexExecResult(stdout);
+      const output = await this.runDetailed(args, request.prompt, request.timeoutMs);
+      const parsed = extractCodexExecResult(output.stdout);
       return {
         text: parsed.messageText,
         sessionId: parsed.threadId ?? sid,
@@ -150,7 +155,7 @@ export class CodexProvider implements ProviderAdapter {
 
   async probeHealth(): Promise<ProviderHealthProbe> {
     try {
-      const output = await this.run(['login', 'status'], undefined, 10_000);
+      const output = await this.runCombined(['login', 'status'], undefined, 10_000);
       if (/logged in/i.test(output)) {
         return { available: true };
       }
@@ -165,6 +170,23 @@ export class CodexProvider implements ProviderAdapter {
   }
 
   private run(args: string[], stdin?: string, timeoutOverride?: number): Promise<string> {
+    return this.runDetailed(args, stdin, timeoutOverride).then((result) => result.stdout);
+  }
+
+  private async runCombined(
+    args: string[],
+    stdin?: string,
+    timeoutOverride?: number,
+  ): Promise<string> {
+    const result = await this.runDetailed(args, stdin, timeoutOverride);
+    return `${result.stdout}\n${result.stderr}`.trim();
+  }
+
+  private runDetailed(
+    args: string[],
+    stdin?: string,
+    timeoutOverride?: number,
+  ): Promise<CommandOutput> {
     return new Promise((resolve, reject) => {
       const proc = execFile(
         this.execPath,
@@ -183,7 +205,10 @@ export class CodexProvider implements ProviderAdapter {
             const detail = stderr?.trim() ? `${err.message}: ${stderr.trim()}` : err.message;
             return reject(new Error(detail));
           }
-          resolve(stdout.trim());
+          resolve({
+            stdout: stdout.trim(),
+            stderr: stderr.trim(),
+          });
         },
       );
       if (stdin && proc.stdin) {
