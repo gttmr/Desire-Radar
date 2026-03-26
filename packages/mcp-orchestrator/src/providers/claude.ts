@@ -25,6 +25,29 @@ export function parseClaudeAuthStatus(stdout: string): ProviderHealthProbe {
   }
 }
 
+export function extractClaudePrintResult(stdout: string): string {
+  const trimmed = stdout.trim();
+  if (!trimmed) {
+    throw new Error('Claude CLI returned empty output');
+  }
+
+  try {
+    const payload = JSON.parse(trimmed) as { result?: string; is_error?: boolean };
+    if (payload.is_error) {
+      throw new Error(`Claude CLI returned error output: ${trimmed.slice(0, 500)}`);
+    }
+    if (typeof payload.result === 'string' && payload.result.trim()) {
+      return payload.result.trim();
+    }
+    throw new Error(`Claude CLI returned empty result payload: ${trimmed.slice(0, 500)}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Claude CLI returned')) {
+      throw error;
+    }
+    return trimmed;
+  }
+}
+
 export class ClaudeProvider implements ProviderAdapter {
   readonly name = 'claude';
 
@@ -39,14 +62,14 @@ export class ClaudeProvider implements ProviderAdapter {
     const model = request.model;
 
     try {
-      const args = ['-p', request.prompt];
+      const args = ['-p', request.prompt, '--output-format', 'json'];
       if (model) {
         args.push('--model', model);
       }
       if (request.sessionId) {
-        args.push('--continue', request.sessionId);
+        args.push('--resume', request.sessionId);
       }
-      const text = await this.run(args, request.timeoutMs);
+      const text = extractClaudePrintResult(await this.run(args, request.timeoutMs));
       return { text, sessionId: sid, durationMs: Date.now() - start, model };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

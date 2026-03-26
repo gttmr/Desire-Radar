@@ -1,8 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ExecFileOptions } from 'node:child_process';
 import { CodexProvider, extractCodexExecResult } from '../src/providers/codex.js';
-import { ClaudeProvider, parseClaudeAuthStatus } from '../src/providers/claude.js';
-import { GeminiProvider, buildGeminiEnv, classifyGeminiError } from '../src/providers/gemini.js';
+import {
+  ClaudeProvider,
+  extractClaudePrintResult,
+  parseClaudeAuthStatus,
+} from '../src/providers/claude.js';
+import {
+  GeminiProvider,
+  buildGeminiEnv,
+  classifyGeminiError,
+  extractGeminiPromptResult,
+} from '../src/providers/gemini.js';
 
 const execFileMock = vi.fn();
 
@@ -110,6 +119,49 @@ warn line
     await expect(provider.probeHealth?.()).resolves.toEqual({ available: true });
   });
 
+  it('extracts claude JSON print output and rejects empty result payloads', () => {
+    expect(
+      extractClaudePrintResult(
+        '{"type":"result","subtype":"success","is_error":false,"result":"OK"}',
+      ),
+    ).toBe('OK');
+    expect(() =>
+      extractClaudePrintResult(
+        '{"type":"result","subtype":"success","is_error":false,"result":""}',
+      ),
+    ).toThrow('Claude CLI returned empty result payload');
+  });
+
+  it('uses claude JSON output and falls back when the CLI returns an empty result', async () => {
+    mockExecFile((_file, args, _options, callback) => {
+      expect(args).toEqual([
+        '-p',
+        'Reply with exactly OK',
+        '--output-format',
+        'json',
+        '--resume',
+        'session-123',
+      ]);
+      callback(
+        null,
+        '{"type":"result","subtype":"success","is_error":false,"result":""}',
+        '',
+      );
+    });
+
+    const provider = new ClaudeProvider('claude', 30_000);
+    const result = await provider.execute({
+      prompt: 'Reply with exactly OK',
+      phase: 'debate',
+      agentName: 'search_intent',
+      modelProfile: 'cheap',
+      responseFormat: 'text',
+      sessionId: 'session-123',
+    });
+
+    expect(result.text).toContain('[claude-mock] Claude CLI returned empty result payload');
+  });
+
   it('classifies gemini capacity errors distinctly from auth failures', () => {
     expect(
       classifyGeminiError(
@@ -133,6 +185,13 @@ warn line
     expect(env.HOME).toBe('/home/ilmaswsl');
   });
 
+  it('extracts gemini response payload from JSON output', () => {
+    expect(extractGeminiPromptResult('{"response":"OK"}')).toBe('OK');
+    expect(() => extractGeminiPromptResult('{"response":""}')).toThrow(
+      'Gemini CLI returned empty response payload',
+    );
+  });
+
   it('surfaces gemini probe failures with classified errors', async () => {
     mockExecFile((_file, args, _options, callback) => {
       expect(args).toEqual(['-p', 'Reply with exactly OK']);
@@ -148,5 +207,23 @@ warn line
       available: false,
       error: 'Gemini reachable but temporarily unavailable (capacity/rate limit).',
     });
+  });
+
+  it('uses gemini JSON output for execution', async () => {
+    mockExecFile((_file, args, _options, callback) => {
+      expect(args).toEqual(['-o', 'json', '-p', 'Reply with exactly OK']);
+      callback(null, '{"response":"OK"}', '');
+    });
+
+    const provider = new GeminiProvider('gemini', 30_000);
+    const result = await provider.execute({
+      prompt: 'Reply with exactly OK',
+      phase: 'debate',
+      agentName: 'search_intent',
+      modelProfile: 'cheap',
+      responseFormat: 'text',
+    });
+
+    expect(result.text).toBe('OK');
   });
 });

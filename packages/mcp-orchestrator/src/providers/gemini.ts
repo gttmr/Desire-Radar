@@ -36,6 +36,26 @@ export function buildGeminiEnv(
   };
 }
 
+export function extractGeminiPromptResult(stdout: string): string {
+  const trimmed = stdout.trim();
+  if (!trimmed) {
+    throw new Error('Gemini CLI returned empty output');
+  }
+
+  try {
+    const payload = JSON.parse(trimmed) as { response?: string };
+    if (typeof payload.response === 'string' && payload.response.trim()) {
+      return payload.response.trim();
+    }
+    throw new Error(`Gemini CLI returned empty response payload: ${trimmed.slice(0, 500)}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Gemini CLI returned')) {
+      throw error;
+    }
+    return trimmed;
+  }
+}
+
 export class GeminiProvider implements ProviderAdapter {
   readonly name = 'gemini';
 
@@ -50,11 +70,11 @@ export class GeminiProvider implements ProviderAdapter {
     const model = request.model;
 
     try {
-      const args = ['-p', request.prompt];
+      const args = ['-o', 'json', '-p', request.prompt];
       if (model) {
         args.push('--model', model);
       }
-      const text = await this.run(args, request.timeoutMs);
+      const text = extractGeminiPromptResult(await this.run(args, request.timeoutMs));
       return { text, sessionId: sid, durationMs: Date.now() - start, model };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

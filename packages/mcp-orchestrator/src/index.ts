@@ -87,7 +87,7 @@ async function main(): Promise<void> {
     repairCooldownMs: config.providerHealth.repairCooldownMs,
     repairCommands: config.providerHealth.repairCommands,
   });
-  await providerHealthMonitor.start();
+  void providerHealthMonitor.start();
   const candidateService = new CandidateService(collectorClient);
   const researchService = new ResearchService(collectorClient);
   const submissionPoller = new SubmissionPoller(
@@ -135,19 +135,12 @@ async function main(): Promise<void> {
   app.use(express.json({ limit: '10mb' }));
   app.use(createRoutes(orchestrator, sessionStore, registry, providerHealthMonitor));
 
-  const providerSnapshot = providerHealthMonitor.snapshot();
-  const availableNames = providerSnapshot.filter((provider) => provider.available).map((provider) => provider.provider);
-  const unavailable = providerSnapshot.filter((provider) => !provider.available).map((provider) => provider.provider);
-
   app.listen(config.runtime.ORCHESTRATOR_PORT, config.runtime.ORCHESTRATOR_HOST, () => {
     console.log(
       `MCP Orchestrator listening on ${config.runtime.ORCHESTRATOR_HOST}:${config.runtime.ORCHESTRATOR_PORT}`,
     );
     console.log(`Default providers: ${config.providers.defaultProviders.join(', ')}`);
-    console.log(`Available providers: ${availableNames.join(', ') || '(none)'}`);
-    if (unavailable.length > 0) {
-      console.warn(`Unavailable providers: ${unavailable.join(', ')}`);
-    }
+    console.log(`Provider health monitoring enabled for: ${registry.list().join(', ') || '(none)'}`);
     console.log(`Data dir: ${config.runtime.DATA_DIR}`);
     console.log(`Collector base URL: ${config.collector.COLLECTOR_BASE_URL}`);
     console.log(`Policy dir: ${config.policies.policyDir}`);
