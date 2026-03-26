@@ -234,6 +234,10 @@ npm run dev:bot
 # orchestrator dev
 npm run dev:orchestrator
 
+# orchestrator provider smoke (real CLI auth + execute)
+npm --prefix packages/mcp-orchestrator run build
+npm --prefix packages/mcp-orchestrator run smoke:providers
+
 # collector tests
 cd packages/collector && pytest
 

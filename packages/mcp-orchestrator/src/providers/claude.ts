@@ -31,21 +31,47 @@ export function extractClaudePrintResult(stdout: string): string {
     throw new Error('Claude CLI returned empty output');
   }
 
-  try {
-    const payload = JSON.parse(trimmed) as { result?: string; is_error?: boolean };
-    if (payload.is_error) {
-      throw new Error(`Claude CLI returned error output: ${trimmed.slice(0, 500)}`);
+  const assistantChunks: string[] = [];
+  for (const rawLine of trimmed.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line.startsWith('{')) {
+      continue;
     }
-    if (typeof payload.result === 'string' && payload.result.trim()) {
-      return payload.result.trim();
+
+    try {
+      const payload = JSON.parse(line) as {
+        type?: string;
+        is_error?: boolean;
+        message?: { content?: Array<{ type?: string; text?: string }> };
+      };
+
+      if (payload.type === 'result' && payload.is_error) {
+        throw new Error(`Claude CLI returned error output: ${line.slice(0, 500)}`);
+      }
+
+      if (payload.type !== 'assistant') {
+        continue;
+      }
+
+      const content = Array.isArray(payload.message?.content) ? payload.message.content : [];
+      for (const block of content) {
+        if (block?.type === 'text' && typeof block.text === 'string') {
+          assistantChunks.push(block.text);
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Claude CLI returned')) {
+        throw error;
+      }
     }
-    throw new Error(`Claude CLI returned empty result payload: ${trimmed.slice(0, 500)}`);
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Claude CLI returned')) {
-      throw error;
-    }
-    return trimmed;
   }
+
+  const text = assistantChunks.join('\n').trim();
+  if (text) {
+    return text;
+  }
+
+  throw new Error(`Claude CLI returned no assistant message: ${trimmed.slice(0, 500)}`);
 }
 
 export class ClaudeProvider implements ProviderAdapter {
@@ -62,7 +88,7 @@ export class ClaudeProvider implements ProviderAdapter {
     const model = request.model;
 
     try {
-      const args = ['-p', request.prompt, '--output-format', 'json'];
+      const args = ['-p', request.prompt, '--output-format', 'stream-json', '--verbose'];
       if (model) {
         args.push('--model', model);
       }

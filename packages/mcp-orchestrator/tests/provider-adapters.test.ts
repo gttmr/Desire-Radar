@@ -119,32 +119,41 @@ warn line
     await expect(provider.probeHealth?.()).resolves.toEqual({ available: true });
   });
 
-  it('extracts claude JSON print output and rejects empty result payloads', () => {
+  it('extracts claude assistant text from stream-json output', () => {
     expect(
       extractClaudePrintResult(
-        '{"type":"result","subtype":"success","is_error":false,"result":"OK"}',
+        [
+          '{"type":"system","subtype":"init"}',
+          '{"type":"assistant","message":{"content":[{"type":"text","text":"OK"}]}}',
+          '{"type":"result","subtype":"success","is_error":false,"result":""}',
+        ].join('\n'),
       ),
     ).toBe('OK');
     expect(() =>
       extractClaudePrintResult(
         '{"type":"result","subtype":"success","is_error":false,"result":""}',
       ),
-    ).toThrow('Claude CLI returned empty result payload');
+    ).toThrow('Claude CLI returned no assistant message');
   });
 
-  it('uses claude JSON output and falls back when the CLI returns an empty result', async () => {
+  it('uses claude stream-json output and extracts assistant text', async () => {
     mockExecFile((_file, args, _options, callback) => {
       expect(args).toEqual([
         '-p',
         'Reply with exactly OK',
         '--output-format',
-        'json',
+        'stream-json',
+        '--verbose',
         '--resume',
         'session-123',
       ]);
       callback(
         null,
-        '{"type":"result","subtype":"success","is_error":false,"result":""}',
+        [
+          '{"type":"system","subtype":"init"}',
+          '{"type":"assistant","message":{"content":[{"type":"text","text":"OK"}]}}',
+          '{"type":"result","subtype":"success","is_error":false,"result":""}',
+        ].join('\n'),
         '',
       );
     });
@@ -159,7 +168,7 @@ warn line
       sessionId: 'session-123',
     });
 
-    expect(result.text).toContain('[claude-mock] Claude CLI returned empty result payload');
+    expect(result.text).toBe('OK');
   });
 
   it('classifies gemini capacity errors distinctly from auth failures', () => {
