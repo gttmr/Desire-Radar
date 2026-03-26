@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from ..analysis.store import AnalysisStore
 from ..normalizer.evidence_schema import Evidence
+from ..sources.registry import SourceRegistry
 from ..store.entity_store import EntityStore
 
 
@@ -21,6 +22,7 @@ class SignalCandidate(BaseModel):
     sources: list[str]
     first_seen: str
     last_seen: str
+    source_quality_score: float | None = None
 
     # LLM-enriched aggregated fields
     desire_types: list[str] = []  # Aggregated desire types from evidence
@@ -42,10 +44,12 @@ class SignalCandidateBuilder:
         time_window_seconds: int = 86400,
         entity_store: EntityStore | None = None,
         analysis_store: AnalysisStore | None = None,
+        source_registry: SourceRegistry | None = None,
     ) -> None:
         self.time_window_seconds = time_window_seconds
         self.entity_store = entity_store
         self.analysis_store = analysis_store
+        self.source_registry = source_registry
 
     def _is_t3_allowed(self, ev: Evidence, entity: str) -> bool:
         """Check if T3 evidence is allowed (approved in review queue)."""
@@ -73,6 +77,14 @@ class SignalCandidateBuilder:
             sources = list({ev.source for ev in evidences})
             source_count = len(sources)
             evidence_ids = [ev.evidence_id for ev in evidences]
+            weighted_source_score = sum(
+                self._source_weight(source, evidences)
+                for source in sources
+            )
+            source_quality_score = round(
+                weighted_source_score / max(1, source_count),
+                3,
+            )
 
             # Parse timestamps for recency
             timestamps: list[datetime] = []
@@ -88,7 +100,7 @@ class SignalCandidateBuilder:
 
             # Emergence score: based on source count and evidence count
             emergence_score = min(
-                10.0, source_count * 2.0 + len(evidences) * 0.5
+                10.0, weighted_source_score * 2.0 + len(evidences) * 0.5
             )
 
             # Velocity score: evidence count within the time window
@@ -103,9 +115,9 @@ class SignalCandidateBuilder:
             )
 
             # Status thresholds
-            if source_count >= 5:
+            if source_count >= 5 and source_quality_score >= 0.6:
                 status: Literal["emerging", "preheat", "spreading"] = "spreading"
-            elif source_count >= 3:
+            elif source_count >= 3 and source_quality_score >= 0.45:
                 status = "preheat"
             else:
                 status = "emerging"
@@ -161,6 +173,7 @@ class SignalCandidateBuilder:
                     sources=sources,
                     first_seen=first_seen,
                     last_seen=last_seen,
+                    source_quality_score=source_quality_score,
                     desire_types=desire_types,
                     behavioral_signals=behavioral_signals,
                     avg_intensity=avg_intensity,
@@ -178,3 +191,22 @@ class SignalCandidateBuilder:
         # Sort by emergence score descending
         candidates.sort(key=lambda c: c.emergence_score, reverse=True)
         return candidates
+
+    def _source_weight(self, source: str, evidences: list[Evidence]) -> float:
+        source_evidences = [ev for ev in evidences if ev.source == source]
+        source_tier = min((ev.source_tier for ev in source_evidences), default=3)
+        tier_weight = {1: 1.25, 2: 1.0, 3: 0.7}.get(source_tier, 0.7)
+
+        if self.source_registry is None:
+            return tier_weight
+
+        status = self.source_registry.status().get(source, {})
+        validity_score = float(status.get("validity_score") or 1.0)
+        validity_status = str(status.get("validity_status") or "healthy")
+        status_weight = {
+            "healthy": 1.0,
+            "noisy": 0.75,
+            "degraded": 0.4,
+            "blocked": 0.0,
+        }.get(validity_status, 0.5)
+        return round(tier_weight * validity_score * status_weight, 3)

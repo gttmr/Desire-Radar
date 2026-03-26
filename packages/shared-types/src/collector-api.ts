@@ -29,6 +29,10 @@ export type CollectorSourceCatalogEntry = {
   validity_score?: number | null;
   recommended_tier?: SourceTier | null;
   recommended_tier_reason?: string | null;
+  capabilities?: string[];
+  request_kinds_supported?: string[];
+  normalizer_key?: string | null;
+  manifest_path?: string | null;
   description?: string | null;
 };
 
@@ -184,7 +188,23 @@ export type HumanAnalystRequest = {
   producer_ref?: string;
   requested_by_agent?: string;
   run_id?: string;
-  requested_input_kind?: 'study_result' | 'data_source';
+  intent?:
+    | 'demand'
+    | 'ranking'
+    | 'pricing'
+    | 'supply'
+    | 'monetization'
+    | 'beneficiary'
+    | 'validation';
+  requested_input_kind?:
+    | 'study_result'
+    | 'data_source'
+    | 'channel_check'
+    | 'beneficiary_mapping'
+    | 'validation_note';
+  required_fields?: string[];
+  preferred_capabilities?: string[];
+  source_hints?: string[];
 };
 
 export type HumanEvidenceBatchRequest = {

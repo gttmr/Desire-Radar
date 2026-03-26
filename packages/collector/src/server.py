@@ -123,6 +123,7 @@ async def lifespan(app: FastAPI):
     signal_builder = SignalCandidateBuilder(
         entity_store=entity_store,
         analysis_store=analysis_store,
+        source_registry=source_registry,
     )
 
     analysis_policy = AnalysisPolicy(
@@ -130,6 +131,7 @@ async def lifespan(app: FastAPI):
         max_candidates_per_run=LLM_MAX_CANDIDATES_PER_RUN,
         cooldown_seconds=LLM_ENTITY_COOLDOWN_SECONDS,
         min_emergence_delta=LLM_MIN_EMERGENCE_DELTA,
+        source_registry=source_registry,
     )
     context_packer = ContextPacker(
         char_budget=LLM_CONTEXT_CHAR_BUDGET,
@@ -207,6 +209,7 @@ async def lifespan(app: FastAPI):
         review_threshold=LLM_REVIEW_CONFIDENCE_THRESHOLD,
         execution_mode=LLM_ANALYSIS_EXECUTION_MODE,
         analysis_batch_size=LLM_ANALYSIS_BATCH_SIZE,
+        source_registry=source_registry,
     )
     ingestion_engine = IngestionEngine(
         source_registry=source_registry,

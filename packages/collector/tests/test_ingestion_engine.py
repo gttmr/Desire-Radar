@@ -8,6 +8,7 @@ from src.ingest.human_input_models import HumanInputRoutingDecision
 from src.ingest.store import SubmissionStore
 from src.normalizer.evidence_schema import Evidence
 from src.resolver.entity_resolver import EntityResolver
+from src.sources.models import SourceDefinition
 from src.sources.defaults import build_default_sources
 from src.sources.registry import SourceRegistry
 from src.store.entity_store import EntityStore
@@ -187,6 +188,77 @@ async def test_run_derived_source_keeps_parent_lineage(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_run_source_persists_research_metadata_and_records_fulfillment(tmp_path):
+    engine, registry, _ = _build_engine(tmp_path)
+
+    record = await engine.run_source(
+        "dummy_pull",
+        producer_ref="research-loop",
+        metadata={
+            "question": "Refresh search demand before verdict.",
+            "intent": "demand",
+            "requested_by_agent": "research-loop",
+            "requested_input_kind": "study_result",
+        },
+    )
+
+    stored = await engine.get_submission(record.submission_id)
+    assert stored is not None
+    assert stored.status == "completed"
+    assert stored.producer_ref == "research-loop"
+    assert stored.metadata["question"] == "Refresh search demand before verdict."
+    validity = registry.validity("dummy_pull")
+    assert validity["metrics"]["research_fulfillment_total"] == 1
+    assert validity["metrics"]["research_useful_total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_source_uses_normalizer_key_instead_of_adapter_name(tmp_path):
+    connectors = {DummyConnector.name: DummyConnector()}
+    registry = SourceRegistry(
+        str(tmp_path / "sources.json"),
+        [
+            SourceDefinition(
+                source_id="custom_pull",
+                kind="pull",
+                ingestion_mode="raw",
+                configured_tier=2,
+                effective_tier=2,
+                enabled=True,
+                adapter_name=DummyConnector.name,
+                default_producer_ref="custom",
+                cadence_seconds=60,
+                runnable=True,
+                scheduled=True,
+                normalizer_key="manual_observation",
+            )
+        ],
+    )
+    analysis_engine = StubAnalysisEngine()
+    calls: list[str] = []
+
+    def normalizer(source: str, raw_payload: dict, snapshot_ref: str) -> list[Evidence]:
+        calls.append(source)
+        return _normalizer(source, raw_payload, snapshot_ref)
+
+    engine = IngestionEngine(
+        source_registry=registry,
+        submission_store=SubmissionStore(str(tmp_path / "submissions.json")),
+        snapshot_store=RawSnapshotStore(str(tmp_path / "snapshots")),
+        evidence_sink=EvidenceSink(),
+        entity_resolver=EntityResolver(EntityStore(str(tmp_path / "entities.json"))),
+        normalizer_fn=normalizer,
+        connectors=connectors,
+        analysis_engine=analysis_engine,
+    )
+
+    record = await engine.run_source("custom_pull")
+
+    assert record.status == "completed"
+    assert calls == ["manual_observation"]
+
+
+@pytest.mark.asyncio
 async def test_request_human_analyst_note_creates_pending_human_submission(tmp_path):
     engine, registry, _ = _build_engine(tmp_path)
 
@@ -206,8 +278,43 @@ async def test_request_human_analyst_note_creates_pending_human_submission(tmp_p
     assert stored.status == "pending_human"
     assert stored.metadata["requested_by_agent"] == "human_intel"
     assert stored.metadata["run_id"] == "run-123"
+    assert stored.metadata["intent"] == "demand"
     assert stored.metadata["requested_input_kind"] == "study_result"
+    assert stored.metadata["required_fields"] == []
+    assert stored.metadata["preferred_capabilities"] == []
     assert registry.status()["human_analyst_note"]["pending_submissions"] == 1
+
+
+@pytest.mark.asyncio
+async def test_request_human_analyst_note_stores_research_metadata(tmp_path):
+    engine, _, _ = _build_engine(tmp_path)
+
+    record = await engine.request_human_analyst_note(
+        {
+            "entity_candidates": ["Cursor"],
+            "question": "Which public beneficiary should be monitored?",
+            "why_now": "Need a public-market mapping before verdict.",
+            "priority": "high",
+            "requested_by_agent": "investment_verdict",
+            "intent": "beneficiary",
+            "requested_input_kind": "beneficiary_mapping",
+            "required_fields": ["entity", "public_beneficiary", "value_capture_reason"],
+            "preferred_capabilities": ["beneficiary", "monetization"],
+            "source_hints": ["agent_evidence"],
+        }
+    )
+
+    stored = await engine.get_submission(record.submission_id)
+    assert stored is not None
+    assert stored.metadata["intent"] == "beneficiary"
+    assert stored.metadata["requested_input_kind"] == "beneficiary_mapping"
+    assert stored.metadata["required_fields"] == [
+        "entity",
+        "public_beneficiary",
+        "value_capture_reason",
+    ]
+    assert stored.metadata["preferred_capabilities"] == ["beneficiary", "monetization"]
+    assert stored.metadata["source_hints"] == ["agent_evidence"]
 
 
 @pytest.mark.asyncio
@@ -241,6 +348,38 @@ async def test_human_analyst_note_fulfills_pending_request_and_sets_submission_r
     evidence = engine.evidence_sink.get_all()[0]
     assert evidence.submission_ref == note.submission_id
     assert registry.status()["human_analyst_note"]["pending_submissions"] == 0
+
+
+@pytest.mark.asyncio
+async def test_requested_channel_check_prefers_curated_dataset_route(tmp_path):
+    router = StubHumanInputRouter(
+        HumanInputRoutingDecision(
+            route="manual_observation",
+            confidence=0.99,
+            rationale="forced",
+            title="Ignored",
+            entities=["Cursor"],
+            observation="Ignored",
+        )
+    )
+    engine, _, _ = _build_engine(tmp_path, human_input_router=router)
+    request = await engine.request_human_analyst_note(
+        {
+            "entity_candidates": ["Cursor"],
+            "question": "Provide channel check inventory datapoints.",
+            "requested_input_kind": "channel_check",
+        }
+    )
+
+    await engine.submit_human_input(
+        {
+            "content": '{"evidence_items":[{"evidence_id":"manual-1","entity_candidates":["Cursor"],"signal_type":"channel_check","title_or_label":"Store inventory tightened","trust_score":0.9}]}',
+            "request_submission_id": request.submission_id,
+            "channel_name": "human-input",
+        }
+    )
+
+    assert router.calls[0][1] == "human_curated_dataset"
 
 
 @pytest.mark.asyncio

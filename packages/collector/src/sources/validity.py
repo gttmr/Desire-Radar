@@ -19,18 +19,59 @@ class SourceValidityEngine:
             if resolve_total > 0
             else 1.0
         )
+        candidate_adoption_rate = min(
+            1.0,
+            metrics.analysis_candidates_total / max(1, total_runs),
+        )
+        analysis_total = (
+            metrics.analysis_completed_total + metrics.analysis_needs_review_total
+            + metrics.analysis_failed_total
+        )
+        analysis_completion_rate = (
+            metrics.analysis_completed_total / analysis_total
+            if analysis_total > 0
+            else 0.5
+        )
+        needs_review_ratio = (
+            metrics.analysis_needs_review_total / analysis_total
+            if analysis_total > 0
+            else 0.0
+        )
+        research_usefulness_rate = (
+            metrics.research_useful_total / metrics.research_fulfillment_total
+            if metrics.research_fulfillment_total > 0
+            else 0.5
+        )
 
-        score = 1.0
-        score -= failure_rate * 0.6
-        score -= dedupe_ratio * 0.2
-        score += (resolve_rate - 0.5) * 0.4
+        score = 0.2
+        score += (1.0 - failure_rate) * 0.22
+        score += (1.0 - dedupe_ratio) * 0.1
+        score += resolve_rate * 0.16
+        score += candidate_adoption_rate * 0.12
+        score += analysis_completion_rate * 0.12
+        score += research_usefulness_rate * 0.14
+        score -= needs_review_ratio * 0.12
         score = max(0.0, min(1.0, score))
 
-        if failure_rate >= 0.7 or score < 0.25:
+        if (
+            failure_rate >= 0.7
+            or score < 0.25
+            or (
+                metrics.analysis_candidates_total >= 3
+                and analysis_completion_rate < 0.2
+            )
+        ):
             status: ValidityStatus = "blocked"
-        elif failure_rate >= 0.4 or score < 0.45:
+        elif (
+            failure_rate >= 0.4
+            or score < 0.45
+            or (
+                metrics.research_fulfillment_total >= 2
+                and research_usefulness_rate < 0.35
+            )
+        ):
             status = "degraded"
-        elif dedupe_ratio >= 0.5 or score < 0.7:
+        elif dedupe_ratio >= 0.5 or score < 0.7 or needs_review_ratio >= 0.45:
             status = "noisy"
         else:
             status = "healthy"
@@ -39,9 +80,18 @@ class SourceValidityEngine:
         reason: str | None = None
         if status in {"blocked", "degraded"} and source.configured_tier < 3:
             recommended_tier = min(3, source.configured_tier + 1)
-            reason = f"High failure/noise detected (failure_rate={failure_rate:.2f}, dedupe_ratio={dedupe_ratio:.2f})."
+            reason = (
+                "High failure/noise or weak downstream usefulness detected "
+                f"(failure_rate={failure_rate:.2f}, dedupe_ratio={dedupe_ratio:.2f}, "
+                f"analysis_completion_rate={analysis_completion_rate:.2f}, "
+                f"research_usefulness_rate={research_usefulness_rate:.2f})."
+            )
         elif status == "healthy" and score > 0.92 and source.configured_tier > 1:
             recommended_tier = max(1, source.configured_tier - 1)
-            reason = f"Strong reliability observed (resolve_rate={resolve_rate:.2f}, failure_rate={failure_rate:.2f})."
+            reason = (
+                "Strong reliability and downstream usefulness observed "
+                f"(resolve_rate={resolve_rate:.2f}, candidate_adoption_rate={candidate_adoption_rate:.2f}, "
+                f"analysis_completion_rate={analysis_completion_rate:.2f})."
+            )
 
         return status, round(score, 3), recommended_tier, reason

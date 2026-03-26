@@ -17,6 +17,9 @@ def _defaults() -> list[SourceDefinition]:
             runnable=True,
             scheduled=True,
             description="alpha source",
+            capabilities=["demand"],
+            request_kinds_supported=["run_source"],
+            normalizer_key="alpha",
         ),
         SourceDefinition(
             source_id="human_analyst_note",
@@ -31,6 +34,8 @@ def _defaults() -> list[SourceDefinition]:
             runnable=False,
             scheduled=False,
             description="human note",
+            capabilities=["validation"],
+            request_kinds_supported=["request_human_note"],
         ),
     ]
 
@@ -68,3 +73,35 @@ def test_source_registry_enable_toggle_is_persistent(tmp_path):
 
     assert reloaded.require("alpha").enabled is False
 
+
+def test_source_registry_surfaces_selection_metadata(tmp_path):
+    registry = SourceRegistry(str(tmp_path / "sources.json"), _defaults())
+
+    status = registry.status()["alpha"]
+    catalog = {item["source_id"]: item for item in registry.catalog()}
+
+    assert status["capabilities"] == ["demand"]
+    assert status["request_kinds_supported"] == ["run_source"]
+    assert status["normalizer_key"] == "alpha"
+    assert status["manifest_path"] is None
+    assert catalog["alpha"]["capabilities"] == ["demand"]
+    assert catalog["alpha"]["request_kinds_supported"] == ["run_source"]
+
+
+def test_source_registry_tracks_downstream_usefulness_metrics(tmp_path):
+    registry = SourceRegistry(str(tmp_path / "sources.json"), _defaults())
+
+    baseline = registry.validity("alpha")
+    registry.record_analysis_candidate(["alpha"])
+    registry.record_analysis_outcome(["alpha"], "completed")
+    registry.record_analysis_outcome(["alpha"], "failed")
+    registry.record_research_fulfillment("alpha", useful=True)
+
+    current = registry.validity("alpha")
+
+    assert current["metrics"]["analysis_candidates_total"] == 1
+    assert current["metrics"]["analysis_completed_total"] == 1
+    assert current["metrics"]["analysis_failed_total"] == 1
+    assert current["metrics"]["research_fulfillment_total"] == 1
+    assert current["metrics"]["research_useful_total"] == 1
+    assert current["validity_score"] >= baseline["validity_score"]

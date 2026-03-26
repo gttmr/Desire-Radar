@@ -13,9 +13,24 @@ export type ResearchRequest = {
   runId: string;
   entity: string;
   requestedByAgent: string;
+  intent:
+    | 'demand'
+    | 'ranking'
+    | 'pricing'
+    | 'supply'
+    | 'monetization'
+    | 'beneficiary'
+    | 'validation';
   requestKind: ResearchRequestKind;
   targetSourceId?: string;
-  requestedInputKind?: 'study_result' | 'data_source';
+  requestedInputKind?:
+    | 'study_result'
+    | 'data_source'
+    | 'channel_check'
+    | 'beneficiary_mapping'
+    | 'validation_note';
+  requiredFields?: string[];
+  preferredCapabilities?: string[];
   question: string;
   whyNow: string;
   priority: ResearchPriority;
@@ -37,7 +52,22 @@ export class ResearchService {
       if (!request.targetSourceId) {
         throw new Error(`run_source request requires targetSourceId (${request.entity})`);
       }
-      const submission = await this.client.triggerSource(request.targetSourceId);
+      const submission = await this.client.triggerSource(request.targetSourceId, {
+        producer_ref: request.requestedByAgent,
+        metadata: {
+          entity_candidates: [request.entity],
+          question: request.question,
+          why_now: request.whyNow,
+          priority: request.priority,
+          requested_by_agent: request.requestedByAgent,
+          run_id: request.runId,
+          intent: request.intent,
+          requested_input_kind: request.requestedInputKind,
+          required_fields: request.requiredFields ?? [],
+          preferred_capabilities: request.preferredCapabilities ?? [],
+          source_hints: request.targetSourceId ? [request.targetSourceId] : [],
+        },
+      });
       return this.toResult(request, submission);
     }
 
@@ -65,7 +95,11 @@ export class ResearchService {
             producer_ref: 'orchestrator',
             requested_by_agent: request.requestedByAgent,
             run_id: request.runId,
+            intent: request.intent,
             requested_input_kind: request.requestedInputKind,
+            required_fields: request.requiredFields,
+            preferred_capabilities: request.preferredCapabilities,
+            source_hints: request.targetSourceId ? [request.targetSourceId] : [],
           });
     return this.toResult(request, submission);
   }

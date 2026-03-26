@@ -1,6 +1,7 @@
 """Tests for the normalizer module."""
 
 from src.normalizer.normalizer import normalize
+from src.normalizer.registry import DEFAULT_NORMALIZER_REGISTRY
 
 
 class TestRedditNormalizer:
@@ -87,6 +88,10 @@ class TestManualObservationNormalizer:
 
 
 class TestUnknownSource:
+    def test_registry_exposes_known_normalizer_keys(self):
+        assert "google_trends" in DEFAULT_NORMALIZER_REGISTRY.keys()
+        assert "reddit_mentions" in DEFAULT_NORMALIZER_REGISTRY.keys()
+
     def test_unknown_source_returns_empty(self):
         results = normalize("unknown_source", {"data": "test"}, "snap_099")
         assert results == []

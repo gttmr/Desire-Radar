@@ -147,9 +147,12 @@ describe('ResearchLoopService', () => {
 
     expect(submitRequest).toHaveBeenCalledWith(
       expect.objectContaining({
+        intent: 'demand',
         requestKind: 'run_source',
         targetSourceId: 'google_trends',
         requestedInputKind: 'study_result',
+        preferredCapabilities: expect.arrayContaining(['demand']),
+        requiredFields: expect.arrayContaining(['entity', 'observed_behavior', 'timeframe']),
       }),
     );
     expect(awaitCompletion).toHaveBeenCalledOnce();
@@ -226,10 +229,95 @@ describe('ResearchLoopService', () => {
       expect.objectContaining({
         requestKind: 'request_human_note',
         targetSourceId: undefined,
-        requestedInputKind: 'data_source',
+        intent: 'supply',
+        requestedInputKind: 'channel_check',
+        requiredFields: expect.arrayContaining(['availability_or_inventory', 'timeframe']),
       }),
     );
     expect(result.reranDebate).toBe(false);
     expect(result.results[0]?.status).toBe('pending_human');
+  });
+
+  it('prefers sources with matching capabilities and stronger validity', async () => {
+    const contextStore = new RunContextStore();
+    contextStore.setBundle('run-1', makeBundle());
+
+    const submitRequest = vi.fn(async (request) => ({
+      request,
+      submissionId: 'sub-1',
+      status: 'completed' as const,
+      evidenceIds: ['ev-new'],
+    }));
+
+    const service = new ResearchLoopService(
+      { submitRequest } as never,
+      { awaitCompletion: vi.fn(async (result) => result) } as never,
+      {
+        buildBundle: vi.fn(async () => makeBundle()),
+        getSourcesCatalog: vi.fn(
+          async () =>
+            ({
+              google_trends: makeSource({
+                kind: 'pull',
+                ingestion_mode: 'raw',
+                enabled: true,
+                runnable: true,
+                validity_status: 'noisy',
+                validity_score: 0.55,
+              }),
+              supply_tightness_proxy: makeSource({
+                kind: 'derived',
+                ingestion_mode: 'evidence',
+                enabled: true,
+                runnable: true,
+                validity_status: 'healthy',
+                validity_score: 0.95,
+                capabilities: ['supply', 'pricing', 'channel_check'],
+              }),
+            }) satisfies Record<string, CollectorSourceStatus>,
+        ),
+      } as never,
+      contextStore,
+      { run: vi.fn() } as never,
+      {
+        directAwait: true,
+        pollIntervalMs: 1,
+        timeoutMs: 100,
+        maxRequestsPerRun: 1,
+        openQuestionThreshold: 1,
+        defaultRequestKind: 'run_source',
+        defaultPriority: 'normal',
+      },
+      {
+        defaultPlan: ['search_intent'],
+        maxRounds: 1,
+        consensusRequiresQuietRound: true,
+        triage: {
+          agentName: 'triage',
+          minimumEmergenceScore: 0,
+          minimumSourceCount: 1,
+        },
+        verdict: {
+          primaryAgent: 'investment_verdict',
+          crossCheckAgent: 'synthesis',
+          primaryModelProfile: 'premium',
+          crossCheckModelProfile: 'balanced',
+        },
+      },
+    );
+
+    await service.run({
+      runId: 'run-1',
+      entity: 'Cursor',
+      latestDebate: makeDebate('What does channel check data say about supply tightness?'),
+      providers: ['mock'],
+    });
+
+    expect(submitRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        intent: 'supply',
+        targetSourceId: 'supply_tightness_proxy',
+      }),
+    );
   });
 });

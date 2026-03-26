@@ -305,14 +305,25 @@ class IngestionEngine:
                 "priority": payload.get("priority", "normal"),
                 "requested_by_agent": payload.get("requested_by_agent"),
                 "run_id": payload.get("run_id"),
+                "intent": payload.get("intent", "demand"),
                 "requested_input_kind": payload.get("requested_input_kind", "study_result"),
+                "required_fields": payload.get("required_fields", []),
+                "preferred_capabilities": payload.get("preferred_capabilities", []),
+                "source_hints": payload.get("source_hints", []),
             },
         )
         self.submission_store.create(record)
         self.source_registry.record_submission("human_analyst_note")
         return record
 
-    async def run_source(self, source_id: str) -> SubmissionRecord:
+    async def run_source(
+        self,
+        source_id: str,
+        *,
+        producer_ref: str | None = None,
+        request_params: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SubmissionRecord:
         source = self.source_registry.require(source_id)
         if not source.enabled:
             raise ValueError(f"Source disabled: {source_id}")
@@ -326,7 +337,10 @@ class IngestionEngine:
                 source_kind=source.kind,
                 ingestion_mode="evidence",
                 status="running",
+                producer_ref=producer_ref or source.default_producer_ref,
                 received_at=self._now(),
+                request_params=request_params or {},
+                metadata=metadata or {},
             )
             self.submission_store.create(record)
             return await self._process_derived_submission(record, is_submission=False)
@@ -341,8 +355,11 @@ class IngestionEngine:
             source_kind=source.kind,
             ingestion_mode="raw",
             status="running",
+            producer_ref=producer_ref or source.default_producer_ref,
             received_at=self._now(),
             payloads=[payload.data for payload in payloads],
+            request_params=request_params or {},
+            metadata=metadata or {},
         )
         self.submission_store.create(record)
         return await self._process_raw_payloads(
@@ -434,7 +451,7 @@ class IngestionEngine:
                     deduped += 1
 
                 evidences = self.normalizer_fn(
-                    source=source.adapter_name,
+                    source=source.normalizer_key or source.adapter_name,
                     raw_payload=payload.data,
                     snapshot_ref=saved["snapshot_id"],
                 )
@@ -469,6 +486,10 @@ class IngestionEngine:
                 entity_resolve_miss_total=resolve_miss,
                 is_run=is_run,
                 is_submission=is_submission,
+            )
+            self._record_research_fulfillment_if_applicable(
+                record,
+                useful=len(evidence_ids) > 0,
             )
             return updated
         except Exception as exc:
@@ -569,6 +590,10 @@ class IngestionEngine:
                 is_run=False,
                 is_submission=is_submission,
             )
+            self._record_research_fulfillment_if_applicable(
+                record,
+                useful=len(evidence_ids) > 0,
+            )
             return updated
         except Exception as exc:
             updated = self.submission_store.update(
@@ -658,6 +683,10 @@ class IngestionEngine:
                 evidence_total=len(evidence_ids),
                 is_submission=True,
             )
+            self._record_research_fulfillment_if_applicable(
+                record,
+                useful=len(evidence_ids) > 0,
+            )
             return updated
         except Exception as exc:
             updated = self.submission_store.update(
@@ -714,6 +743,10 @@ class IngestionEngine:
                 entity_resolve_miss_total=miss_count,
                 is_run=True,
                 is_submission=is_submission,
+            )
+            self._record_research_fulfillment_if_applicable(
+                record,
+                useful=len(resolved_evidences) > 0,
             )
             return updated
         except Exception as exc:
@@ -796,6 +829,30 @@ class IngestionEngine:
                 is_submission=True,
             )
 
+    def _record_research_fulfillment_if_applicable(
+        self,
+        record: SubmissionRecord,
+        *,
+        useful: bool,
+    ) -> None:
+        metadata = record.metadata or {}
+        if not any(
+            metadata.get(key)
+            for key in (
+                "question",
+                "intent",
+                "requested_by_agent",
+                "requested_input_kind",
+                "request_submission_id",
+                "run_id",
+            )
+        ):
+            return
+        self.source_registry.record_research_fulfillment(
+            record.source_id,
+            useful=useful,
+        )
+
     async def _dispatch_human_input(
         self,
         decision: HumanInputRoutingDecision,
@@ -861,9 +918,14 @@ class IngestionEngine:
         if request is None:
             return None
         requested_kind = request.metadata.get("requested_input_kind")
-        if requested_kind == "data_source":
+        if requested_kind in {"data_source", "channel_check"}:
             return "human_curated_dataset"
-        if requested_kind == "study_result":
+        if requested_kind in {"study_result", "beneficiary_mapping", "validation_note"}:
+            return "human_analyst_note"
+        intent = request.metadata.get("intent")
+        if intent in {"pricing", "supply"}:
+            return "human_curated_dataset"
+        if intent in {"monetization", "beneficiary", "validation", "demand", "ranking"}:
             return "human_analyst_note"
         return None
 

@@ -3,7 +3,7 @@
 from typing import Any
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/internal")
 
@@ -22,6 +22,12 @@ class BuildBundleRequest(BaseModel):
 
 class AnalysisRunRequest(BaseModel):
     entity: str
+
+
+class RunSourceRequest(BaseModel):
+    producer_ref: str | None = None
+    request_params: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class UpdateSourceTierRequest(BaseModel):
@@ -131,9 +137,14 @@ async def analysis_preview_batch() -> dict:
 
 
 @router.post("/sources/run/{source_id}")
-async def run_source(source_id: str) -> dict:
+async def run_source(source_id: str, body: RunSourceRequest | None = None) -> dict:
     ingestion_engine = _deps["ingestion_engine"]
-    record = await ingestion_engine.run_source(source_id)
+    record = await ingestion_engine.run_source(
+        source_id,
+        producer_ref=body.producer_ref if body else None,
+        request_params=body.request_params if body else None,
+        metadata=body.metadata if body else None,
+    )
     return record.model_dump(
         exclude={"payloads", "evidence_payloads", "request_params"},
     )

@@ -3,7 +3,19 @@
 from datetime import datetime, timezone
 
 from src.builder.signal_candidate_builder import SignalCandidateBuilder
+from src.connectors.base import BaseConnector
 from src.normalizer.evidence_schema import Evidence
+from src.sources.defaults import build_default_sources
+from src.sources.registry import SourceRegistry
+
+
+class _DummyConnector(BaseConnector):
+    name = "google_trends"
+    cadence_seconds = 60
+    source_tier = 2
+
+    async def fetch(self):
+        return []
 
 
 def _make_evidence(
@@ -110,3 +122,37 @@ class TestSignalCandidateBuilder:
         candidates = builder.build_candidates(evidence)
         assert len(candidates) == 1
         assert candidates[0].velocity_score > 0
+
+    def test_source_validity_lowers_emergence_score(self, tmp_path):
+        registry = SourceRegistry(
+            str(tmp_path / "sources.json"),
+            build_default_sources({"dummy": _DummyConnector()}),
+        )
+        registry.record_processing(
+            "google_trends",
+            success=False,
+            snapshot_total=5,
+            is_submission=True,
+        )
+        registry.record_processing(
+            "google_trends",
+            success=False,
+            snapshot_total=5,
+            is_submission=True,
+        )
+        registry.record_processing(
+            "google_trends",
+            success=False,
+            snapshot_total=5,
+            is_submission=True,
+        )
+
+        builder = SignalCandidateBuilder(source_registry=registry)
+        evidence = [
+            _make_evidence(["ChatGPT"], source="google_trends", evidence_id="ev1"),
+            _make_evidence(["ChatGPT"], source="manual_observation", source_tier=1, evidence_id="ev2"),
+        ]
+        candidates = builder.build_candidates(evidence)
+        assert len(candidates) == 1
+        assert candidates[0].source_quality_score is not None
+        assert candidates[0].source_quality_score < 1.0

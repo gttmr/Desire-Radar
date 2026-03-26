@@ -1,6 +1,6 @@
 """Public API routes for the collector service."""
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -81,7 +81,25 @@ class HumanAnalystRequestRequest(BaseModel):
     producer_ref: str | None = None
     requested_by_agent: str | None = None
     run_id: str | None = None
-    requested_input_kind: str = "study_result"
+    intent: Literal[
+        "demand",
+        "ranking",
+        "pricing",
+        "supply",
+        "monetization",
+        "beneficiary",
+        "validation",
+    ] = "demand"
+    requested_input_kind: Literal[
+        "study_result",
+        "data_source",
+        "channel_check",
+        "beneficiary_mapping",
+        "validation_note",
+    ] = "study_result"
+    required_fields: list[str] = Field(default_factory=list)
+    preferred_capabilities: list[str] = Field(default_factory=list)
+    source_hints: list[str] = Field(default_factory=list)
 
 
 class RawEnvelopeRequest(BaseModel):

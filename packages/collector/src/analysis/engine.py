@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from ..builder.signal_candidate_builder import SignalCandidateBuilder
+from ..sources.registry import SourceRegistry
 from ..store.evidence_sink import EvidenceSink
 from .context_packer import ContextPacker
 from .models import AnalysisProjection, AnalysisTask, PackedContext
@@ -37,6 +38,7 @@ class AnalysisEngine:
         review_threshold: float = 0.55,
         execution_mode: str = "batch",
         analysis_batch_size: int = 3,
+        source_registry: SourceRegistry | None = None,
     ) -> None:
         self.evidence_sink = evidence_sink
         self.signal_builder = signal_builder
@@ -49,6 +51,7 @@ class AnalysisEngine:
         self.review_threshold = review_threshold
         self.execution_mode = execution_mode
         self.analysis_batch_size = analysis_batch_size
+        self.source_registry = source_registry
         self._queue: asyncio.Queue[AnalysisTask] = asyncio.Queue()
         self._queued_entities: set[str] = set()
         self._worker_task: asyncio.Task | None = None
@@ -142,6 +145,8 @@ class AnalysisEngine:
             self._queued_entities.add(entity_key)
             self.analysis_store.mark_pending(task)
             self._queue.put_nowait(task)
+            if self.source_registry is not None:
+                self.source_registry.record_analysis_candidate(task.sources)
             accepted.append(task)
 
         return accepted
@@ -172,6 +177,7 @@ class AnalysisEngine:
         bundle = self._resolve_entity_bundle(task.entity)
         if bundle is None:
             self.analysis_store.mark_failed(task, "candidate_disappeared", execution_mode=execution_mode, batch_size=1)
+            self._record_analysis_outcome(task, "failed")
             return
 
         candidate, evidences, projection = bundle
@@ -200,6 +206,7 @@ class AnalysisEngine:
                 execution_mode=execution_mode,
                 batch_size=1,
             )
+            self._record_analysis_outcome(task, "failed")
             return
 
         response = result.responses[0]
@@ -214,6 +221,10 @@ class AnalysisEngine:
             execution_mode=execution_mode,
             batch_size=1,
         )
+        self._record_analysis_outcome(
+            task,
+            "needs_review" if response.confidence < self.review_threshold else "completed",
+        )
 
     async def _process_batch(self, tasks: list[AnalysisTask]) -> None:
         prepared: list[tuple[AnalysisTask, object, list, AnalysisProjection | None]] = []
@@ -221,6 +232,7 @@ class AnalysisEngine:
             bundle = self._resolve_entity_bundle(task.entity)
             if bundle is None:
                 self.analysis_store.mark_failed(task, "candidate_disappeared", execution_mode="batch", batch_size=len(tasks))
+                self._record_analysis_outcome(task, "failed")
                 continue
             candidate, evidences, projection = bundle
             prepared.append((task, candidate, evidences, projection))
@@ -256,6 +268,7 @@ class AnalysisEngine:
                     execution_mode="batch",
                     batch_size=len(prepared),
                 )
+                self._record_analysis_outcome(task, "failed")
             return
 
         response_map = {
@@ -278,6 +291,7 @@ class AnalysisEngine:
                         execution_mode="batch",
                         batch_size=len(prepared),
                     )
+                    self._record_analysis_outcome(task, "failed")
                     continue
 
             self.analysis_store.mark_completed(
@@ -290,6 +304,10 @@ class AnalysisEngine:
                 usage=result.usage,
                 execution_mode="batch",
                 batch_size=len(prepared),
+            )
+            self._record_analysis_outcome(
+                task,
+                "needs_review" if response.confidence < self.review_threshold else "completed",
             )
 
     def _build_preview_payload(self, packed: PackedContext) -> dict:
@@ -361,6 +379,18 @@ class AnalysisEngine:
 
         ranked.sort(key=lambda item: item[0], reverse=True)
         return ranked
+
+    def _record_analysis_outcome(
+        self,
+        task: AnalysisTask,
+        outcome: str,
+    ) -> None:
+        if self.source_registry is None:
+            return
+        normalized = "needs_review" if outcome == "needs_review" else (
+            "completed" if outcome == "completed" else "failed"
+        )
+        self.source_registry.record_analysis_outcome(task.sources, normalized)
 
     def _resolve_entity_bundle(
         self,

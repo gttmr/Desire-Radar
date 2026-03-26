@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
+from typing import Literal
 
 from .models import SourceDefinition
 from .validity import SourceValidityEngine
@@ -106,6 +107,45 @@ class SourceRegistry:
         self._refresh_validity(source)
         self._save()
 
+    def record_analysis_candidate(self, source_ids: list[str]) -> None:
+        changed = False
+        for source_id in {source_id for source_id in source_ids if source_id in self._sources}:
+            source = self._sources[source_id]
+            source.metrics.analysis_candidates_total += 1
+            self._refresh_validity(source)
+            changed = True
+        if changed:
+            self._save()
+
+    def record_analysis_outcome(
+        self,
+        source_ids: list[str],
+        outcome: Literal["completed", "needs_review", "failed"],
+    ) -> None:
+        changed = False
+        for source_id in {source_id for source_id in source_ids if source_id in self._sources}:
+            source = self._sources[source_id]
+            if outcome == "completed":
+                source.metrics.analysis_completed_total += 1
+            elif outcome == "needs_review":
+                source.metrics.analysis_needs_review_total += 1
+            else:
+                source.metrics.analysis_failed_total += 1
+            self._refresh_validity(source)
+            changed = True
+        if changed:
+            self._save()
+
+    def record_research_fulfillment(self, source_id: str, *, useful: bool) -> None:
+        if source_id not in self._sources:
+            return
+        source = self._sources[source_id]
+        source.metrics.research_fulfillment_total += 1
+        if useful:
+            source.metrics.research_useful_total += 1
+        self._refresh_validity(source)
+        self._save()
+
     def catalog(self) -> list[dict]:
         return [
             {
@@ -126,6 +166,10 @@ class SourceRegistry:
                 "recommended_tier": source.recommended_tier,
                 "recommended_tier_reason": source.recommended_tier_reason,
                 "description": source.description,
+                "capabilities": source.capabilities,
+                "request_kinds_supported": source.request_kinds_supported,
+                "normalizer_key": source.normalizer_key,
+                "manifest_path": source.manifest_path,
             }
             for source in self._sources.values()
         ]
@@ -150,6 +194,10 @@ class SourceRegistry:
                 "validity_score": source.validity_score,
                 "recommended_tier": source.recommended_tier,
                 "recommended_tier_reason": source.recommended_tier_reason,
+                "capabilities": source.capabilities,
+                "request_kinds_supported": source.request_kinds_supported,
+                "normalizer_key": source.normalizer_key,
+                "manifest_path": source.manifest_path,
             }
             for source in self._sources.values()
         }
@@ -188,6 +236,10 @@ class SourceRegistry:
             current.runnable = default.runnable
             current.scheduled = default.scheduled
             current.description = default.description
+            current.capabilities = list(default.capabilities)
+            current.request_kinds_supported = list(default.request_kinds_supported)
+            current.normalizer_key = default.normalizer_key
+            current.manifest_path = default.manifest_path
         for source in self._sources.values():
             self._refresh_validity(source)
         self._save()

@@ -6,6 +6,11 @@ import type { SubmissionPoller } from '../collector/submission-poller.js';
 import type { DebateService } from './debate.js';
 import type { RunContextStore } from '../orchestrator/run-context-store.js';
 import type { DebatePhaseResult, ResearchLoopResult } from './types.js';
+import {
+  inferSourceCapabilities,
+  planResearchQuestion,
+  supportsRequestKind,
+} from './research-planner.js';
 
 export class ResearchLoopService {
   constructor(
@@ -31,25 +36,36 @@ export class ResearchLoopService {
 
     const bundle = this.contextStore.getBundle(params.runId);
     const sourceCatalog = await this.candidateService.getSourcesCatalog();
-    const preferredSourceId = bundle
-      ? this.selectPreferredSource(bundle.evidence_items.map((item) => item.source), sourceCatalog)
-      : undefined;
     const requests = openQuestions
       .slice(0, this.researchPolicy.maxRequestsPerRun)
-      .map<ResearchRequest>((question) => ({
-        runId: params.runId,
-        entity: params.entity,
-        requestedByAgent: 'research-loop',
-        requestKind:
-          this.researchPolicy.defaultRequestKind === 'run_source' && !preferredSourceId
+      .map<ResearchRequest>((question) => {
+        const plan = planResearchQuestion(question, this.researchPolicy.defaultRequestKind);
+        const preferredSourceId = this.selectPreferredSource(
+          bundle?.evidence_items.map((item) => item.source) ?? [],
+          sourceCatalog,
+          plan.preferredCapabilities,
+          plan.requestKind,
+        );
+        const requestKind =
+          plan.requestKind === 'run_source' && !preferredSourceId
             ? 'request_human_note'
-            : this.researchPolicy.defaultRequestKind,
-        targetSourceId: preferredSourceId,
-        requestedInputKind: this.inferRequestedInputKind(question),
-        question,
-        whyNow: 'Debate produced unresolved questions that need additional evidence.',
-        priority: this.researchPolicy.defaultPriority,
-      }));
+            : plan.requestKind;
+
+        return {
+          runId: params.runId,
+          entity: params.entity,
+          requestedByAgent: 'research-loop',
+          intent: plan.intent,
+          requestKind,
+          targetSourceId: requestKind === 'run_source' ? preferredSourceId : undefined,
+          requestedInputKind: plan.requestedInputKind,
+          requiredFields: plan.requiredFields,
+          preferredCapabilities: plan.preferredCapabilities,
+          question,
+          whyNow: 'Debate produced unresolved questions that need additional evidence.',
+          priority: this.researchPolicy.defaultPriority,
+        };
+      });
 
     const submitted = await Promise.all(
       requests.map(async (request) => {
@@ -91,11 +107,14 @@ export class ResearchLoopService {
   private selectPreferredSource(
     bundleSources: string[],
     sourceCatalog: Record<string, CollectorSourceStatus>,
+    preferredCapabilities: string[],
+    requestKind: ResearchRequest['requestKind'],
   ): string | undefined {
     const uniqueSources = bundleSources.filter(
       (source, index, sources) => source && sources.indexOf(source) === index,
     );
-    const ranked = uniqueSources
+    const knownSources = Object.keys(sourceCatalog);
+    const ranked = [...new Set([...uniqueSources, ...knownSources])]
       .map((sourceId) => ({ sourceId, source: sourceCatalog[sourceId] }))
       .filter(
         (
@@ -103,10 +122,25 @@ export class ResearchLoopService {
         ): entry is { sourceId: string; source: CollectorSourceStatus } =>
           Boolean(entry.source) &&
           entry.source.enabled !== false &&
-          entry.source.runnable === true &&
-          entry.source.kind !== 'human',
+          supportsRequestKind(entry.sourceId, entry.source, requestKind),
       )
       .sort((left, right) => {
+        const capabilityRank =
+          this.capabilityScore(right.sourceId, right.source, preferredCapabilities) -
+          this.capabilityScore(left.sourceId, left.source, preferredCapabilities);
+        if (capabilityRank !== 0) {
+          return capabilityRank;
+        }
+        const currentBundleRank =
+          Number(uniqueSources.includes(right.sourceId)) - Number(uniqueSources.includes(left.sourceId));
+        if (currentBundleRank !== 0) {
+          return currentBundleRank;
+        }
+        const validityRank =
+          this.validityScore(right.source) - this.validityScore(left.source);
+        if (validityRank !== 0) {
+          return validityRank;
+        }
         const kindRank = this.kindPriority(left.source.kind) - this.kindPriority(right.source.kind);
         if (kindRank !== 0) {
           return kindRank;
@@ -132,6 +166,32 @@ export class ResearchLoopService {
     return ranked[0]?.sourceId;
   }
 
+  private capabilityScore(
+    sourceId: string,
+    source: CollectorSourceStatus,
+    preferredCapabilities: string[],
+  ): number {
+    const capabilities = inferSourceCapabilities(sourceId, source);
+    return preferredCapabilities.reduce(
+      (score, capability) => score + (capabilities.includes(capability) ? 1 : 0),
+      0,
+    );
+  }
+
+  private validityScore(source: CollectorSourceStatus): number {
+    const status = source.validity_status ?? 'healthy';
+    const score = source.validity_score ?? 1;
+    const statusWeight =
+      status === 'healthy'
+        ? 1
+        : status === 'noisy'
+          ? 0.7
+          : status === 'degraded'
+            ? 0.35
+            : 0.1;
+    return statusWeight * score;
+  }
+
   private kindPriority(kind: CollectorSourceStatus['kind']): number {
     switch (kind) {
       case 'pull':
@@ -143,29 +203,6 @@ export class ResearchLoopService {
       default:
         return 3;
     }
-  }
-
-  private inferRequestedInputKind(question: string): 'study_result' | 'data_source' {
-    const normalized = question.toLowerCase();
-    const dataLikeTerms = [
-      'data',
-      'datapoint',
-      'count',
-      'numbers',
-      'pricing',
-      'inventory',
-      'sell out',
-      'sell-out',
-      'channel check',
-      'channel',
-      'seat count',
-      'store',
-      'survey',
-    ];
-
-    return dataLikeTerms.some((term) => normalized.includes(term))
-      ? 'data_source'
-      : 'study_result';
   }
 
   private collectOpenQuestions(result: DebatePhaseResult): string[] {

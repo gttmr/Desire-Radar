@@ -1,0 +1,19 @@
+{
+  "source_id": "agent_evidence",
+  "kind": "agent",
+  "ingestion_mode": "evidence",
+  "configured_tier": 2,
+  "adapter_name": "agent_evidence",
+  "default_producer_ref": "orchestrator-agent",
+  "description": "Normalized evidence pushed by external agents",
+  "capabilities": [
+    "demand",
+    "pricing",
+    "supply",
+    "monetization",
+    "beneficiary",
+    "validation"
+  ],
+  "request_kinds_supported": ["submit_agent_evidence"],
+  "normalizer_key": null
+}

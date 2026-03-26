@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .evidence_schema import Evidence
+from .registry import DEFAULT_NORMALIZER_REGISTRY, register_normalizer
 
 # Words to ignore when extracting entity candidates from titles
 _STOP_WORDS = {
@@ -39,6 +40,7 @@ def _gen_id() -> str:
     return uuid.uuid4().hex[:16]
 
 
+@register_normalizer("reddit_mentions")
 def _normalize_reddit(
     raw_payload: dict[str, Any], snapshot_ref: str
 ) -> list[Evidence]:
@@ -73,6 +75,7 @@ def _normalize_reddit(
     ]
 
 
+@register_normalizer("manual_observation")
 def _normalize_manual(
     raw_payload: dict[str, Any], snapshot_ref: str
 ) -> list[Evidence]:
@@ -98,6 +101,7 @@ def _normalize_manual(
     ]
 
 
+@register_normalizer("google_trends")
 def _normalize_google_trends(
     raw_payload: dict[str, Any], snapshot_ref: str
 ) -> list[Evidence]:
@@ -130,6 +134,7 @@ def _normalize_google_trends(
     ]
 
 
+@register_normalizer("naver_datalab")
 def _normalize_naver_datalab(
     raw_payload: dict[str, Any], snapshot_ref: str
 ) -> list[Evidence]:
@@ -164,6 +169,7 @@ def _normalize_naver_datalab(
     ]
 
 
+@register_normalizer("app_store_top_charts")
 def _normalize_app_store_top_charts(
     raw_payload: dict[str, Any], snapshot_ref: str
 ) -> list[Evidence]:
@@ -198,6 +204,7 @@ def _normalize_app_store_top_charts(
     ]
 
 
+@register_normalizer("steamdb_top_sellers")
 def _normalize_steamdb_top_sellers(
     raw_payload: dict[str, Any], snapshot_ref: str
 ) -> list[Evidence]:
@@ -240,6 +247,7 @@ def _normalize_steamdb_top_sellers(
     ]
 
 
+@register_normalizer("tiktok_creative_center")
 def _normalize_tiktok_creative_center(
     raw_payload: dict[str, Any], snapshot_ref: str
 ) -> list[Evidence]:
@@ -276,6 +284,7 @@ def _normalize_tiktok_creative_center(
     ]
 
 
+@register_normalizer("similarweb_movers")
 def _normalize_similarweb_movers(
     raw_payload: dict[str, Any], snapshot_ref: str
 ) -> list[Evidence]:
@@ -316,23 +325,8 @@ def _normalize_similarweb_movers(
     ]
 
 
-_NORMALIZERS: dict[str, Any] = {
-    "reddit_mentions": _normalize_reddit,
-    "manual_observation": _normalize_manual,
-    "google_trends": _normalize_google_trends,
-    "naver_datalab": _normalize_naver_datalab,
-    "app_store_top_charts": _normalize_app_store_top_charts,
-    "steamdb_top_sellers": _normalize_steamdb_top_sellers,
-    "tiktok_creative_center": _normalize_tiktok_creative_center,
-    "similarweb_movers": _normalize_similarweb_movers,
-}
-
-
 def normalize(
     source: str, raw_payload: dict[str, Any], snapshot_ref: str
 ) -> list[Evidence]:
     """Dispatch to per-source normalizer. Return empty list for unknown sources."""
-    normalizer_fn = _NORMALIZERS.get(source)
-    if normalizer_fn is None:
-        return []
-    return normalizer_fn(raw_payload, snapshot_ref)
+    return DEFAULT_NORMALIZER_REGISTRY.normalize(source, raw_payload, snapshot_ref)

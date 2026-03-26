@@ -39,6 +39,10 @@ export type CollectorSourceStatus = {
   validity_score?: number | null;
   recommended_tier?: 1 | 2 | 3 | null;
   recommended_tier_reason?: string | null;
+  capabilities?: string[];
+  request_kinds_supported?: string[];
+  normalizer_key?: string | null;
+  manifest_path?: string | null;
   pending_submissions?: number;
   failure_count?: number;
   adapter_name?: string;
@@ -71,6 +75,7 @@ export type CollectorSubmission = {
   producer_ref?: string;
   received_at: string;
   processed_at?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export class CollectorClient {
@@ -122,8 +127,19 @@ export class CollectorClient {
     }
   }
 
-  async triggerSource(sourceId: string): Promise<CollectorSubmission> {
-    return this.post<CollectorSubmission>(`/internal/sources/run/${encodeURIComponent(sourceId)}`, {});
+  async triggerSource(
+    sourceId: string,
+    body?: {
+      producer_ref?: string;
+      request_params?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<CollectorSubmission> {
+    return this.post<CollectorSubmission>(`/internal/sources/run/${encodeURIComponent(sourceId)}`, {
+      producer_ref: body?.producer_ref,
+      request_params: body?.request_params ?? {},
+      metadata: body?.metadata ?? {},
+    });
   }
 
   async submitManualObservation(note: {
@@ -170,7 +186,23 @@ export class CollectorClient {
     producer_ref?: string;
     requested_by_agent?: string;
     run_id?: string;
-    requested_input_kind?: 'study_result' | 'data_source';
+    intent?:
+      | 'demand'
+      | 'ranking'
+      | 'pricing'
+      | 'supply'
+      | 'monetization'
+      | 'beneficiary'
+      | 'validation';
+    requested_input_kind?:
+      | 'study_result'
+      | 'data_source'
+      | 'channel_check'
+      | 'beneficiary_mapping'
+      | 'validation_note';
+    required_fields?: string[];
+    preferred_capabilities?: string[];
+    source_hints?: string[];
   }): Promise<CollectorSubmission> {
     return this.post<CollectorSubmission>('/ingest/human-analyst-request', body);
   }

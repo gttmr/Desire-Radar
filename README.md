@@ -245,6 +245,9 @@ npm run dev:orchestrator
 npm --prefix packages/mcp-orchestrator run build
 npm --prefix packages/mcp-orchestrator run smoke:providers
 
+# orchestrator + collector end-to-end smoke (requires both services running)
+npm --prefix packages/mcp-orchestrator run smoke:end-to-end
+
 # collector tests
 cd packages/collector && pytest
 
@@ -258,6 +261,17 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 |--------|------|
 | `/ping` | 봇 상태 확인 |
 | `/watchlist-add ticker:<코드>` | 관심 종목 추가 |
+
+## Smoke 해석 기준
+
+- `smoke:providers`
+  - `healthStatus`가 `healthy`면 provider health probe 통과
+  - `executeStatus=degraded`면 provider 실패가 구조적으로 surface된 것
+- `smoke:end-to-end`
+  - human input submission과 pull source submission이 둘 다 settle 되어야 한다
+  - candidate가 생성되고 `POST /runs/from-candidate`가 verdict를 반환해야 한다
+  - beneficiary mapping이 비어 있으면 실패로 본다
+  - provider가 degraded 상태라면 verdict confidence가 cap되어야 한다
 | `/watchlist-remove ticker:<코드>` | 관심 종목 제거 |
 | `/watchlist-list` | 관심 종목 목록 |
 | `/report-summary` | 요약 리포트 생성 |
