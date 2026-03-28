@@ -9,6 +9,7 @@
 - [AGENTS.md](AGENTS.md): Codex CLI 작업 규칙과 저장소 작업 방식
 - [ARCHITECTURE.md](ARCHITECTURE.md): 서비스 경계, 핵심 추상화, CLI/provider 변동성 대응 원칙
 - [RUNBOOK.md](RUNBOOK.md): WSL 기준 로컬 런타임, 네이티브 실행, 재기동, health, smoke, 장애 대응 절차
+- [docs/collector-source-agents.md](docs/collector-source-agents.md): collector source-agent living design
 - `packages/mcp-orchestrator/src/agents/*.md`: 오케스트레이터 분석 에이전트 프롬프트
 
 ## 아키텍처
@@ -49,6 +50,7 @@ Discord human input / slash commands
 ### Collector
 - 공개 API, 사람 입력, agent push, pull connector를 모두 공통 ingestion pipeline으로 처리한다.
 - source registry가 각 source의 `kind`, `ingestion_mode`, `configured_tier`, `effective_tier`, validity 상태를 관리한다.
+- source별 `agent.md`를 통해 source submission 단위 요약과 파생 evidence를 만들 수 있다.
 - candidate 분석은 기본적으로 `batch` 모드로 돌아가며, 상위 후보를 묶어 CLI 기반 LLM 호출을 수행한다.
 - `POST /ingest/human-input`는 free-form 입력을 받아 collector 내부에서 다음 중 하나로 라우팅한다.
   - `manual_observation`
@@ -110,6 +112,7 @@ cp .env.example .env
 - `mcp-orchestrator`에서 Codex를 실제로 쓸 때는 `${HOME}/.codex` mount를 writable로 두는 편이 낫다. WebSocket 고부하 시 HTTPS fallback과 모델 cache 갱신이 read-only mount에서 실패할 수 있다.
 - Gemini도 `${HOME}/.gemini` 아래에 state/history/tmp를 쓰므로, Docker에서 실제 실행/health probe를 돌릴 때는 writable mount가 안전하다.
 - provider session artifact는 `data/provider-sessions`, collector CLI session artifact는 `data/llm-session-workdirs` 아래에 쌓인다.
+- collector source-agent artifact는 `data/source_agent_artifacts.json`과 source-agent session workdir 아래에 남는다.
 - provider 장애 알림은 discord-bot이 `/health`를 polling해서 보내고, optional repair command는 orchestrator가 인증/로그인 계열 실패에 한해 수행한다.
 - Discord provider alert에는 현재 에러 요약, check 시각, repair 설정 여부, 마지막 repair 결과가 같이 포함된다.
 
@@ -196,6 +199,7 @@ collector는 이를 `human_input_inbox` source로 받고 내부 라우터가 적
 - 각 bundle은 `evidence_items`와 함께 `graph` snapshot을 가진다. 이 graph는 최소한 `entity`, `source`, `signal`, `event` 관계를 보존한다.
 - orchestrator는 graph summary를 prompt에 같이 넣어 “어떤 사건이 누구에게 연결되는지”를 더 일관되게 판단한다.
 - provider 결과는 가능하면 즉시 stdout/json으로 받고, 동시에 session directory에도 기록한다.
+- collector source-agent session은 collector candidate analysis session과 별개다. 전자는 source submission enrichment용, 후자는 candidate shortlist enrichment용이다.
 - caller가 결과를 직접 회수할 수 없거나 future Discord/bridge 주입이 필요하면 `external_injection` transport가 같은 session directory를 통해 결과를 회수한다.
 
 ## 주요 API
@@ -231,6 +235,9 @@ collector는 이를 `human_input_inbox` source로 받고 내부 라우터가 적
 - `PATCH /internal/sources/{source_id}/tier`
 - `PATCH /internal/sources/{source_id}/enable`
 - `GET /internal/sources/{source_id}/validity`
+- `GET /internal/source-agents/{source_id}/status`
+- `GET /internal/source-agents/{source_id}/preview`
+- `POST /internal/source-agents/run/{source_id}`
 
 ### Orchestrator
 - `POST /runs/from-candidate`
@@ -252,6 +259,7 @@ collector는 Docker 안에서도 CLI 기반 분석을 수행할 수 있게 구�
 - default model: `gpt-5.4-mini`
 
 human input 라우팅도 별도 domain에서 CLI JSON 분류를 사용한다.
+source-agent 실행도 collector 전체 공통 provider/model 설정을 쓰고, source별 차이는 `packages/collector/src/agents/sources/*.md`와 source metadata로만 준다.
 
 중요:
 - collector와 orchestrator는 둘 다 호스트의 CLI 인증 디렉터리와 npm global package mount를 사용한다.

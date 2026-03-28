@@ -29,8 +29,10 @@ Collector owns:
 - source provenance, source tier, and source validity state
 - submission tracking and human follow-up queues
 - normalized evidence and candidate construction
+- source-specific collector-owned source-agents and external push agents under the same source registry
 - event and relationship preservation inside evidence bundles
 - low-cost, batch-first CLI analysis for candidate enrichment and human-input routing
+- source-level CLI session transport and artifact persistence for source-agent execution
 
 Collector does not own final investment judgment. It prepares evidence and structured candidate state for downstream analysis.
 
@@ -66,12 +68,13 @@ Shared types exist to keep contracts synchronized across services. Any API shape
 ## Primary Flows
 
 ### 1. Evidence Ingestion
-`human/pull/push/agent/derived input -> collector source registry -> submission -> source-run queue or ingest queue -> snapshots -> normalized evidence -> candidates`
+`human/pull/push/agent/derived input -> collector source registry -> submission -> source-run queue or ingest queue -> snapshots -> normalized evidence -> source-agent enrichment -> candidates`
 
 Important property:
 - raw snapshots and provenance remain intact even when analysis layers add derived fields.
 - long-running source collection should not block request/health handling; source execution is queued and runtime state is observable separately
 - source status should expose partial-failure metadata instead of collapsing mixed outcomes into a binary success/failure view
+- source-agents may enrich a source submission, but they do not replace raw evidence or make final investment judgments
 
 ### 2. Collector Analysis
 `candidate shortlist -> analysis policy -> context packing -> graph-aware bundle -> CLI session execution -> analysis projection`
@@ -109,6 +112,7 @@ Use these to model all inputs, not just scheduled connectors.
 
 Key idea:
 - a source is defined by `kind`, `ingestion_mode`, tier fields, validity fields, metrics, and operational flags
+- a source can optionally own a collector-side prompt, logical session domain, and source-agent output mode
 - tier is configurable and validity-driven, not a hardcoded constant scattered across collectors
 
 This lets the system treat pull APIs, human input, agent pushes, and derived sources as one operational surface.
@@ -121,6 +125,7 @@ The ingestion engine is the shared pipeline for all inputs.
 
 Key idea:
 - every ingest path becomes a tracked submission with status, snapshots, evidence ids, and errors
+- source-agent execution is still submission-scoped and yields tracked artifacts plus optional derived evidence
 - push paths and human paths are not special-case side doors
 
 This keeps traceability and retry behavior consistent.
@@ -135,6 +140,19 @@ Key idea:
 - the collector can route input into observation, study result, curated data, or review
 
 This keeps external ingress clients thin.
+
+#### SourceAgentRegistry, SourceAgentRunner, SourceAgentArtifactStore
+`packages/collector/src/source_agents/`
+
+These components keep source-level prompt execution separate from candidate-level analysis.
+
+Key idea:
+- every source can have its own `agent.md` prompt and logical session domain
+- source-agent execution happens after raw evidence is persisted, not before
+- outputs are stored as artifacts first and may optionally create derived evidence
+- provider/model configuration stays global to collector; source-specific behavior lives in source metadata and prompt files
+
+This keeps raw evidence protected while still letting collector attach source-aware event, theme, or relationship structure.
 
 #### AnalysisPolicy, ContextPacker, CliSession, SessionPool, AnalysisEngine
 `packages/collector/src/analysis/`
@@ -193,6 +211,8 @@ Key idea:
 - request/response exchange happens through a session directory target
 - this gives a stable handoff point for future Discord-thread injection, file-based bridges, or provider-owned session daemons
 - direct CLI execution and external injection can share the same higher-level session model
+
+The same artifact-first principle now applies to collector source-agents: if provider-owned sessions become externally injectable later, collector should swap transport without changing source-agent contracts.
 
 #### CandidateService, ResearchService, SubmissionPoller
 `packages/mcp-orchestrator/src/collector/`
@@ -257,6 +277,8 @@ Provider CLIs change quickly. Commands, flags, output envelopes, auth prompts, a
   - parse failure
   - timeout
   - unknown provider failure
+
+These rules apply both to orchestrator debate/verdict transports and to collector source-agent transports.
 
 ### Rule 4: Separate Auth Probe, Execute Probe, And Repair
 - A command that proves installation is not the same as a command that proves login.
