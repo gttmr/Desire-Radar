@@ -37,7 +37,7 @@ services:
       - ./data/collector:/app/data
       - ${HOME}/.claude:/home/collector/.claude:ro
       - ${HOME}/.codex:/home/collector/.codex:ro
-      - ${HOME}/.gemini:/home/collector/.gemini:ro
+      - ${HOME}/.gemini:/home/collector/.gemini
       - ${HOME}/.local/share/claude:/home/collector/.local/share/claude:ro
       - ${HOME}/.nvm/versions/node/v24.13.0/lib/node_modules/@openai/codex:/usr/local/lib/node_modules/@openai/codex:ro
       - ${HOME}/.nvm/versions/node/v24.13.0/lib/node_modules/@google/gemini-cli:/usr/local/lib/node_modules/@google/gemini-cli:ro
@@ -68,7 +68,8 @@ services:
       - ${HOME}/.claude:/home/node/.claude:ro
       # Codex needs a writable home dir for cache/session fallback paths.
       - ${HOME}/.codex:/home/node/.codex
-      - ${HOME}/.gemini:/home/node/.gemini:ro
+      # Gemini also keeps local state/history/tmp under ~/.gemini.
+      - ${HOME}/.gemini:/home/node/.gemini
       # --- Host CLI binaries ---
       # Claude: native binary
       - ${HOME}/.local/share/claude:/home/node/.local/share/claude:ro

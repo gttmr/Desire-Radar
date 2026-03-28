@@ -108,6 +108,7 @@ cp .env.example .env
 - Docker에서 특정 provider가 TLS/CA 같은 이유로 계속 깨지면 `ENABLED_PROVIDERS`에서 빼고 재기동하는 쪽이 맞다.
 - `mcp-orchestrator` Docker 이미지는 Codex/Gemini TLS probe를 위해 system CA bundle을 포함해야 한다. 현재 이미지는 `ca-certificates`와 `SSL_CERT_FILE`/`NODE_EXTRA_CA_CERTS`를 같이 설정한다.
 - `mcp-orchestrator`에서 Codex를 실제로 쓸 때는 `${HOME}/.codex` mount를 writable로 두는 편이 낫다. WebSocket 고부하 시 HTTPS fallback과 모델 cache 갱신이 read-only mount에서 실패할 수 있다.
+- Gemini도 `${HOME}/.gemini` 아래에 state/history/tmp를 쓰므로, Docker에서 실제 실행/health probe를 돌릴 때는 writable mount가 안전하다.
 - provider session artifact는 `data/provider-sessions`, collector CLI session artifact는 `data/llm-session-workdirs` 아래에 쌓인다.
 - provider 장애 알림은 discord-bot이 `/health`를 polling해서 보내고, optional repair command는 orchestrator가 인증/로그인 계열 실패에 한해 수행한다.
 - Discord provider alert에는 현재 에러 요약, check 시각, repair 설정 여부, 마지막 repair 결과가 같이 포함된다.

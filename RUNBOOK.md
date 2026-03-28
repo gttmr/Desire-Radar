@@ -164,6 +164,7 @@ curl http://127.0.0.1:5003/health
 - Docker에서 `codex`가 `transport_failed`와 `no native root CA certificates found`로 보이면, `mcp-orchestrator` 이미지에 `ca-certificates`가 포함되어 있는지 먼저 확인한다.
 - Docker에서 Codex가 WebSocket fallback 뒤 `Read-only file system (os error 30)`로 실패하면, `mcp-orchestrator`의 `${HOME}/.codex` mount가 writable인지 같이 확인한다.
 - Docker shell에서 직접 Codex를 칠 때 `OPENAI_BASE_URL` deprecation이 보이면, compose runtime이 최신인지와 컨테이너 env override가 반영됐는지 같이 확인한다.
+- Docker에서 Gemini가 `parse_failed`인데 stderr가 비어 있거나 stdout이 계속 비면, `${HOME}/.gemini` mount가 writable인지 먼저 확인한다.
 - 특정 runtime에서 provider를 아예 빼고 싶으면 `.env`의 `ENABLED_PROVIDERS`를 줄여서 재기동한다.
   - 예: `ENABLED_PROVIDERS=claude,gemini`
   - `DEFAULT_PROVIDERS`는 등록된 provider 안에서만 우선순위를 정한다.
