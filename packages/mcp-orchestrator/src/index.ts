@@ -39,9 +39,10 @@ function resolveAgentsDir(): string {
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  const enabledProviders = new Set(config.providers.enabledProviders);
 
   const registry = new ProviderRegistry();
-  if (config.providers.OPENAI_API_KEY) {
+  if (enabledProviders.has('openai') && config.providers.OPENAI_API_KEY) {
     registry.register(
       new OpenAIProvider(
         config.providers.OPENAI_API_KEY,
@@ -50,21 +51,27 @@ async function main(): Promise<void> {
       ),
     );
   }
-  registry.register(
-    new CodexProvider(config.providers.CODEX_PATH, config.providers.PROVIDER_TIMEOUT_MS, {
-      defaultTransportMode: config.providers.CODEX_TRANSPORT,
-    }),
-  );
-  registry.register(
-    new ClaudeProvider(config.providers.CLAUDE_PATH, config.providers.PROVIDER_TIMEOUT_MS, {
-      defaultTransportMode: config.providers.CLAUDE_TRANSPORT,
-    }),
-  );
-  registry.register(
-    new GeminiProvider(config.providers.GEMINI_PATH, config.providers.PROVIDER_TIMEOUT_MS, {
-      defaultTransportMode: config.providers.GEMINI_TRANSPORT,
-    }),
-  );
+  if (enabledProviders.has('codex')) {
+    registry.register(
+      new CodexProvider(config.providers.CODEX_PATH, config.providers.PROVIDER_TIMEOUT_MS, {
+        defaultTransportMode: config.providers.CODEX_TRANSPORT,
+      }),
+    );
+  }
+  if (enabledProviders.has('claude')) {
+    registry.register(
+      new ClaudeProvider(config.providers.CLAUDE_PATH, config.providers.PROVIDER_TIMEOUT_MS, {
+        defaultTransportMode: config.providers.CLAUDE_TRANSPORT,
+      }),
+    );
+  }
+  if (enabledProviders.has('gemini')) {
+    registry.register(
+      new GeminiProvider(config.providers.GEMINI_PATH, config.providers.PROVIDER_TIMEOUT_MS, {
+        defaultTransportMode: config.providers.GEMINI_TRANSPORT,
+      }),
+    );
+  }
 
   const sessionStore = new SessionStore(
     config.runtime.DATA_DIR,
@@ -151,6 +158,7 @@ async function main(): Promise<void> {
     console.log(
       `MCP Orchestrator listening on ${config.runtime.ORCHESTRATOR_HOST}:${config.runtime.ORCHESTRATOR_PORT}`,
     );
+    console.log(`Enabled providers: ${config.providers.enabledProviders.join(', ') || '(none)'}`);
     console.log(`Default providers: ${config.providers.defaultProviders.join(', ')}`);
     console.log(`Provider health monitoring enabled for: ${registry.list().join(', ') || '(none)'}`);
     console.log(`Data dir: ${config.runtime.DATA_DIR}`);

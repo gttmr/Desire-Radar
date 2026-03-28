@@ -12,6 +12,7 @@ export const providerEnvSchema = z.object({
   CODEX_TRANSPORT: z.string().default('cli_exec'),
   CLAUDE_TRANSPORT: z.string().default('cli_exec'),
   GEMINI_TRANSPORT: z.string().default('cli_exec'),
+  ENABLED_PROVIDERS: z.string().default('codex,claude,gemini'),
   DEFAULT_PROVIDERS: z.string().default('codex,claude,gemini'),
   PROVIDER_TIMEOUT_MS: z.coerce.number().default(60_000),
   PROVIDER_EXTERNAL_POLL_INTERVAL_MS: z.coerce.number().default(1_000),
@@ -22,9 +23,17 @@ export type ProvidersConfig = z.infer<typeof providerEnvSchema> & {
   CODEX_TRANSPORT: ProviderTransportConfig;
   CLAUDE_TRANSPORT: ProviderTransportConfig;
   GEMINI_TRANSPORT: ProviderTransportConfig;
+  enabledProviders: string[];
   defaultProviders: string[];
   providerSessionRootDir: string;
 };
+
+function splitProviderList(value: string): string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
 function normalizeTransportMode(value: string): ProviderTransportConfig {
   const normalized = value.trim();
@@ -42,15 +51,17 @@ export function loadProvidersConfig(
   defaultDataDir: string = 'data',
 ): ProvidersConfig {
   const parsed = providerEnvSchema.parse(env);
+  const enabledProviders = splitProviderList(parsed.ENABLED_PROVIDERS);
+  const enabledSet = new Set(enabledProviders);
+  const requestedDefaults = splitProviderList(parsed.DEFAULT_PROVIDERS);
+  const defaultProviders = requestedDefaults.filter((provider) => enabledSet.has(provider));
   return {
     ...parsed,
     CODEX_TRANSPORT: normalizeTransportMode(parsed.CODEX_TRANSPORT),
     CLAUDE_TRANSPORT: normalizeTransportMode(parsed.CLAUDE_TRANSPORT),
     GEMINI_TRANSPORT: normalizeTransportMode(parsed.GEMINI_TRANSPORT),
-    defaultProviders: parsed.DEFAULT_PROVIDERS
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean),
+    enabledProviders,
+    defaultProviders: defaultProviders.length > 0 ? defaultProviders : enabledProviders,
     providerSessionRootDir:
       parsed.PROVIDER_SESSION_ROOT_DIR.trim() || join(defaultDataDir, 'provider-sessions'),
   };

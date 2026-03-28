@@ -11,6 +11,7 @@ import {
   buildDegradedProviderResult,
   buildFailedHealthProbe,
   buildProviderHealthProbe,
+  summarizeProviderFailure,
 } from './errors.js';
 
 type CodexUsage = {
@@ -185,10 +186,12 @@ export class CodexProvider implements ProviderAdapter {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const classified = buildFailedHealthProbe(message);
         return buildProviderHealthProbe({
           auth_status: 'healthy',
-          execute_status: buildFailedHealthProbe(message).failure_kind ?? 'unknown',
-          error_summary: message,
+          execute_status: classified.failure_kind ?? 'unknown',
+          error_summary: classified.error_summary ?? summarizeProviderFailure(message),
+          error: message,
         });
       }
     } catch (err) {

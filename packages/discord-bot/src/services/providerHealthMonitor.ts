@@ -128,11 +128,12 @@ export class ProviderHealthMonitor {
 }
 
 function buildProviderSignature(provider: ProviderHealth): string {
+  const alertSummary = provider.error_summary ?? provider.error ?? 'provider unavailable';
   return [
     provider.available ? 'up' : 'down',
     provider.status ?? 'unknown',
     provider.recoverable ? 'recoverable' : 'terminal',
-    summarize(provider.error ?? 'provider unavailable', 240),
+    summarize(alertSummary, 240),
     provider.last_repair_at ?? '',
     summarize(provider.last_repair_summary ?? '', 240),
   ].join('|');
@@ -147,7 +148,7 @@ function formatProviderOutage(
   if (provider.status) {
     lines.push(`status: ${provider.status}`);
   }
-  lines.push(`error: ${summarize(currentError, 320)}`);
+  lines.push(`error: ${summarize(provider.error_summary ?? currentError, 320)}`);
   lines.push(`checked: ${provider.last_checked_at}`);
   lines.push(`down since: ${unavailableSince}`);
   if (typeof provider.recoverable === 'boolean') {

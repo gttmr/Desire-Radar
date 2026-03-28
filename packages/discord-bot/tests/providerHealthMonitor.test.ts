@@ -26,6 +26,7 @@ function healthResponse(
     status?: ProviderHealthStatus;
     recoverable?: boolean;
     error?: string;
+    error_summary?: string;
     repair_configured?: boolean;
     repair_command_preview?: string;
     last_repair_at?: string;
@@ -69,17 +70,14 @@ describe('ProviderHealthMonitor', () => {
     expect(messages).toEqual([
       [
         '[provider-health] codex unavailable',
-        'status: unknown',
         'error: login expired',
         'checked: 2026-03-26T00:00:00Z',
         'down since: 2026-03-26T00:00:00Z',
-        'recoverable: false',
         'repair: not configured',
       ].join('\n'),
       [
         '[provider-health] codex recovered',
         'checked: 2026-03-26T00:00:00Z',
-        'status: unknown',
         'downtime: unknown',
       ].join('\n'),
     ]);
@@ -106,11 +104,60 @@ describe('ProviderHealthMonitor', () => {
     expect(messages).toEqual([
       [
         '[provider-health] claude unavailable',
-        'status: unknown',
         'error: auth expired',
         'checked: 2026-03-26T00:00:00Z',
         'down since: 2026-03-26T00:00:00Z',
-        'recoverable: false',
+        'repair: not configured',
+      ].join('\n'),
+    ]);
+  });
+
+  it('dedupes repeated failures when only the raw error changes', async () => {
+    const orchestrator = new MockOrchestratorClient([
+      healthResponse([
+        {
+          provider: 'codex',
+          available: false,
+          status: 'transport_failed',
+          recoverable: true,
+          error_summary: 'transport failed (TLS/CA, websocket, or network issue)',
+          error:
+            'Codex response missing agent_message: {"type":"thread.started","thread_id":"thread-a"} {"type":"error","message":"Reconnecting... 1/5 (no native root CA certificates found)"}',
+        },
+      ]),
+      healthResponse([
+        {
+          provider: 'codex',
+          available: false,
+          status: 'transport_failed',
+          recoverable: true,
+          error_summary: 'transport failed (TLS/CA, websocket, or network issue)',
+          error:
+            'Codex response missing agent_message: {"type":"thread.started","thread_id":"thread-b"} {"type":"error","message":"Reconnecting... 2/5 (no native root CA certificates found)"}',
+        },
+      ]),
+    ]);
+
+    const monitor = new ProviderHealthMonitor(orchestrator as never, {
+      pollIntervalMs: 60_000,
+    });
+
+    const messages: string[] = [];
+    await monitor.pollOnce(async (message) => {
+      messages.push(message);
+    });
+    await monitor.pollOnce(async (message) => {
+      messages.push(message);
+    });
+
+    expect(messages).toEqual([
+      [
+        '[provider-health] codex unavailable',
+        'status: transport_failed',
+        'error: transport failed (TLS/CA, websocket, or network issue)',
+        'checked: 2026-03-26T00:00:00Z',
+        'down since: 2026-03-26T00:00:00Z',
+        'recoverable: true',
         'repair: not configured',
       ].join('\n'),
     ]);
@@ -211,11 +258,9 @@ describe('ProviderHealthMonitor', () => {
     expect(messages).toEqual([
       [
         '[provider-health] codex unavailable',
-        'status: unknown',
         'error: login expired',
         'checked: 2026-03-26T00:00:00Z',
         'down since: 2026-03-26T00:00:00Z',
-        'recoverable: false',
         'repair: configured (printenv OPENAI_API_KEY | codex login --with-api-key)',
         'last repair: 2026-03-26T00:00:30Z',
         'repair result: codex: command completed',

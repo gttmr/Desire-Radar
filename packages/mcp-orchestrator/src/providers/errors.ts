@@ -103,6 +103,28 @@ export function isRecoverableFailure(kind: ProviderFailureKind): boolean {
   }
 }
 
+export function summarizeProviderFailure(message: string): string {
+  switch (classifyProviderFailure(message)) {
+    case 'auth_failed':
+      return 'authentication failed';
+    case 'binary_missing':
+      return 'provider binary missing';
+    case 'capacity_limited':
+      return 'capacity limited';
+    case 'rate_limited':
+      return 'rate limited';
+    case 'transport_failed':
+      return 'transport failed (TLS/CA, websocket, or network issue)';
+    case 'timeout':
+      return 'provider timed out';
+    case 'parse_failed':
+      return 'provider returned an unreadable response';
+    case 'unknown':
+    default:
+      return 'provider unavailable';
+  }
+}
+
 export function buildDegradedProviderResult(params: {
   sessionId: string;
   durationMs: number;
@@ -131,7 +153,7 @@ export function buildFailedHealthProbe(message: string): ProviderHealthProbe {
     execute_status: kind === 'auth_failed' ? 'unprobed' : kind,
     ready_for_execution: false,
     failure_kind: kind,
-    error_summary: message,
+    error_summary: summarizeProviderFailure(message),
     error: message,
     recoverable: isRecoverableFailure(kind),
   };
@@ -141,6 +163,7 @@ export function buildProviderHealthProbe(params: {
   auth_status: 'healthy' | 'unprobed' | ProviderFailureKind;
   execute_status: 'healthy' | 'unprobed' | ProviderFailureKind;
   error_summary?: string;
+  error?: string;
 }): ProviderHealthProbe {
   const ready_for_execution =
     params.auth_status === 'healthy' && params.execute_status === 'healthy';
@@ -158,7 +181,7 @@ export function buildProviderHealthProbe(params: {
     execute_status: params.execute_status,
     failure_kind,
     error_summary: params.error_summary,
-    error: params.error_summary,
+    error: params.error ?? params.error_summary,
     recoverable: failure_kind ? isRecoverableFailure(failure_kind) : false,
   };
 }

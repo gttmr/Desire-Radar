@@ -60,7 +60,9 @@ Discord human input / slash commands
 - collector 후보를 받아 phase-aware 의사결정 파이프라인으로 처리한다.
 - research 부족분은 collector submission API를 통해 다시 요청한다.
 - 최종 verdict는 premium model policy를 분리해 사용한다.
-- 기본 provider 경로는 `codex, claude, gemini`이며, `OPENAI_API_KEY`가 있을 때만 OpenAI provider를 추가 등록한다.
+- 기본 provider 경로는 `codex, claude, gemini`다.
+- `ENABLED_PROVIDERS`가 실제 등록과 health monitoring 대상을 결정하고, `DEFAULT_PROVIDERS`는 그 안에서 실행 우선순위를 결정한다.
+- `OPENAI_API_KEY`만으로는 OpenAI provider가 자동 등록되지 않고, `ENABLED_PROVIDERS`에 `openai`를 넣었을 때만 추가 등록된다.
 - provider session마다 request/response artifact를 JSON으로 남긴다.
 - transport는 `cli_exec`, `cli_resume`, `external_injection` 중 하나를 사용한다.
 
@@ -102,6 +104,7 @@ cp .env.example .env
 - Docker Compose를 쓰려면 호스트에서 `codex`, `claude`, `gemini` 중 필요한 CLI 로그인이 이미 되어 있어야 한다.
 - `${HOME}` 기준 Docker mount는 WSL 홈을 바라본다.
 - `OPENAI_API_KEY`는 OpenAI provider를 추가로 켤 때만 필요하다.
+- Docker에서 특정 provider가 TLS/CA 같은 이유로 계속 깨지면 `ENABLED_PROVIDERS`에서 빼고 재기동하는 쪽이 맞다.
 - provider session artifact는 `data/provider-sessions`, collector CLI session artifact는 `data/llm-session-workdirs` 아래에 쌓인다.
 - provider 장애 알림은 discord-bot이 `/health`를 polling해서 보내고, optional repair command는 orchestrator가 인증/로그인 계열 실패에 한해 수행한다.
 - Discord provider alert에는 현재 에러 요약, check 시각, repair 설정 여부, 마지막 repair 결과가 같이 포함된다.
@@ -349,6 +352,7 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 | `LLM_HUMAN_ROUTING_ENABLED` | collector | human input collector-side routing on/off |
 | `LLM_HUMAN_ROUTING_MODEL` | collector | human input routing model |
 | `LLM_SESSION_WORKDIR_ROOT` | collector | collector CLI session/artifact 루트 |
+| `ENABLED_PROVIDERS` | mcp-orchestrator | 실제 등록 + health monitoring 대상 provider 목록 |
 | `DEFAULT_PROVIDERS` | mcp-orchestrator | 기본 provider 우선순위 |
 | `CODEX_TRANSPORT` | mcp-orchestrator | codex transport 기본값 (`cli_exec` 또는 `external_injection`) |
 | `CLAUDE_TRANSPORT` | mcp-orchestrator | claude transport 기본값 |

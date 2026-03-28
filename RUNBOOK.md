@@ -161,6 +161,9 @@ curl http://127.0.0.1:5003/health
   - `failure_kind`
   - `error_summary`
 - `auth_status=healthy`여도 `ready_for_execution=false`면 실제 debate/verdict 경로에서는 제외된다.
+- 특정 runtime에서 provider를 아예 빼고 싶으면 `.env`의 `ENABLED_PROVIDERS`를 줄여서 재기동한다.
+  - 예: `ENABLED_PROVIDERS=claude,gemini`
+  - `DEFAULT_PROVIDERS`는 등록된 provider 안에서만 우선순위를 정한다.
 
 ### Discord Bot
 

@@ -199,6 +199,8 @@ warn line
         execute_status: 'transport_failed',
         ready_for_execution: false,
         failure_kind: 'transport_failed',
+        error_summary: 'transport failed (TLS/CA, websocket, or network issue)',
+        error: expect.stringContaining('no native root CA certificates found'),
         recoverable: true,
       }),
     );
@@ -476,7 +478,8 @@ warn line
         auth_status: 'healthy',
         execute_status: 'capacity_limited',
         ready_for_execution: false,
-        error: 'Gemini reachable but temporarily unavailable (capacity/rate limit).',
+        error: 'capacity limited',
+        error_summary: 'capacity limited',
         recoverable: true,
       }),
     );
