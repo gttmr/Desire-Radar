@@ -98,11 +98,11 @@ export const commandBuilders = [
     .addSubcommand((sub) =>
       sub
         .setName('start')
-        .setDescription('candidate entity로 orchestrator run 시작')
+        .setDescription('candidate entity 또는 cluster label로 orchestrator run 시작')
         .addStringOption((opt) =>
           opt
             .setName('entity')
-            .setDescription('collector candidate entity')
+            .setDescription('collector candidate entity 또는 display label')
             .setRequired(true)
             .setMaxLength(200),
         ),

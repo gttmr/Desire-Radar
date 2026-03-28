@@ -28,8 +28,10 @@ class FakeOrchestratorClient {
           status: 'healthy',
           auth_status: 'healthy',
           execute_status: 'healthy',
+          transport_status: 'healthy',
           ready_for_execution: true,
           last_checked_at: '2026-03-28T00:00:00Z',
+          repair_configured: false,
         },
         {
           provider: 'gemini',
@@ -37,10 +39,12 @@ class FakeOrchestratorClient {
           status: 'parse_failed',
           auth_status: 'healthy',
           execute_status: 'parse_failed',
+          transport_status: 'healthy',
           ready_for_execution: false,
           failure_kind: 'parse_failed',
           error_summary: 'provider returned an unreadable response',
           last_checked_at: '2026-03-28T00:00:00Z',
+          repair_configured: false,
         },
       ],
     };
@@ -82,6 +86,9 @@ describe('OpsCommandService', () => {
     const content = await service.providers();
     expect(content).toContain('**codex**');
     expect(content).toContain('execute=parse_failed');
+    expect(content).toContain('transport=healthy');
+    expect(content).toContain('checked=2026-03-28T00:00:00Z');
+    expect(content).toContain('repair=not_configured');
     expect(content).toContain('error=provider returned an unreadable response');
   });
 });

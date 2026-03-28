@@ -317,9 +317,13 @@ export class BotApp {
   }
 
   private async handleOpsSlash(interaction: ChatInputCommandInteraction): Promise<void> {
-    if (!isOpsChannelAllowed(interaction.channelId, env.DISCORD_STATUS_CHANNEL_IDS)) {
+    if (!isOpsChannelAllowed(
+      interaction.channelId,
+      env.DISCORD_STATUS_CHANNEL_IDS,
+      env.DISCORD_PROVIDER_ALERT_CHANNEL_IDS,
+    )) {
       await interaction.editReply({
-        content: '이 명령은 지정된 상태 채널에서만 사용하세요.',
+        content: '이 명령은 지정된 상태 또는 provider alert 채널에서만 사용하세요.',
       });
       return;
     }

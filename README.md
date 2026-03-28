@@ -351,23 +351,24 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 - `/report status`: 리포트 설정과 최근 실행 상태 조회
 
 ### `/radar`
-- `/radar sources`: collector source 상태 조회
-- `/radar candidates [limit]`: 떠오르는 후보 조회
+- `/radar sources`: collector source 상태 조회. `current_stage`, payload/evidence 카운터, source-agent 상태와 warning/failure를 함께 보여준다.
+- `/radar candidates [limit]`: 떠오르는 후보 조회. `display_label`, `candidate_kind`, `cluster_id`, `theme_tags`, 요약을 함께 보여준다.
 - `/radar collect [source]`: enabled pull source 전체 또는 특정 source 수집 실행
 
 ### `/run`
-- `/run start entity:<이름>`: orchestrator run 시작
+- `/run start entity:<이름>`: collector candidate entity 또는 cluster label 문자열로 orchestrator run 시작
 - `/run status run_id:<id>`: run 상태 요약
 - `/run verdict run_id:<id>`: verdict와 beneficiary mapping 요약
 - `/run research run_id:<id>`: research loop 상태 요약
 - `/run requests run_id:<id>`: research request 목록 조회
 
 ### `/queue`
-- `/queue human [limit]`: `pending_human` 요청 조회
+- `/queue human [limit]`: `pending_human` 요청 조회. `DISCORD_HUMAN_QUEUE_CHANNEL_IDS`가 설정돼 있으면 해당 채널에서만 사용할 수 있다.
 
 ### `/ops`
 - `/ops health`: bot, collector, orchestrator 종합 상태 조회
 - `/ops providers`: provider별 auth/execute/readiness 상태 조회
+- 모든 slash command 응답은 기본적으로 ephemeral이고, `/report run`만 실제 리포트를 보고 채널에 보낸 뒤 ephemeral ack를 반환한다.
 
 ## Smoke 해석 기준
 
@@ -389,7 +390,7 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 | `DISCORD_HUMAN_INPUT_CHANNEL_IDS` | discord-bot | human input 단일 채널 allowlist |
 | `DISCORD_HUMAN_QUEUE_CHANNEL_IDS` | discord-bot | `/queue human` 허용 채널 |
 | `DISCORD_DAILY_REPORT_CHANNEL_ID` | discord-bot | 매일 리포트 기본 채널 |
-| `DISCORD_STATUS_CHANNEL_IDS` | discord-bot | 서버 상태/운영 알림 채널 |
+| `DISCORD_STATUS_CHANNEL_IDS` | discord-bot | 서버 상태/운영 slash 명령 허용 채널 |
 | `DISCORD_PROVIDER_ALERT_CHANNEL_IDS` | discord-bot | provider 장애/복구 알림 채널 |
 | `PROVIDER_ALERT_POLL_INTERVAL_SEC` | discord-bot | provider 알림 polling 주기 |
 | `ANALYSIS_BACKEND` | discord-bot | 현재 `orchestrator`만 사용 |

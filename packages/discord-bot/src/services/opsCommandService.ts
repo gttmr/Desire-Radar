@@ -63,8 +63,23 @@ export class OpsCommandService {
     if (provider.execute_status) {
       fields.push(`execute=${provider.execute_status}`);
     }
+    if (provider.transport_status) {
+      fields.push(`transport=${provider.transport_status}`);
+    }
     if (provider.failure_kind) {
       fields.push(`failure=${provider.failure_kind}`);
+    }
+    if (provider.last_checked_at) {
+      fields.push(`checked=${provider.last_checked_at}`);
+    }
+    if (typeof provider.repair_configured === 'boolean') {
+      fields.push(`repair=${provider.repair_configured ? 'configured' : 'not_configured'}`);
+    }
+    if (provider.last_repair_at) {
+      fields.push(`last_repair=${provider.last_repair_at}`);
+    }
+    if (provider.last_repair_summary) {
+      fields.push(`repair_summary=${provider.last_repair_summary}`);
     }
     if (provider.error_summary || provider.error) {
       fields.push(`error=${provider.error_summary ?? provider.error}`);

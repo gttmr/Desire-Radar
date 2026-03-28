@@ -4,6 +4,8 @@ const state = {
   promptIndex: null,
   selectedPromptSource: "",
   promptDetail: null,
+  promptAgentStatus: null,
+  promptAgentPreview: null,
   selectedEntity: "",
   bundle: null,
   busy: new Set(),
@@ -13,6 +15,8 @@ const $ = (id) => document.getElementById(id);
 const overviewEndpoint = "/dashboard/api/overview";
 const envEndpoint = "/dashboard/api/env-settings";
 const sourcePromptIndexEndpoint = "/dashboard/api/source-prompts";
+const sourceAgentStatusEndpoint = (sourceId) => `/internal/source-agents/${encodeURIComponent(sourceId)}/status`;
+const sourceAgentPreviewEndpoint = (sourceId) => `/internal/source-agents/${encodeURIComponent(sourceId)}/preview`;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -163,6 +167,8 @@ function renderSummary() {
 function sourceStatusPill(source) {
   const status = source.enabled === false
     ? "disabled"
+    : source.run_state === "queued" || (source.queued_runs || 0) > 0
+      ? "queued"
     : source.runnable === false
       ? "not runnable"
       : source.run_state === "running"
@@ -172,6 +178,8 @@ function sourceStatusPill(source) {
           : "enabled";
   const cls = source.enabled === false
     ? "bad"
+    : source.run_state === "queued" || (source.queued_runs || 0) > 0
+      ? "warn"
     : source.runnable === false
       ? "warn"
       : source.run_state === "failed"
@@ -390,6 +398,7 @@ function renderSubmissions() {
           progress.stage ? `stage: ${progress.stage}` : "",
           progress.message || "",
           submission.metadata?.source_agent_status ? `agent: ${submission.metadata.source_agent_status}` : "",
+          submission.metadata?.source_agent_error || "",
         ]);
         return `
           <article class="card">
@@ -507,6 +516,8 @@ function renderSettingField(setting) {
 function renderPromptEditor() {
   const index = state.promptIndex;
   const detail = state.promptDetail;
+  const agentStatus = state.promptAgentStatus;
+  const agentPreview = state.promptAgentPreview;
   $("promptMeta").textContent = index ? `${fmtNumber(index.count || 0)} prompt files` : "unavailable";
   if (!index?.prompts?.length) {
     $("promptPanel").innerHTML = `<p class="empty">No source prompt files are registered.</p>`;
@@ -530,6 +541,30 @@ function renderPromptEditor() {
         <span class="muted">${escapeHtml(selectedMeta.agent_prompt_path || "no prompt path")}</span>
         <span class="pill">${escapeHtml(selectedMeta.source_agent_status || selectedMeta.last_agent_status || (selectedMeta.exists ? "file exists" : "file missing"))}</span>
       </div>
+      <div class="rowline">
+        <span class="muted">${escapeHtml(`session: ${agentStatus?.agent_session_domain || selectedMeta.agent_session_domain || "n/a"}`)}</span>
+        <span class="pill">${escapeHtml(`mode: ${agentStatus?.agent_output_mode || selectedMeta.agent_output_mode || "artifact_only"}`)}</span>
+      </div>
+      <div class="rowline">
+        <span class="muted">${escapeHtml(`preview: ${agentPreview?.evidence_count ?? 0} evidence | ${agentPreview?.char_count ?? 0} chars`)}</span>
+        <span class="pill ${agentStatus?.latest_artifact?.status === "failed" ? "bad" : agentStatus?.latest_artifact?.status === "completed" ? "good" : "warn"}">${escapeHtml(`latest: ${agentStatus?.latest_artifact?.status || "none"}`)}</span>
+      </div>
+      ${
+        agentStatus?.latest_artifact
+          ? `
+            <div class="source-sub">${escapeHtml(
+              compactJoin([
+                agentStatus.latest_artifact.summary,
+                agentStatus.latest_artifact.event_summary,
+                agentStatus.latest_artifact.error_message,
+                agentStatus.latest_artifact.derived_evidence_ids?.length
+                  ? `derived ${agentStatus.latest_artifact.derived_evidence_ids.length}`
+                  : "",
+              ]) || "No latest artifact detail.",
+            )}</div>
+          `
+          : ""
+      }
       <div class="field">
         <div class="field-head">
           <label for="promptContent">Markdown prompt</label>
@@ -545,7 +580,7 @@ function renderPromptEditor() {
     </div>
   `;
   $("promptSourceSelect").addEventListener("change", (event) => selectPromptSource(event.target.value));
-  $("promptRefreshBtn").addEventListener("click", () => loadPromptDetail());
+  $("promptRefreshBtn").addEventListener("click", () => Promise.all([loadPromptDetail(), loadPromptAgentState()]));
   $("promptRunBtn").addEventListener("click", () => runSourceAgent());
 }
 
@@ -613,11 +648,47 @@ async function loadPromptDetail(sourceId = state.selectedPromptSource) {
   }
 }
 
+async function loadPromptAgentState(sourceId = state.selectedPromptSource) {
+  if (!sourceId) {
+    state.promptAgentStatus = null;
+    state.promptAgentPreview = null;
+    renderPromptEditor();
+    return;
+  }
+  setBusy(`prompt-agent:${sourceId}`, true);
+  try {
+    const [statusResult, previewResult] = await Promise.allSettled([
+      fetchJson(sourceAgentStatusEndpoint(sourceId)),
+      fetchJson(sourceAgentPreviewEndpoint(sourceId)),
+    ]);
+    state.promptAgentStatus = statusResult.status === "fulfilled"
+      ? statusResult.value
+      : {
+          source_id: sourceId,
+          latest_artifact: null,
+          error_message: statusResult.reason?.message || "status unavailable",
+        };
+    state.promptAgentPreview = previewResult.status === "fulfilled"
+      ? previewResult.value
+      : {
+          source_id: sourceId,
+          evidence_count: 0,
+          char_count: 0,
+        };
+    renderPromptEditor();
+  } finally {
+    setBusy(`prompt-agent:${sourceId}`, false);
+  }
+}
+
 async function refreshAll() {
   clearAllMessages();
   await Promise.all([loadOverview(), loadEnvSettings(), loadPromptIndex()]);
   if (state.selectedPromptSource) {
-    await loadPromptDetail(state.selectedPromptSource);
+    await Promise.all([
+      loadPromptDetail(state.selectedPromptSource),
+      loadPromptAgentState(state.selectedPromptSource),
+    ]);
   }
 }
 
@@ -659,7 +730,7 @@ async function runSourceAgent(sourceId = state.selectedPromptSource) {
       body: "{}",
     });
     showMessage("promptMessage", `Source agent ran for ${sourceId}. Derived evidence: ${fmtNumber(payload.derived_evidence_count || 0)}.`, "ok");
-    await Promise.all([loadOverview(), loadPromptIndex()]);
+    await Promise.all([loadOverview(), loadPromptIndex(), loadPromptAgentState(sourceId)]);
   } catch (error) {
     showMessage("promptMessage", error.message, "error");
   } finally {
@@ -734,8 +805,10 @@ async function selectPromptSource(sourceId, scrollIntoView = false) {
   if (!sourceId) return;
   state.selectedPromptSource = sourceId;
   state.promptDetail = null;
+  state.promptAgentStatus = null;
+  state.promptAgentPreview = null;
   renderPromptEditor();
-  await loadPromptDetail(sourceId);
+  await Promise.all([loadPromptDetail(sourceId), loadPromptAgentState(sourceId)]);
   if (scrollIntoView) {
     $("promptPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -757,7 +830,7 @@ async function saveSourcePrompt(event) {
       body: JSON.stringify({ content }),
     });
     showMessage("promptMessage", `Saved prompt for ${sourceId}.`, "ok");
-    await Promise.all([loadPromptIndex(), loadPromptDetail(sourceId), loadOverview()]);
+    await Promise.all([loadPromptIndex(), loadPromptDetail(sourceId), loadPromptAgentState(sourceId), loadOverview()]);
   } catch (error) {
     showMessage("promptMessage", error.message, "error");
   } finally {

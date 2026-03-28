@@ -13,4 +13,9 @@ describe('commandPolicies', () => {
     expect(isOpsChannelAllowed('ops-1', new Set(['ops-1']))).toBe(true);
     expect(isOpsChannelAllowed('other', new Set(['ops-1']))).toBe(false);
   });
+
+  it('allows ops commands in provider alert channels too', () => {
+    expect(isOpsChannelAllowed('provider-1', new Set(['ops-1']), new Set(['provider-1']))).toBe(true);
+    expect(isOpsChannelAllowed('other', new Set(['ops-1']), new Set(['provider-1']))).toBe(false);
+  });
 });

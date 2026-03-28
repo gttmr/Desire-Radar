@@ -41,6 +41,12 @@ describe('RadarCommandService', () => {
               scheduled: true,
               enabled: true,
               run_state: 'running',
+              current_stage: 'processing_payloads',
+              current_stage_message: 'processing 10/20',
+              payload_total: 20,
+              payloads_processed: 10,
+              evidence_total: 8,
+              source_agent_status: 'running',
               last_warning_kind: 'http_403_blocked',
             },
           },
@@ -53,6 +59,8 @@ describe('RadarCommandService', () => {
     const content = await service.sources();
     expect(content).toContain('source_run_queue=1');
     expect(content).toContain('**reddit_mentions**');
+    expect(content).toContain('stage=processing_payloads');
+    expect(content).toContain('agent=running');
     expect(content).toContain('warning=http_403_blocked');
   });
 
@@ -68,6 +76,13 @@ describe('RadarCommandService', () => {
           candidates: [
             {
               entity: 'Cursor',
+              display_label: 'Cursor IDE',
+              candidate_kind: 'entity_cluster',
+              cluster_id: 'cluster-cursor',
+              primary_entity: 'Cursor',
+              theme_tags: ['developer-tools'],
+              supporting_terms: ['cursor', 'seat expansion'],
+              event_summary: 'Seat expansion chatter is accelerating',
               status: 'emerging',
               emergence_score: 0.9,
               velocity_score: 0.7,
@@ -103,7 +118,11 @@ describe('RadarCommandService', () => {
       ) as never,
     );
 
-    expect(await service.candidates(1)).toContain('**Cursor**');
+    const candidates = await service.candidates(1);
+    expect(candidates).toContain('**Cursor IDE**');
+    expect(candidates).toContain('kind=entity_cluster');
+    expect(candidates).toContain('cluster=cluster-cursor');
+    expect(candidates).toContain('themes=developer-tools');
     const collect = await service.collect();
     expect(collect).toContain('queued_sources=reddit_mentions, app_store_top_charts');
     expect(collect).toContain('google_trends:source_disabled');

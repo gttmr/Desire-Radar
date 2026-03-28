@@ -331,6 +331,12 @@ collector가 이를 해석해서:
 - Discord 채널에서 `/queue human limit:5`
 - Discord 채널에서 `/ops providers`
 
+운영 정책:
+- slash command 응답은 기본적으로 ephemeral이다.
+- `/queue human`은 `DISCORD_HUMAN_QUEUE_CHANNEL_IDS`가 설정된 경우 해당 채널에서만 허용된다.
+- `/ops health`, `/ops providers`는 `DISCORD_STATUS_CHANNEL_IDS` 또는 `DISCORD_PROVIDER_ALERT_CHANNEL_IDS`에 포함된 채널에서 허용된다.
+- `/report run`은 ephemeral ack를 반환하고 실제 리포트 본문은 `DISCORD_DAILY_REPORT_CHANNEL_ID` 또는 guild 기본 보고 채널로 전송된다.
+
 필수 env:
 - `DISCORD_TOKEN`
 - `DISCORD_CLIENT_ID`

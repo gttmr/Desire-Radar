@@ -29,7 +29,7 @@ export class RunCommandService {
 
   async start(entity: string): Promise<string> {
     const result = await this.orchestrator.runFromCandidate({ entity });
-    return this.formatRunStart(result);
+    return this.formatRunStart(entity, result);
   }
 
   async status(runId: string): Promise<string> {
@@ -52,8 +52,9 @@ export class RunCommandService {
     return this.formatRequests(result);
   }
 
-  private formatRunStart(result: RunFromCandidateResponse): string {
+  private formatRunStart(subject: string, result: RunFromCandidateResponse): string {
     const lines = [
+      `subject=${subject}`,
       `run_id=${result.run_id}`,
       `triage=${result.triage.approved ? 'approved' : 'rejected'} | ${result.triage.reason}`,
     ];
@@ -70,6 +71,9 @@ export class RunCommandService {
         `verdict=${result.verdict.recommendation} | confidence=${Math.round(result.verdict.confidence * 100)}% | degraded=${isVerdictDegraded(result.verdict)}`,
       );
       lines.push(`summary=${result.verdict.summary}`);
+      if (result.verdict.entity) {
+        lines.push(`topic=${result.verdict.entity}`);
+      }
       if (result.verdict.beneficiary_mapping) {
         lines.push(...formatBeneficiaries('direct', result.verdict.beneficiary_mapping.direct_winners));
         lines.push(...formatBeneficiaries('public', result.verdict.beneficiary_mapping.public_beneficiaries));

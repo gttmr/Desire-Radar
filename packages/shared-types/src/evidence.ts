@@ -222,6 +222,16 @@ export type SourceStatus = {
   default_producer_ref?: string | null;
   tier_override_reason?: string | null;
   description?: string | null;
+  current_stage?: string | null;
+  current_stage_message?: string | null;
+  last_progress_at?: string | null;
+  payload_total?: number;
+  payloads_processed?: number;
+  snapshot_total?: number;
+  evidence_total?: number;
+  resolve_success_total?: number;
+  resolve_miss_total?: number;
+  last_warning_targets?: string[];
   source_agent_status?: string | null;
   source_agent_artifact_id?: string | null;
   source_agent_error?: string | null;

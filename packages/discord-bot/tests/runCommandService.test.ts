@@ -123,9 +123,11 @@ describe('RunCommandService', () => {
   it('summarizes run start with degraded verdict visibility', async () => {
     const service = new RunCommandService(new FakeOrchestratorClient() as never);
     const content = await service.start('Cursor');
+    expect(content).toContain('subject=Cursor');
     expect(content).toContain('run_id=run-1');
     expect(content).toContain('triage=approved');
     expect(content).toContain('degraded=true');
+    expect(content).toContain('topic=Cursor');
     expect(content).toContain('public: MSFT');
   });
 
