@@ -115,6 +115,7 @@ class SourceAgentRunner:
                 submission.source_id,
                 submission,
                 evidences,
+                mode="standard",
             )
             result, execution_notes = await self._execute_with_fallback(
                 preview=preview,
@@ -195,6 +196,7 @@ class SourceAgentRunner:
         evidences: list[Evidence],
     ) -> tuple[Any, list[str]]:
         notes: list[str] = []
+        failures: list[str] = []
         try:
             result = await self.session_pool.execute_json(
                 preview.prompt,
@@ -203,33 +205,39 @@ class SourceAgentRunner:
             )
             return result, notes
         except Exception as exc:
-            if not self._should_retry_with_compact_context(exc):
+            failures.append(f"standard={self._short_error(exc)}")
+            fallback_modes = self._fallback_modes_for_error(exc)
+            if not fallback_modes:
                 raise RuntimeError(
                     "source-agent execution failed; "
                     f"initial={self._short_error(exc)}"
                 ) from exc
-            compact_preview = self.context_builder.build(
+            notes.append(f"initial source-agent execution failed: {self._short_error(exc)}")
+        for mode in fallback_modes:
+            fallback_preview = self.context_builder.build(
                 submission.source_id,
                 submission,
                 evidences,
-                compact=True,
+                mode=mode,
             )
-            notes.append("source-agent retried with compact context")
-            notes.append(f"initial source-agent execution failed: {self._short_error(exc)}")
+            notes.append(f"source-agent retried with {mode} context")
             self.session_pool.reset(preview.session_domain)
             try:
                 result = await self.session_pool.execute_json(
-                    compact_preview.prompt,
-                    domain=compact_preview.session_domain,
+                    fallback_preview.prompt,
+                    domain=fallback_preview.session_domain,
                     execution_mode="fresh",
                 )
                 return result, notes
-            except Exception as compact_exc:
-                raise RuntimeError(
-                    "source-agent execution failed; "
-                    f"initial={self._short_error(exc)}; "
-                    f"compact_retry={self._short_error(compact_exc)}"
-                ) from compact_exc
+            except Exception as fallback_exc:
+                failures.append(f"{mode}={self._short_error(fallback_exc)}")
+                notes.append(
+                    f"{mode} source-agent retry failed: {self._short_error(fallback_exc)}"
+                )
+        raise RuntimeError(
+            "source-agent execution failed; "
+            + "; ".join(failures)
+        )
 
     def _resolve_source_input(
         self,
@@ -266,15 +274,23 @@ class SourceAgentRunner:
             )
         return submission, evidences
 
-    def _should_retry_with_compact_context(self, exc: Exception) -> bool:
+    def _fallback_modes_for_error(self, exc: Exception) -> list[str]:
         message = self._short_error(exc).lower()
-        retry_markers = (
+        parse_retry_markers = (
             "invalid json",
             "did not include agent_message",
             "returned unreadable response",
             "parse_failed",
         )
-        return any(marker in message for marker in retry_markers)
+        timeout_retry_markers = (
+            "timed out",
+            "timeout",
+        )
+        if any(marker in message for marker in timeout_retry_markers):
+            return ["minimal"]
+        if any(marker in message for marker in parse_retry_markers):
+            return ["compact", "minimal"]
+        return []
 
     def _build_derived_evidence(
         self,

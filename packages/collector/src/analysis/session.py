@@ -373,6 +373,10 @@ class CliSession:
             )
         except TimeoutError as exc:
             proc.kill()
+            try:
+                await proc.communicate()
+            except Exception:
+                pass
             raise RuntimeError(f"analysis CLI timed out after {self.timeout_seconds}s") from exc
 
         elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
@@ -425,6 +429,10 @@ class CliSession:
             )
         except TimeoutError as exc:
             proc.kill()
+            try:
+                await proc.communicate()
+            except Exception:
+                pass
             raise RuntimeError(f"analysis CLI timed out after {self.timeout_seconds}s") from exc
 
         elapsed_ms = round((time.perf_counter() - started) * 1000, 1)

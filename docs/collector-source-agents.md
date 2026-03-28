@@ -151,6 +151,13 @@ Session workdirs follow the collector-wide workdir root:
 Current default transport:
 - `cli_exec` / collector session pool with JSON execution
 
+Current timeout strategy:
+- default timeout is `LLM_SOURCE_AGENT_TIMEOUT_SECONDS=60`
+- default execution keeps the source session domain and uses `resume`
+- parse/unreadable failures retry with smaller `compact` and then `minimal` prompts using `fresh`
+- timeout failures skip straight to `minimal` + `fresh`
+- timed out subprocesses are killed and reaped immediately so collector does not accumulate zombie CLI children
+
 Future-compatible transport rule:
 - the caller may receive structured stdout directly
 - or the caller may have to rely on request/response artifacts written to a session directory
@@ -252,3 +259,10 @@ These are meant for inspection and manual operator control.
   - `ARCHITECTURE.md` for boundaries and abstractions
   - `README.md` for operator-facing runtime notes
   - `docs/collector-source-agents.md` for ongoing design details
+
+### 2026-03-29
+
+- Raised the default source-agent timeout to `60s` because source-agent enrichment now runs in the background and does not block raw evidence persistence
+- Slimmed the source-agent JSON contract so optional structure can be omitted instead of forcing large payloads
+- Added a smaller `compact -> minimal` fallback ladder for parse and timeout failures
+- Made timeout cleanup reap killed CLI children immediately to avoid lingering subprocesses after repeated source-agent failures

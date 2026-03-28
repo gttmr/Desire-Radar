@@ -133,7 +133,7 @@ curl http://127.0.0.1:5002/sources/status
 curl http://127.0.0.1:5002/runtime/status
 ```
 
-`sources/status`에서 source가 오래 `source_agent_analysis` 단계에 머물면 먼저 `LLM_SOURCE_AGENT_TIMEOUT_SECONDS` 값을 확인한다. 기본값은 `30`이며, source-agent가 불안정할 때 collector 전체 수집 시간이 120초 이상 묶이지 않도록 source-agent timeout을 analysis timeout과 분리해 둔다.
+`sources/status`에서 source가 오래 `source_agent_analysis` 단계에 머물면 먼저 `LLM_SOURCE_AGENT_TIMEOUT_SECONDS` 값을 확인한다. 기본값은 `60`이며, source-agent가 불안정할 때 collector 전체 수집 시간이 묶이지 않도록 source-agent timeout을 analysis timeout과 분리해 둔다. 기본 실행이 실패하면 collector는 더 작은 `compact` 또는 `minimal` 컨텍스트로 fresh 재시도를 시도한다.
 
 `reddit_mentions`는 Reddit OAuth Data API를 전제로 한다. 아래 중 하나가 없으면 source는 `auth_not_configured` warning과 함께 skip된다.
 

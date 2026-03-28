@@ -66,6 +66,19 @@ class _FlakySessionPool(_SessionPool):
         self.calls.append(("__reset__", domain, ""))
 
 
+class _AlwaysFailSessionPool(_SessionPool):
+    def __init__(self, *, error_message: str):
+        super().__init__({})
+        self.error_message = error_message
+
+    async def execute_json(self, prompt: str, *, domain: str, execution_mode: str):
+        self.calls.append((prompt, domain, execution_mode))
+        raise RuntimeError(self.error_message)
+
+    def reset(self, domain: str):
+        self.calls.append(("__reset__", domain, ""))
+
+
 class _RedditConnector(BaseConnector):
     name = "reddit_mentions"
     cadence_seconds = 300
@@ -233,15 +246,14 @@ async def test_source_agent_runner_retries_with_compact_context_after_parse_fail
 
 
 @pytest.mark.asyncio
-async def test_source_agent_runner_does_not_retry_timeout_failures(tmp_path):
+async def test_source_agent_runner_retries_timeout_failures_with_minimal_context(tmp_path):
     session_pool = _FlakySessionPool(
         {
-            "summary": "Should not be used.",
-            "confidence": 0.1,
+            "summary": "Minimal retry succeeded.",
+            "confidence": 0.58,
             "warnings": [],
-            "theme_tags": [],
-            "entity_hints": [],
-            "derived_evidence": [],
+            "theme_tags": ["workflow"],
+            "entity_hints": ["Cursor"],
         },
         error_message="analysis CLI timed out after 120s",
     )
@@ -252,9 +264,27 @@ async def test_source_agent_runner_does_not_retry_timeout_failures(tmp_path):
 
     result = await runner.run_latest("reddit_mentions")
 
+    assert result.artifact.status == "completed"
+    assert ("__reset__", "source-agent:reddit_mentions", "") in session_pool.calls
+    assert session_pool.calls[0][2] == "resume"
+    assert session_pool.calls[-1][2] == "fresh"
+    assert "context_mode: minimal" in session_pool.calls[-1][0]
+    assert any("minimal" in note for note in result.artifact.execution_notes)
+
+
+@pytest.mark.asyncio
+async def test_source_agent_runner_fails_after_all_fallbacks_exhausted(tmp_path):
+    session_pool = _AlwaysFailSessionPool(error_message="analysis CLI timed out after 120s")
+    runner, sink, submission_store = _build_runner_with_session_pool(tmp_path, session_pool)
+    submission = _submission("reddit_mentions")
+    submission_store.create(submission)
+    sink.append(_evidence())
+
+    result = await runner.run_latest("reddit_mentions")
+
     assert result.artifact.status == "failed"
-    assert "timed out" in (result.artifact.error_message or "")
-    assert ("__reset__", "source-agent:reddit_mentions", "") not in session_pool.calls
+    assert "standard=analysis CLI timed out after 120s" in (result.artifact.error_message or "")
+    assert "minimal=analysis CLI timed out after 120s" in (result.artifact.error_message or "")
 
 
 def test_source_agent_runner_status_surfaces_latest_artifact(tmp_path):
