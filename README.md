@@ -159,10 +159,11 @@ docker compose up --build
 운영용 collector 대시보드:
 - `http://localhost:5002/dashboard`
 - source enable/disable, tier 변경, source run, source-agent run, 최근 evidence/submission/candidate 조회를 한 화면에서 볼 수 있다.
-- source row에는 현재 stage 메시지, 마지막 warning/failure, source-agent error가 함께 보여서 “fetch가 느린지 / 부분 실패인지 / agent 후처리가 깨졌는지”를 구분할 수 있다.
+- source row에는 현재 stage, 마지막 outcome, payload/evidence counters, warning/failure, source-agent status/error가 함께 보여서 “fetch가 느린지 / 부분 실패인지 / source-agent 후처리만 남았는지”를 구분할 수 있다.
 - source별 `packages/collector/src/agents/sources/*.md` 프롬프트를 대시보드에서 수정할 수 있다.
 - allowlist 된 일부 collector `.env` 값도 편집할 수 있다.
 - `.env` 저장 후 collector 재기동 전까지는 startup-time 설정이 즉시 반영되지 않는다.
+- queued source run은 raw evidence 저장과 candidate enqueue가 끝나면 `submission.status=completed`로 먼저 떨어질 수 있고, source-agent는 `metadata.source_agent_status`에서 별도로 추적된다.
 
 자세한 재기동/강제 recreate/troubleshooting은 [RUNBOOK.md](RUNBOOK.md)를 따른다.
 

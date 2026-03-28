@@ -80,6 +80,7 @@ Important property:
 - long-running source collection should not block request/health handling; source execution is queued and runtime state is observable separately
 - source status should expose partial-failure metadata instead of collapsing mixed outcomes into a binary success/failure view
 - source-agents may enrich a source submission, but they do not replace raw evidence or make final investment judgments
+- queued pull runs may complete raw evidence persistence and candidate enqueue before source-agent enrichment finishes; source-agent completion is tracked separately via `source_agent_status`
 
 ### 2. Collector Analysis
 `candidate shortlist -> analysis policy -> context packing -> graph-aware bundle -> CLI session execution -> analysis projection`

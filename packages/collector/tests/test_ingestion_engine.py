@@ -184,6 +184,18 @@ class StubSourceAgentRunner:
         return SourceAgentRunResult(artifact=artifact, derived_evidence=derived)
 
 
+class SlowSourceAgentRunner(StubSourceAgentRunner):
+    def __init__(self, *, status: str = "completed", derived_count: int = 0) -> None:
+        super().__init__(status=status, derived_count=derived_count)
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def run_for_submission(self, record, evidences):
+        self.started.set()
+        await self.release.wait()
+        return await super().run_for_submission(record, evidences)
+
+
 def _normalizer(source: str, raw_payload: dict, snapshot_ref: str) -> list[Evidence]:
     entity = raw_payload.get("entities", ["Cursor"])[0]
     return [
@@ -287,6 +299,48 @@ async def test_source_agent_derived_evidence_is_persisted_and_triggers_analysis(
     runtime = engine.get_runtime_status()["sources"]["dummy_pull"]
     assert runtime["derived_evidence_total"] == 1
     assert runtime["last_submission_id"] == record.submission_id
+
+
+@pytest.mark.asyncio
+async def test_async_source_run_completes_before_background_source_agent(tmp_path):
+    source_agent_runner = SlowSourceAgentRunner(status="completed", derived_count=1)
+    engine, _, analysis_engine = _build_engine(
+        tmp_path,
+        source_agent_runner=source_agent_runner,
+    )
+    await engine.start()
+    try:
+        record = await engine.enqueue_source_run("dummy_pull")
+        await engine._source_run_queue.join()  # type: ignore[attr-defined]
+        await asyncio.wait_for(source_agent_runner.started.wait(), timeout=1)
+
+        stored = await engine.get_submission(record.submission_id)
+        assert stored is not None
+        assert stored.status == "completed"
+        assert stored.metadata["source_agent_status"] in {"queued", "running"}
+        assert analysis_engine.calls == 1
+
+        runtime = engine.get_runtime_status()["sources"]["dummy_pull"]
+        assert runtime["run_state"] == "idle"
+        assert runtime["source_agent_status"] in {"queued", "running"}
+
+        source_agent_runner.release.set()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            stored = await engine.get_submission(record.submission_id)
+            if stored is not None and stored.metadata.get("source_agent_status") == "completed":
+                break
+            await asyncio.sleep(0.05)
+
+        stored = await engine.get_submission(record.submission_id)
+        assert stored is not None
+        assert stored.metadata["source_agent_status"] == "completed"
+        assert stored.metadata["derived_evidence_ids"] == ["dummy_pull-derived-0"]
+        assert len(stored.evidence_ids) == 2
+        assert analysis_engine.calls == 2
+    finally:
+        source_agent_runner.release.set()
+        await engine.stop()
 
 
 @pytest.mark.asyncio

@@ -78,6 +78,7 @@ Important invariant:
 
 Important boundary:
 - source-agent output can add structure, but it cannot rewrite source facts
+- queued pull runs may mark the submission `completed` once raw evidence persistence and candidate enqueue are done; in that path source-agent execution continues as background enrichment and is tracked via `source_agent_status`
 
 ## Source-Agent Types
 

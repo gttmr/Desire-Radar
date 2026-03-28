@@ -54,6 +54,7 @@ class IngestionEngine:
         self._source_run_queue: asyncio.Queue[str] = asyncio.Queue()
         self._worker: asyncio.Task | None = None
         self._source_workers: list[asyncio.Task] = []
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._running = False
         self._source_run_worker_concurrency = max(1, source_run_worker_concurrency)
         self._processing_yield_every = max(1, processing_yield_every)
@@ -85,6 +86,14 @@ class IngestionEngine:
             except asyncio.CancelledError:
                 pass
         self._source_workers = []
+        for task in list(self._background_tasks):
+            task.cancel()
+        for task in list(self._background_tasks):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        self._background_tasks.clear()
 
     async def enqueue_source_run(
         self,
@@ -486,13 +495,21 @@ class IngestionEngine:
                 record = self.submission_store.get(submission_id)
                 if record is None:
                     continue
-                await self._execute_source_run(record)
+                await self._execute_source_run(
+                    record,
+                    background_source_agent=True,
+                )
             except Exception:
                 logger.exception("Failed to execute source run %s", submission_id)
             finally:
                 self._source_run_queue.task_done()
 
-    async def _execute_source_run(self, record: SubmissionRecord) -> SubmissionRecord:
+    async def _execute_source_run(
+        self,
+        record: SubmissionRecord,
+        *,
+        background_source_agent: bool = False,
+    ) -> SubmissionRecord:
         trigger = str(record.metadata.get("trigger", "manual"))
         self._mark_source_running(record.source_id, record.submission_id, trigger=trigger)
         running_record = self.submission_store.update(
@@ -561,6 +578,7 @@ class IngestionEngine:
                     warnings=warnings,
                     is_run=True,
                     is_submission=False,
+                    background_source_agent=background_source_agent,
                 )
         except Exception as exc:
             failure_kind = self._classify_runtime_failure(exc)
@@ -900,6 +918,7 @@ class IngestionEngine:
         warnings: list[ConnectorWarning] | None = None,
         is_run: bool,
         is_submission: bool,
+        background_source_agent: bool = False,
     ) -> SubmissionRecord:
         self.submission_store.update(record.submission_id, status="running")
         def progress_update(**kwargs: Any) -> SubmissionRecord:
@@ -1005,14 +1024,29 @@ class IngestionEngine:
                 last_warning_message=warning_items[0].message if warning_items else None,
             )
             self.evidence_sink.extend(all_evidences)
-            source_agent_metadata, source_agent_evidence = await self._run_source_agent(
-                record=record,
-                evidences=all_evidences,
-                is_run=is_run,
-            )
-            if source_agent_evidence:
-                self.evidence_sink.extend(source_agent_evidence)
-            combined_evidences = [*all_evidences, *source_agent_evidence]
+            source_agent_metadata: dict[str, Any]
+            source_agent_evidence: list[Evidence]
+            combined_evidences: list[Evidence]
+            if background_source_agent and is_run and all_evidences:
+                source_agent_metadata = {
+                    "source_agent_status": "queued",
+                    "derived_evidence_ids": [],
+                }
+                source_agent_evidence = []
+                combined_evidences = list(all_evidences)
+                self._schedule_background_source_agent(
+                    record=record,
+                    evidences=list(all_evidences),
+                )
+            else:
+                source_agent_metadata, source_agent_evidence = await self._run_source_agent(
+                    record=record,
+                    evidences=all_evidences,
+                    progress_target="source" if is_run else "submission",
+                )
+                if source_agent_evidence:
+                    self.evidence_sink.extend(source_agent_evidence)
+                combined_evidences = [*all_evidences, *source_agent_evidence]
             progress_update(
                 stage="triggering_analysis",
                 message="triggering candidate analysis",
@@ -1080,7 +1114,167 @@ class IngestionEngine:
                 record,
                 useful=len(resolved_evidence_ids) > 0,
             )
-            return updated
+        except Exception as exc:
+            updated = self.submission_store.update(
+                record.submission_id,
+                status="failed",
+                error_message=str(exc),
+                processed_at=self._now(),
+                metadata={
+                    **record.metadata,
+                    "warnings": [self._warning_to_dict(item) for item in warning_items],
+                },
+            )
+            updated = progress_update(
+                stage="failed",
+                message=str(exc),
+                payload_total=len(payloads),
+                payloads_processed=len(snapshot_ids),
+                snapshot_total=len(snapshot_ids),
+                evidence_total=len(resolved_evidence_ids),
+                resolve_success_total=resolve_success,
+                resolve_miss_total=resolve_miss,
+                partial_failure_count=len(warning_items),
+                last_warning_count=len(warning_items),
+                last_warning_targets=[item.target for item in warning_items if item.target][:5],
+                last_warning_kind=warning_items[0].kind if warning_items else None,
+                last_warning_message=warning_items[0].message if warning_items else None,
+            )
+            self.source_registry.record_processing(
+                source_id,
+                success=False,
+                failure_kind=self._classify_runtime_failure(exc),
+                failure_message=str(exc),
+                warning_kind=warning_items[0].kind if warning_items else None,
+                warning_message=warning_items[0].message if warning_items else None,
+                warning_count=len(warning_items),
+                is_run=is_run,
+                is_submission=is_submission,
+            )
+        return updated
+
+    def _track_background_task(self, task: asyncio.Task[Any]) -> None:
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+
+    def _update_source_agent_state(
+        self,
+        *,
+        source_id: str,
+        submission_id: str,
+        status: str,
+        artifact_id: str | None = None,
+        error_message: str | None = None,
+        summary: str | None = None,
+        confidence: float | None = None,
+        derived_evidence_ids: list[str] | None = None,
+    ) -> SubmissionRecord | None:
+        record = self.submission_store.get(submission_id)
+        if record is None:
+            return None
+        metadata = dict(record.metadata)
+        metadata["source_agent_status"] = status
+        metadata["derived_evidence_ids"] = list(derived_evidence_ids or [])
+        if artifact_id is not None:
+            metadata["source_agent_artifact_id"] = artifact_id
+        if summary is not None:
+            metadata["source_agent_summary"] = summary
+        if confidence is not None:
+            metadata["source_agent_confidence"] = confidence
+        if error_message:
+            metadata["source_agent_error"] = error_message
+        elif "source_agent_error" in metadata:
+            metadata.pop("source_agent_error", None)
+        progress = dict(metadata.get("progress") or {})
+        progress["source_agent_status"] = status
+        progress["source_agent_artifact_id"] = artifact_id
+        if error_message:
+            progress["source_agent_error"] = error_message
+        metadata["progress"] = progress
+        updated = self.submission_store.update(submission_id, metadata=metadata)
+        runtime = self._runtime_for_source(source_id)
+        runtime["source_agent_status"] = status
+        runtime["source_agent_artifact_id"] = artifact_id
+        runtime["source_agent_error"] = error_message
+        runtime["last_progress_at"] = self._now()
+        return updated
+
+    def _schedule_background_source_agent(
+        self,
+        *,
+        record: SubmissionRecord,
+        evidences: list[Evidence],
+    ) -> None:
+        self._update_source_agent_state(
+            source_id=record.source_id,
+            submission_id=record.submission_id,
+            status="queued",
+            derived_evidence_ids=[],
+        )
+        task = asyncio.create_task(
+            self._run_source_agent_background(
+                record=record,
+                evidences=evidences,
+            )
+        )
+        self._track_background_task(task)
+
+    async def _run_source_agent_background(
+        self,
+        *,
+        record: SubmissionRecord,
+        evidences: list[Evidence],
+    ) -> None:
+        try:
+            self._update_source_agent_state(
+                source_id=record.source_id,
+                submission_id=record.submission_id,
+                status="running",
+                derived_evidence_ids=[],
+            )
+            metadata, derived = await self._run_source_agent(
+                record=record,
+                evidences=evidences,
+                progress_target="none",
+            )
+            if derived:
+                self.evidence_sink.extend(derived)
+                current = self.submission_store.get(record.submission_id)
+                if current is not None:
+                    existing_ids = list(current.evidence_ids)
+                    existing_ids.extend(
+                        item.evidence_id
+                        for item in derived
+                        if item.evidence_id not in existing_ids
+                    )
+                    self.submission_store.update(
+                        record.submission_id,
+                        evidence_ids=existing_ids,
+                    )
+                    await self._trigger_analysis(derived)
+            self._update_source_agent_state(
+                source_id=record.source_id,
+                submission_id=record.submission_id,
+                status=str(metadata.get("source_agent_status") or "skipped"),
+                artifact_id=metadata.get("source_agent_artifact_id"),
+                error_message=metadata.get("source_agent_error"),
+                summary=metadata.get("source_agent_summary"),
+                confidence=metadata.get("source_agent_confidence"),
+                derived_evidence_ids=list(metadata.get("derived_evidence_ids") or []),
+            )
+        except Exception as exc:
+            logger.exception(
+                "Background source-agent failed for %s submission %s",
+                record.source_id,
+                record.submission_id,
+            )
+            self._update_source_agent_state(
+                source_id=record.source_id,
+                submission_id=record.submission_id,
+                status="failed",
+                error_message=str(exc),
+                derived_evidence_ids=[],
+            )
         except Exception as exc:
             failure_kind = self._classify_runtime_failure(exc)
             updated = self.submission_store.update(
@@ -1209,7 +1403,7 @@ class IngestionEngine:
             source_agent_metadata, source_agent_evidence = await self._run_source_agent(
                 record=record,
                 evidences=evidences,
-                is_run=False,
+                progress_target="submission",
             )
             if source_agent_evidence:
                 self.evidence_sink.extend(source_agent_evidence)
@@ -1496,7 +1690,7 @@ class IngestionEngine:
             source_agent_metadata, source_agent_evidence = await self._run_source_agent(
                 record=record,
                 evidences=resolved_evidences,
-                is_run=True,
+                progress_target="source",
             )
             if source_agent_evidence:
                 self.evidence_sink.extend(source_agent_evidence)
@@ -1606,7 +1800,7 @@ class IngestionEngine:
         *,
         record: SubmissionRecord,
         evidences: list[Evidence],
-        is_run: bool,
+        progress_target: str,
     ) -> tuple[dict[str, Any], list[Evidence]]:
         if self.source_agent_runner is None or not evidences:
             return {"source_agent_status": "skipped"}, []
@@ -1626,7 +1820,7 @@ class IngestionEngine:
         if artifact.error_message:
             metadata["source_agent_error"] = artifact.error_message
 
-        if is_run:
+        if progress_target == "source":
             self._update_source_progress(
                 record.source_id,
                 record.submission_id,
@@ -1637,7 +1831,7 @@ class IngestionEngine:
                 source_agent_artifact_id=artifact.artifact_id,
                 source_agent_error=artifact.error_message,
             )
-        else:
+        elif progress_target == "submission":
             self._update_submission_progress(
                 record.submission_id,
                 stage="source_agent_analysis",

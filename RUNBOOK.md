@@ -280,6 +280,7 @@ curl http://127.0.0.1:5002/runtime/status
 - `current_stage=fetching`: connector fetch가 아직 안 끝난 상태
 - `current_stage=processing_payloads`: fetch는 끝났고 snapshot/normalizer/resolve를 진행 중인 상태
 - `current_stage=triggering_analysis`: evidence 적재는 끝났고 analysis enqueue 직전/직후
+- `submission.status=completed` 이고 `metadata.source_agent_status=queued|running` 이면 raw evidence 저장과 candidate enqueue는 끝났고 source-agent enrichment만 background로 남아 있는 상태
 - `last_warning_targets`가 있으면 partial failure가 source 전체 실패가 아니라 특정 target/subreddit에 국한된 상태다
 
 ## Discord Human Input Test

@@ -161,16 +161,65 @@ function renderSummary() {
 }
 
 function sourceStatusPill(source) {
-  const status = source.enabled === false ? "disabled" : source.runnable === false ? "not runnable" : "enabled";
-  const cls = source.enabled === false ? "bad" : source.runnable === false ? "warn" : "good";
+  const status = source.enabled === false
+    ? "disabled"
+    : source.runnable === false
+      ? "not runnable"
+      : source.run_state === "running"
+        ? "running"
+        : source.run_state === "failed"
+          ? "failed"
+          : "enabled";
+  const cls = source.enabled === false
+    ? "bad"
+    : source.runnable === false
+      ? "warn"
+      : source.run_state === "failed"
+        ? "bad"
+        : source.run_state === "running"
+          ? "warn"
+          : "good";
   return `<span class="pill ${cls}">${escapeHtml(status)}</span>`;
 }
 
 function agentStatusPill(source) {
   if (!source.agent_enabled) return `<span class="pill warn">agent off</span>`;
-  const status = source.last_agent_status || "ready";
-  const cls = status === "failed" ? "bad" : status === "completed" ? "good" : "warn";
+  const status = source.source_agent_status || source.last_agent_status || "ready";
+  const cls = status === "failed" ? "bad" : status === "completed" ? "good" : status === "running" ? "warn" : "warn";
   return `<span class="pill ${cls}">${escapeHtml(status)}</span>`;
+}
+
+function compactJoin(items) {
+  return items.filter(Boolean).join(" · ");
+}
+
+function sourceDetailLines(source) {
+  const details = [];
+  details.push(compactJoin([
+    source.kind || "source",
+    source.capabilities?.length ? `caps: ${source.capabilities.slice(0, 3).join(", ")}` : "",
+    source.request_kinds_supported?.length ? `requests: ${source.request_kinds_supported.join(", ")}` : "",
+  ]));
+  details.push(compactJoin([
+    source.current_stage ? `stage: ${source.current_stage}` : "",
+    source.current_stage_message || "",
+  ]));
+  details.push(compactJoin([
+    source.last_outcome ? `outcome: ${source.last_outcome}` : "",
+    typeof source.payload_total === "number" && source.payload_total > 0 ? `payloads ${source.payloads_processed || 0}/${source.payload_total}` : "",
+    typeof source.evidence_total === "number" && source.evidence_total > 0 ? `evidence ${source.evidence_total}` : "",
+    typeof source.resolve_miss_total === "number" && source.resolve_miss_total > 0 ? `resolve miss ${source.resolve_miss_total}` : "",
+  ]));
+  details.push(compactJoin([
+    source.source_agent_status ? `agent: ${source.source_agent_status}` : "",
+    source.source_agent_error || source.last_agent_error || "",
+  ]));
+  details.push(compactJoin([
+    source.last_warning_kind ? `warning: ${source.last_warning_kind}` : "",
+    source.last_warning_targets?.length ? `targets: ${source.last_warning_targets.join(", ")}` : "",
+    source.last_failure_kind ? `failure: ${source.last_failure_kind}` : "",
+  ]));
+  return details.filter(Boolean);
 }
 
 function renderSources() {
@@ -181,23 +230,19 @@ function renderSources() {
       const id = source.source_id || "";
       const tier = source.configured_tier ?? "";
       const promptHint = source.agent_prompt_path ? source.agent_prompt_path.split("/").slice(-2).join("/") : "no prompt";
-      const sourceDetail =
-        source.current_stage_message ||
-        source.source_agent_error ||
-        source.last_agent_error ||
-        source.last_warning_message ||
-        source.last_failure_message ||
-        `${source.kind || "source"} · ${promptHint}`;
+      const detailLines = sourceDetailLines(source);
       return `
         <tr>
           <td data-label="Source">
             <div class="source-name">${escapeHtml(id)}</div>
-            <div class="source-sub">${escapeHtml(sourceDetail)}</div>
+            ${detailLines.map((line) => `<div class="source-sub">${escapeHtml(line)}</div>`).join("")}
+            <div class="source-sub">${escapeHtml(`prompt: ${promptHint}`)}</div>
           </td>
           <td data-label="Status">
             <div class="inline">
               ${sourceStatusPill(source)}
               ${agentStatusPill(source)}
+              ${source.scheduled ? `<span class="pill">scheduled</span>` : ""}
             </div>
           </td>
           <td data-label="Tier">
@@ -207,13 +252,14 @@ function renderSources() {
                 <input type="checkbox" ${source.enabled ? "checked" : ""} data-enable-input="${escapeHtml(id)}" />
                 enabled
               </label>
+              <span class="pill">effective ${escapeHtml(source.effective_tier ?? tier)}</span>
             </div>
           </td>
           <td data-label="Run">
             <div class="source-actions">
-              <button class="btn btn-ghost btn-small" type="button" data-run-source="${escapeHtml(id)}">Run source</button>
+              <button class="btn btn-ghost btn-small" type="button" data-run-source="${escapeHtml(id)}" ${(!source.enabled || !source.runnable) ? "disabled" : ""}>Run source</button>
               ${source.agent_prompt_path ? `<button class="btn btn-ghost btn-small" type="button" data-edit-prompt="${escapeHtml(id)}">Edit prompt</button>` : ""}
-              ${source.agent_enabled ? `<button class="btn btn-ghost btn-small" type="button" data-run-agent="${escapeHtml(id)}">Run agent</button>` : ""}
+              ${source.agent_prompt_path ? `<button class="btn btn-ghost btn-small" type="button" data-run-agent="${escapeHtml(id)}" ${!source.agent_enabled ? "disabled" : ""}>Run agent</button>` : ""}
             </div>
           </td>
         </tr>
@@ -265,6 +311,7 @@ function renderCandidates() {
     ? candidates.map((candidate) => {
         const entity = candidateText(candidate);
         const score = candidate.emergence_score ?? candidate.velocity_score ?? candidate.score ?? "";
+        const inspectKey = candidate.primary_entity || entity;
         const summary =
           candidate.event_summary ||
           candidate.analysis_summary ||
@@ -284,11 +331,13 @@ function renderCandidates() {
               ${facetSummary ? `<p class="muted">${escapeHtml(facetSummary)}</p>` : ""}
               <div class="row">
                 <span class="pill">${escapeHtml(score === "" ? "n/a" : score)}</span>
+                ${candidate.candidate_kind ? `<span class="pill">${escapeHtml(candidate.candidate_kind)}</span>` : ""}
+                ${candidate.cluster_id ? `<span class="pill">${escapeHtml(candidate.cluster_id)}</span>` : ""}
                 <span class="muted">${escapeHtml(candidate.source_count ? `${candidate.source_count} sources` : candidate.status || "")}</span>
               </div>
             </div>
             <div class="card-actions">
-              <button class="btn btn-ghost btn-small" type="button" data-inspect-entity="${escapeHtml(entity)}">Inspect</button>
+              <button class="btn btn-ghost btn-small" type="button" data-inspect-entity="${escapeHtml(inspectKey)}">Inspect</button>
             </div>
           </article>
         `;
@@ -333,13 +382,19 @@ function renderSubmissions() {
         const statusClass =
           submission.status === "failed"
             ? "bad"
-            : submission.status === "pending" || submission.status === "running"
+            : submission.status === "pending" || submission.status === "running" || submission.status === "pending_human"
               ? "warn"
               : "good";
+        const progress = submission.metadata?.progress || {};
+        const detail = compactJoin([
+          progress.stage ? `stage: ${progress.stage}` : "",
+          progress.message || "",
+          submission.metadata?.source_agent_status ? `agent: ${submission.metadata.source_agent_status}` : "",
+        ]);
         return `
           <article class="card">
             <h3>${escapeHtml(submission.source_id || submission.submission_id || "Submission")}</h3>
-            <p class="muted">${escapeHtml(submission.error_message || submission.producer_ref || "")}</p>
+            <p class="muted">${escapeHtml(detail || submission.error_message || submission.producer_ref || "")}</p>
             <div class="row">
               <span class="pill ${statusClass}">${escapeHtml(submission.status || "unknown")}</span>
               <span class="muted">${escapeHtml(fmtDate(submission.processed_at || submission.received_at || ""))}</span>
@@ -473,7 +528,7 @@ function renderPromptEditor() {
       </div>
       <div class="rowline">
         <span class="muted">${escapeHtml(selectedMeta.agent_prompt_path || "no prompt path")}</span>
-        <span class="pill">${escapeHtml(selectedMeta.last_agent_status || (selectedMeta.exists ? "file exists" : "file missing"))}</span>
+        <span class="pill">${escapeHtml(selectedMeta.source_agent_status || selectedMeta.last_agent_status || (selectedMeta.exists ? "file exists" : "file missing"))}</span>
       </div>
       <div class="field">
         <div class="field-head">
@@ -484,7 +539,7 @@ function renderPromptEditor() {
       </div>
       <div class="prompt-actions">
         <button class="btn btn-ghost btn-small" id="promptRefreshBtn" type="button">Reload prompt</button>
-        <button class="btn btn-ghost btn-small" id="promptRunBtn" type="button">Run source agent</button>
+        <button class="btn btn-ghost btn-small" id="promptRunBtn" type="button" ${!selectedMeta.agent_enabled ? "disabled" : ""}>Run source agent</button>
         <button class="btn btn-primary" type="submit">Save prompt</button>
       </div>
     </div>
