@@ -181,6 +181,7 @@ export class ClaudeProvider implements ProviderAdapter {
         return buildProviderHealthProbe({
           auth_status: 'healthy',
           execute_status: classified.failure_kind ?? 'unknown',
+          error: message,
           error_summary: classified.error_summary ?? classified.error,
         });
       }

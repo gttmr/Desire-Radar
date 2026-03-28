@@ -266,6 +266,47 @@ warn line
     );
   });
 
+  it('surfaces the raw claude execute error when auth is healthy but execution fails', async () => {
+    let callCount = 0;
+    mockExecFile((_file, args, _options, callback) => {
+      callCount += 1;
+      if (callCount === 1) {
+        expect(args).toEqual(['auth', 'status']);
+        callback(null, '{"loggedIn":true,"authMethod":"claude.ai"}', '');
+        return;
+      }
+      expect(args).toEqual([
+        '-p',
+        'Reply with exactly OK',
+        '--output-format',
+        'stream-json',
+        '--verbose',
+      ]);
+      callback(
+        Object.assign(new Error('Command failed'), { code: 1 }),
+        [
+          '{"type":"system","subtype":"init"}',
+          '{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401 {\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"authentication_error\\",\\"message\\":\\"Invalid authentication credentials\\"}}"}]}}',
+          '{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate. API Error: 401 {\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"authentication_error\\",\\"message\\":\\"Invalid authentication credentials\\"}}"}',
+        ].join('\n'),
+        '',
+      );
+    });
+
+    const provider = new ClaudeProvider('claude', 30_000);
+    await expect(provider.probeHealth?.()).resolves.toEqual(
+      expect.objectContaining({
+        available: false,
+        auth_status: 'healthy',
+        execute_status: 'auth_failed',
+        ready_for_execution: false,
+        failure_kind: 'auth_failed',
+        error_summary: 'authentication failed',
+        error: expect.stringContaining('Invalid authentication credentials'),
+      }),
+    );
+  });
+
   it('extracts claude assistant text from stream-json output', () => {
     expect(
       extractClaudePrintResult(

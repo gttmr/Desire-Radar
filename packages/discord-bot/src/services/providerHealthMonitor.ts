@@ -148,6 +148,12 @@ function formatProviderOutage(
   if (provider.status) {
     lines.push(`status: ${provider.status}`);
   }
+  if (provider.auth_status && provider.auth_status !== 'unprobed') {
+    lines.push(`auth: ${provider.auth_status}`);
+  }
+  if (provider.execute_status && provider.execute_status !== 'unprobed') {
+    lines.push(`execute: ${provider.execute_status}`);
+  }
   lines.push(`error: ${summarize(provider.error_summary ?? currentError, 320)}`);
   lines.push(`checked: ${provider.last_checked_at}`);
   lines.push(`down since: ${unavailableSince}`);

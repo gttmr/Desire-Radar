@@ -24,6 +24,8 @@ function healthResponse(
     provider: string;
     available: boolean;
     status?: ProviderHealthStatus;
+    auth_status?: ProviderHealthStatus;
+    execute_status?: ProviderHealthStatus;
     recoverable?: boolean;
     error?: string;
     error_summary?: string;
@@ -275,6 +277,8 @@ describe('ProviderHealthMonitor', () => {
           provider: 'claude',
           available: false,
           status: 'rate_limited',
+          auth_status: 'healthy',
+          execute_status: 'rate_limited',
           recoverable: true,
           error: "You've hit your limit",
         },
@@ -294,6 +298,8 @@ describe('ProviderHealthMonitor', () => {
       [
         '[provider-health] claude unavailable',
         'status: rate_limited',
+        'auth: healthy',
+        'execute: rate_limited',
         "error: You've hit your limit",
         'checked: 2026-03-26T00:00:00Z',
         'down since: 2026-03-26T00:00:00Z',
