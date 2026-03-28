@@ -12,6 +12,7 @@ _deps: dict[str, Any] = {}
 
 def init_dependencies(deps: dict[str, Any]) -> None:
     """Inject service dependencies from server setup."""
+    _deps.clear()
     _deps.update(deps)
 
 

@@ -133,6 +133,22 @@ curl http://127.0.0.1:5002/sources/status
 curl http://127.0.0.1:5002/runtime/status
 ```
 
+브라우저 대시보드:
+
+```bash
+xdg-open http://127.0.0.1:5002/dashboard
+```
+
+대시보드에서 가능한 작업:
+- 최근 evidence / submission / candidate 확인
+- source enable/disable, tier 변경, source run, source-agent run
+- source별 source-agent markdown prompt 수정
+- allowlist 된 collector `.env` 값 수정
+
+주의:
+- 대시보드의 `.env` 편집은 파일을 저장하지만, startup-time 설정은 collector 재기동 후 반영된다.
+- Docker Compose에서는 `.env`가 collector 컨테이너의 `/app/.env`로 mount 되어 있어야 편집이 host 파일에 반영된다. 현재 compose는 이를 포함한다.
+
 의미:
 - `/health`: 빠른 liveness + analysis/source queue 요약
 - `/sources/status`: source별 enabled/tier/validity + 현재 run state

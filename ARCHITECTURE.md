@@ -33,6 +33,7 @@ Collector owns:
 - event and relationship preservation inside evidence bundles
 - low-cost, batch-first CLI analysis for candidate enrichment and human-input routing
 - source-level CLI session transport and artifact persistence for source-agent execution
+- operator dashboard for collector-owned runtime visibility, source controls, and allowlisted config edits
 
 Collector does not own final investment judgment. It prepares evidence and structured candidate state for downstream analysis.
 

@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Collector Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/assets/dashboard.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <main class="shell">
+      <header class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">Collector operator dashboard</p>
+          <h1>Live evidence intake, source control, and analysis health.</h1>
+          <p class="lede">
+            Monitor runtime state, trigger collection, inspect emerging candidates,
+            and manage environment settings from a single static UI.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button class="btn btn-ghost" id="refreshBtn" type="button">Refresh</button>
+          <button class="btn btn-primary" id="collectAllBtn" type="button">Run collect</button>
+        </div>
+      </header>
+
+      <div id="globalMessage" class="message"></div>
+
+      <section class="summary-grid" id="summaryGrid" aria-label="Dashboard summary"></section>
+
+      <section class="layout">
+        <div class="stack">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Sources</p>
+                <h2>Source management</h2>
+              </div>
+              <span class="meta" id="sourceMeta">Loading</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table" aria-label="Source management table">
+                <thead>
+                  <tr>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th>Tier</th>
+                    <th>Run</th>
+                  </tr>
+                </thead>
+                <tbody id="sourcesBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Candidates</p>
+                <h2>Emerging candidates</h2>
+              </div>
+              <span class="meta" id="candidateMeta">Loading</span>
+            </div>
+            <div class="cards" id="candidatesList"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Evidence</p>
+                <h2>Recent evidence</h2>
+              </div>
+            </div>
+            <div class="cards cards-tight" id="evidenceList"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Submissions</p>
+                <h2>Recent submissions</h2>
+              </div>
+            </div>
+            <div class="cards cards-tight" id="submissionsList"></div>
+          </section>
+        </div>
+
+        <aside class="stack side">
+          <section class="panel panel-sticky">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Entity</p>
+                <h2>Entity detail</h2>
+              </div>
+              <button class="btn btn-ghost btn-small" id="entityRefreshBtn" type="button">Refresh bundle</button>
+            </div>
+            <div id="entityPanel" class="entity-panel">
+              <p class="empty">Select a candidate or top entity to inspect its evidence bundle.</p>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Source Agents</p>
+                <h2>Prompt editor</h2>
+              </div>
+              <span class="meta" id="promptMeta">Loading</span>
+            </div>
+            <form id="promptForm" class="env-form">
+              <div id="promptMessage" class="message"></div>
+              <div id="promptPanel" class="prompt-panel">
+                <p class="empty">Loading source prompts.</p>
+              </div>
+            </form>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="section-kicker">Config</p>
+                <h2>Environment settings</h2>
+              </div>
+              <span class="meta" id="envMeta">Loading</span>
+            </div>
+            <form id="envForm" class="env-form">
+              <div id="envMessage" class="message"></div>
+              <div id="envSections" class="env-sections"></div>
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">Save settings</button>
+              </div>
+            </form>
+          </section>
+        </aside>
+      </section>
+    </main>
+    <script src="/dashboard/assets/dashboard.js" defer></script>
+  </body>
+</html>
