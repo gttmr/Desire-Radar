@@ -21,6 +21,7 @@ import { RadarCommandService } from '../services/radarCommandService.js';
 import { ReportCommandService } from '../services/reportCommandService.js';
 import { ReportService, type ReportDispatch } from '../services/reportService.js';
 import { RunCommandService } from '../services/runCommandService.js';
+import { HumanInputFollowUpService } from '../services/humanInputFollowUpService.js';
 import type { ReportDetailLevel, ReportRunMode } from '../types/domain.js';
 import { commandJson } from './commands.js';
 import {
@@ -65,6 +66,7 @@ export class BotApp {
   readonly runCommands: RunCommandService;
   readonly queueCommands: QueueCommandService;
   readonly opsCommands: OpsCommandService;
+  readonly humanInputFollowUps: HumanInputFollowUpService;
 
   constructor(
     scheduler: NotificationScheduler,
@@ -98,6 +100,10 @@ export class BotApp {
       collector,
       orchestrator,
       this.health.bind(this),
+    );
+    this.humanInputFollowUps = new HumanInputFollowUpService(
+      this.reportCommands,
+      orchestrator,
     );
 
     this.client.once(Events.ClientReady, async () => {
@@ -340,6 +346,21 @@ export class BotApp {
         await message.react('📥');
       } catch (error) {
         console.error('Failed to react to ingested message', error);
+      }
+      if (result.interpretation && result.submissionId) {
+        const followUps = await this.humanInputFollowUps.handle({
+          guildId: message.guildId,
+          channelRef: message.url,
+          rawInput: message.content,
+          sourceSubmissionId: result.submissionId,
+          interpretation: result.interpretation,
+        });
+        if (followUps.length > 0) {
+          await message.reply({
+            content: followUps.join('\n').slice(0, 1900),
+            allowedMentions: { repliedUser: false },
+          });
+        }
       }
       return;
     }

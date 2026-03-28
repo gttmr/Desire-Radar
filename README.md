@@ -10,6 +10,7 @@
 - [ARCHITECTURE.md](ARCHITECTURE.md): 서비스 경계, 핵심 추상화, CLI/provider 변동성 대응 원칙
 - [RUNBOOK.md](RUNBOOK.md): WSL 기준 로컬 런타임, 네이티브 실행, 재기동, health, smoke, 장애 대응 절차
 - [docs/collector-source-agents.md](docs/collector-source-agents.md): collector source-agent living design
+- [docs/investment-module.md](docs/investment-module.md): free-form human input와 orchestrator investment module living design
 - `packages/mcp-orchestrator/src/agents/*.md`: 오케스트레이터 분석 에이전트 프롬프트
 
 ## 아키텍처
@@ -52,11 +53,15 @@ Discord human input / slash commands
 - source registry가 각 source의 `kind`, `ingestion_mode`, `configured_tier`, `effective_tier`, validity 상태를 관리한다.
 - source별 `agent.md`를 통해 source submission 단위 요약과 파생 evidence를 만들 수 있다.
 - candidate 분석은 기본적으로 `batch` 모드로 돌아가며, 상위 후보를 묶어 CLI 기반 LLM 호출을 수행한다.
-- `POST /ingest/human-input`는 free-form 입력을 받아 collector 내부에서 다음 중 하나로 라우팅한다.
-  - `manual_observation`
-  - `human_analyst_note`
-  - `human_curated_dataset`
-  - `needs_review`
+- `POST /ingest/human-input`는 free-form 입력을 받아 collector 내부에서 해석 결과 객체를 만든다.
+  - `collector_route`
+  - `input_kind`
+  - `action_requests`
+  - `handoff_targets`
+  - `asset_candidates`
+  - `investment_note`
+  - `user_message`
+- collector는 collector-native route가 있으면 evidence ingest로 fan-out 하고, command-only 입력이면 raw submission만 보존한 채 후속 서비스가 쓸 구조화 결과를 남긴다.
 
 ### Orchestrator
 - collector 후보를 받아 phase-aware 의사결정 파이프라인으로 처리한다.
@@ -67,10 +72,13 @@ Discord human input / slash commands
 - `OPENAI_API_KEY`만으로는 OpenAI provider가 자동 등록되지 않고, `ENABLED_PROVIDERS`에 `openai`를 넣었을 때만 추가 등록된다.
 - provider session마다 request/response artifact를 JSON으로 남긴다.
 - transport는 `cli_exec`, `cli_resume`, `external_injection` 중 하나를 사용한다.
+- free-form human study 입력은 orchestrator 내부 investment module이 Markdown intake와 asset dossier로 축적한다.
 
 ### Discord Bot
 - 하나의 human input 채널만 본다.
 - 메시지 내용을 bot이 직접 분류하지 않고 raw envelope 그대로 collector에 전달한다.
+- collector가 돌려준 `action_requests` 중 저위험 주식 watchlist add/remove만 자동 실행한다.
+- collector가 돌려준 `investment_module` handoff는 orchestrator investment intake API로 전달한다.
 - slash command 표면은 `report`, `radar`, `run`, `queue`, `ops` 5개 namespace로 고정한다.
 
 ## 빠른 시작
@@ -153,29 +161,23 @@ human input 채널은 하나만 둔다.
 권장 예시:
 - `DISCORD_HUMAN_INPUT_CHANNEL_IDS=123456789012345678`
 
-채널에 입력 가능한 형태:
+채널 입력은 자유 형식이 기본이다. 아래는 가능한 예시일 뿐 필수 템플릿이 아니다.
 
-### 1. 빠른 관측
-
-```text
-title: Cursor adoption spike
-entities: Cursor, OpenAI
-
-개발팀에서 seat 확대 언급이 이번 주에 급증했다.
-```
-
-### 2. 분석/스터디 결과
+### 1. 자연어 명령
 
 ```text
-title: Developer workflow study
-entities: Cursor
-why_now: team-wide rollout expanded this month
-supporting_points: review workflow lock-in; repeat seat expansion
-
-코드 리뷰 워크플로우 중심으로 유입이 강하다.
+삼성전자 와치리스트에 추가해
 ```
 
-### 3. 구조화된 데이터
+### 2. 자유 형식 스터디 메모
+
+```text
+삼성전자 쪽을 이번 달 내내 다시 보고 있다.
+HBM과 패키징 투자, 그리고 고객사 확보 속도 때문에 메모리 사이클보다
+상향 여지가 더 클 수 있다고 본다.
+```
+
+### 3. 구조화된 데이터(JSON도 계속 지원)
 
 ```json
 {
@@ -191,7 +193,12 @@ supporting_points: review workflow lock-in; repeat seat expansion
 }
 ```
 
-collector는 이를 `human_input_inbox` source로 받고 내부 라우터가 적절한 ingestion 타입으로 fan-out 한다.
+collector는 이를 `human_input_inbox` source로 받고 다음을 판단한다.
+- collector-native evidence ingest route
+- 저위험 watchlist auto-action 가능 여부
+- investment module handoff 여부
+
+장문 스터디/리서치 입력은 orchestrator의 investment module에 Markdown으로 축적된다.
 
 ## Session And Graph Strategy
 
@@ -247,6 +254,9 @@ collector는 이를 `human_input_inbox` source로 받고 내부 라우터가 적
 - `GET /runs/:id/state`
 - `GET /runs/:id/verdict`
 - `GET /health`
+- `POST /investment/intake`
+- `GET /investment/intakes/:intake_id`
+- `GET /investment/assets/:asset_key`
 
 ## Collector CLI 분석
 

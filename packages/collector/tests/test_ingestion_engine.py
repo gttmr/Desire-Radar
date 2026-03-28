@@ -954,3 +954,55 @@ async def test_human_input_inbox_rejects_needs_review(tmp_path):
     assert stored.evidence_ids == []
     assert stored.metadata["classification"]["route"] == "needs_review"
     assert registry.status()["human_input_inbox"]["pending_submissions"] == 0
+
+
+@pytest.mark.asyncio
+async def test_human_input_inbox_completes_command_only_input_without_evidence(tmp_path):
+    router = StubHumanInputRouter(
+        HumanInputRoutingDecision(
+            route="none",
+            collector_route="none",
+            input_kind="command",
+            confidence=0.91,
+            rationale="watchlist_command",
+            title="삼성전자 와치리스트에 추가해",
+            action_requests=[
+                {
+                    "action": "watchlist_add",
+                    "asset_type": "stock",
+                    "asset_key": "stock:005930",
+                    "ticker": "005930",
+                    "display_name": "삼성전자",
+                    "confidence": 0.95,
+                }
+            ],
+            asset_candidates=[
+                {
+                    "asset_type": "stock",
+                    "asset_key": "stock:005930",
+                    "display_name": "삼성전자",
+                    "ticker": "005930",
+                    "market": "KRX",
+                    "confidence": 0.95,
+                }
+            ],
+            user_message="watchlist 명령으로 해석했습니다: 삼성전자 (005930)",
+        )
+    )
+    engine, registry, _ = _build_engine(tmp_path, human_input_router=router)
+
+    record = await engine.submit_human_input(
+        {
+            "content": "삼성전자 와치리스트에 추가해",
+            "producer_ref": "discord:777",
+            "message_id": "msg-5",
+        }
+    )
+
+    stored = await engine.get_submission(record.submission_id)
+    assert stored is not None
+    assert stored.status == "completed"
+    assert stored.evidence_ids == []
+    assert stored.metadata["classification"]["route"] == "none"
+    assert stored.metadata["classification"]["action_requests"][0]["ticker"] == "005930"
+    assert registry.status()["human_input_inbox"]["pending_submissions"] == 0

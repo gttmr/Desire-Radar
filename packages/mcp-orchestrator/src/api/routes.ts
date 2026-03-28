@@ -10,12 +10,14 @@ import { synthesizeReport } from '../tools/synthesize-report.js';
 import { getRunState } from '../tools/get-run-state.js';
 import { listSessions } from '../tools/list-sessions.js';
 import { resetSession } from '../tools/reset-session.js';
+import type { InvestmentIntakeService } from '../investment/intake-service.js';
 
 export function createRoutes(
   orchestrator: RunOrchestrator,
   sessionStore: SessionStore,
   registry: ProviderRegistry,
   providerHealthMonitor?: ProviderHealthMonitor,
+  investmentIntakeService?: InvestmentIntakeService,
 ): Router {
   const router = Router();
 
@@ -259,6 +261,67 @@ export function createRoutes(
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       res.status(404).json({ error: message });
+    }
+  });
+
+  router.post('/investment/intake', async (req, res) => {
+    if (!investmentIntakeService) {
+      res.status(404).json({ error: 'investment intake not configured' });
+      return;
+    }
+    try {
+      const result = await investmentIntakeService.submit({
+        source_submission_id: String(req.body.source_submission_id ?? ''),
+        input_kind: req.body.input_kind,
+        raw_input: String(req.body.raw_input ?? ''),
+        channel_ref:
+          typeof req.body.channel_ref === 'string' ? req.body.channel_ref : undefined,
+        asset_candidates: Array.isArray(req.body.asset_candidates)
+          ? req.body.asset_candidates
+          : [],
+        auto_actions: Array.isArray(req.body.auto_actions) ? req.body.auto_actions : [],
+        investment_note: req.body.investment_note,
+      });
+      res.json(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  router.get('/investment/intakes/:intakeId', async (req, res) => {
+    if (!investmentIntakeService) {
+      res.status(404).json({ error: 'investment intake not configured' });
+      return;
+    }
+    try {
+      const result = await investmentIntakeService.getIntake(req.params.intakeId);
+      if (!result) {
+        res.status(404).json({ error: 'investment intake not found' });
+        return;
+      }
+      res.json(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  router.get('/investment/assets/:assetKey', async (req, res) => {
+    if (!investmentIntakeService) {
+      res.status(404).json({ error: 'investment intake not configured' });
+      return;
+    }
+    try {
+      const result = await investmentIntakeService.getAsset(req.params.assetKey);
+      if (!result) {
+        res.status(404).json({ error: 'investment asset not found' });
+        return;
+      }
+      res.json(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
     }
   });
 

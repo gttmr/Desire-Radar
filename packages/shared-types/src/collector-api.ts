@@ -312,6 +312,86 @@ export type HumanEvidenceBatchRequest = {
   request_submission_id?: string;
 };
 
+export type HumanInputCollectorRoute =
+  | 'manual_observation'
+  | 'human_analyst_note'
+  | 'human_curated_dataset'
+  | 'needs_review'
+  | 'none';
+
+export type HumanInputInputKind =
+  | 'observation'
+  | 'study_note'
+  | 'dataset'
+  | 'command'
+  | 'mixed';
+
+export type AssetCandidate = {
+  asset_type: 'stock' | 'real_estate' | 'topic' | 'other';
+  asset_key?: string | null;
+  display_name: string;
+  ticker?: string | null;
+  market?: string | null;
+  confidence: number;
+  rationale?: string;
+};
+
+export type ActionRequest = {
+  action: 'watchlist_add' | 'watchlist_remove';
+  asset_type: 'stock';
+  asset_key: string;
+  ticker: string;
+  display_name: string;
+  confidence: number;
+  rationale?: string;
+};
+
+export type InvestmentNoteDraft = {
+  title: string;
+  summary: string;
+  structured_summary: string[];
+  why_it_might_matter: string;
+  beneficiary_hints: string[];
+  open_questions: string[];
+  references: string[];
+  asset_candidates: AssetCandidate[];
+  status: 'resolved' | 'unresolved';
+};
+
+export type HumanInputInterpretation = {
+  route: HumanInputCollectorRoute;
+  collector_route: HumanInputCollectorRoute;
+  input_kind: HumanInputInputKind;
+  confidence: number;
+  rationale: string;
+  title: string;
+  entities: string[];
+  signal_type: string;
+  metric_value?: number | null;
+  metric_delta?: number | null;
+  rank?: number | null;
+  geo: string;
+  url: string;
+  trust_score: number;
+  freshness_ttl: number;
+  observation: string;
+  why_now: string;
+  beneficiary_hints: string[];
+  research_questions: string[];
+  source_refs: string[];
+  supporting_points: string[];
+  study_type: string;
+  dataset_name: string;
+  notes: string;
+  evidence_items: Record<string, unknown>[];
+  request_submission_id?: string | null;
+  user_message?: string | null;
+  action_requests: ActionRequest[];
+  handoff_targets: string[];
+  asset_candidates: AssetCandidate[];
+  investment_note?: InvestmentNoteDraft | null;
+};
+
 export type HumanInputMessageRequest = {
   content: string;
   message_url?: string;

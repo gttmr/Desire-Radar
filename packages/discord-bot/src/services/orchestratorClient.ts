@@ -18,6 +18,10 @@ import type {
   RunResearchLoopResponse,
   RunVerdictResponse,
   ListResearchRequestsResponse,
+  InvestmentIntakeRequest,
+  InvestmentIntakeResponse,
+  GetInvestmentIntakeResponse,
+  GetInvestmentAssetResponse,
 } from '@agentic/shared-types';
 
 export class OrchestratorClient {
@@ -76,6 +80,18 @@ export class OrchestratorClient {
 
   async getResearchRequests(runId: string): Promise<ListResearchRequestsResponse> {
     return this.get(`/runs/${encodeURIComponent(runId)}/research-requests`);
+  }
+
+  async submitInvestmentIntake(req: InvestmentIntakeRequest): Promise<InvestmentIntakeResponse> {
+    return this.post('/investment/intake', req);
+  }
+
+  async getInvestmentIntake(intakeId: string): Promise<GetInvestmentIntakeResponse> {
+    return this.get(`/investment/intakes/${encodeURIComponent(intakeId)}`);
+  }
+
+  async getInvestmentAsset(assetKey: string): Promise<GetInvestmentAssetResponse> {
+    return this.get(`/investment/assets/${encodeURIComponent(assetKey)}`);
   }
 
   async listSessions(agentName?: string): Promise<ListSessionsResponse> {

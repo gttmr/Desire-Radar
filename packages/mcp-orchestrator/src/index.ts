@@ -17,6 +17,8 @@ import { ReportService } from './pipeline/report.js';
 import { ResearchLoopService } from './pipeline/research-loop.js';
 import { TriageService } from './pipeline/triage.js';
 import { VerdictService } from './pipeline/verdict.js';
+import { InvestmentIntakeService } from './investment/intake-service.js';
+import { InvestmentMarkdownStore } from './investment/markdown-store.js';
 import { PromptComposer } from './prompt/composer.js';
 import { PromptLoader } from './prompt/loader.js';
 import { ExecutionPolicyResolver } from './policy/execution.js';
@@ -138,6 +140,8 @@ async function main(): Promise<void> {
     runStore,
   );
   const reportService = new ReportService(agentExecutor, contextStore, runStore);
+  const investmentMarkdownStore = new InvestmentMarkdownStore(config.runtime.DATA_DIR);
+  const investmentIntakeService = new InvestmentIntakeService(investmentMarkdownStore);
 
   const orchestrator = new RunOrchestrator(agentExecutor, runStore, config.providers.defaultProviders, {
     sessionStore,
@@ -152,7 +156,15 @@ async function main(): Promise<void> {
 
   const app = express();
   app.use(express.json({ limit: '10mb' }));
-  app.use(createRoutes(orchestrator, sessionStore, registry, providerHealthMonitor));
+  app.use(
+    createRoutes(
+      orchestrator,
+      sessionStore,
+      registry,
+      providerHealthMonitor,
+      investmentIntakeService,
+    ),
+  );
 
   app.listen(config.runtime.ORCHESTRATOR_PORT, config.runtime.ORCHESTRATOR_HOST, () => {
     console.log(

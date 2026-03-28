@@ -8,7 +8,13 @@ import re
 from typing import Any
 
 from ..analysis.session import SessionPool
-from .human_input_models import HumanInputEnvelope, HumanInputRoutingDecision
+from .human_input_models import (
+    ActionRequest,
+    AssetCandidate,
+    HumanInputEnvelope,
+    HumanInputRoutingDecision,
+    InvestmentNoteDraft,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +29,7 @@ _KNOWN_METADATA_KEYS = {
     "entity",
     "entities",
     "entity_candidates",
+    "ticker",
     "signal_type",
     "geo",
     "url",
@@ -43,16 +50,53 @@ _KNOWN_METADATA_KEYS = {
     "request_submission_id",
 }
 _SYSTEM_INSTRUCTIONS = """Return JSON only.
-Choose route from manual_observation, human_analyst_note, human_curated_dataset, needs_review.
+Choose route from manual_observation, human_analyst_note, human_curated_dataset, needs_review, none.
 Use human_curated_dataset only if the message contains structured data that can be normalized immediately.
 If the input is analytical, comparative, or explains why demand is changing, prefer human_analyst_note.
+If the input is a watchlist command with no collector evidence to store, use route none.
 Use needs_review when the message is too incomplete to classify safely.
 Keep confidence between 0 and 1.
+Set input_kind from observation, study_note, dataset, command, mixed.
+Return action_requests only for low-risk stock watchlist add/remove actions when the stock is identified confidently.
+Use handoff_targets ["investment_module"] when the input contains free-form study or research that should be archived for later investment use.
+Asset candidates should include stock, real_estate, topic, or other.
+If a free-form study is useful for later investment research, include an investment_note object.
 For human_curated_dataset, evidence_items must be a JSON array of evidence objects with keys:
 evidence_id, entity_candidates, signal_type, title_or_label, metric_value, metric_delta, rank, geo, url_or_ref, trust_score, freshness_ttl.
 For other routes, evidence_items should be an empty array.
 Return keys:
-route, confidence, rationale, title, entities, signal_type, metric_value, metric_delta, rank, geo, trust_score, freshness_ttl, observation, why_now, beneficiary_hints, research_questions, source_refs, supporting_points, study_type, dataset_name, notes, evidence_items, request_submission_id, user_message."""
+route, collector_route, input_kind, confidence, rationale, title, entities, signal_type, metric_value, metric_delta, rank, geo, trust_score, freshness_ttl, observation, why_now, beneficiary_hints, research_questions, source_refs, supporting_points, study_type, dataset_name, notes, evidence_items, request_submission_id, user_message, action_requests, handoff_targets, asset_candidates, investment_note."""
+_WATCHLIST_TERMS = ("watchlist", "와치리스트", "관심종목", "관심 종목")
+_ADD_TERMS = ("add", "추가", "등록", "넣어")
+_REMOVE_TERMS = ("remove", "삭제", "제거", "빼")
+_REAL_ESTATE_TERMS = ("부동산", "아파트", "오피스텔", "재건축")
+_STUDY_NOTE_TERMS = (
+    "study",
+    "스터디",
+    "invest",
+    "투자",
+    "관점",
+    "가설",
+    "thesis",
+    "why now",
+    "beneficiary",
+    "고객사",
+    "수급",
+    "공급",
+    "금리",
+    "rollout",
+    "seat",
+    "hbm",
+)
+_KNOWN_STOCK_ALIASES: dict[str, tuple[str, str]] = {
+    "005930": ("005930", "삼성전자"),
+    "samsung electronics": ("005930", "삼성전자"),
+    "삼성전자": ("005930", "삼성전자"),
+    "삼성 전자": ("005930", "삼성전자"),
+    "000660": ("000660", "SK하이닉스"),
+    "sk hynix": ("000660", "SK하이닉스"),
+    "sk하이닉스": ("000660", "SK하이닉스"),
+}
 
 
 class _ParsedMetadata:
@@ -112,6 +156,10 @@ class HumanInputRouter:
             preferred_route=preferred_route,
         )
         if normalized.route == "needs_review":
+            if heuristic.route != "needs_review" and heuristic.confidence >= self.auto_threshold:
+                return heuristic
+            return normalized
+        if normalized.route == "none":
             return normalized
         if normalized.confidence >= self.auto_threshold:
             return normalized
@@ -145,12 +193,16 @@ class HumanInputRouter:
             if evidence_items:
                 return HumanInputRoutingDecision(
                     route="human_curated_dataset",
+                    collector_route="human_curated_dataset",
+                    input_kind="dataset",
                     confidence=0.99,
                     rationale="structured_json_dataset",
                     dataset_name=parsed.values.get("dataset_name") or json_payload.get("dataset_name") or "discord_human_input",
                     notes=parsed.values.get("notes", ""),
                     evidence_items=evidence_items,
                     request_submission_id=request_submission_id,
+                    source_refs=_dedupe_strings([envelope.message_url, *envelope.attachment_urls]),
+                    user_message="구조화된 데이터 입력으로 인식해 collector evidence로 적재합니다.",
                 )
 
         body = parsed.body or envelope.content.strip()
@@ -167,6 +219,18 @@ class HumanInputRouter:
             ]
         )
         title = parsed.values.get("title") or _summarize(body, 140) or "Human input"
+        beneficiary_hints = _parse_list(parsed.values.get("beneficiary_hints"))
+        research_questions = _parse_list(parsed.values.get("research_questions"))
+        supporting_points = _parse_list(parsed.values.get("supporting_points"))
+        stock_hint = parsed.values.get("ticker")
+        asset_candidates = _extract_asset_candidates(
+            envelope.content,
+            title=title,
+            raw_entities=entities,
+            stock_hint=stock_hint,
+        )
+        action_requests = _detect_action_requests(envelope.content, asset_candidates)
+        action_confidence = max((item.confidence for item in action_requests), default=0.0)
 
         if preferred_route == "human_curated_dataset" and envelope.attachment_urls:
             return self._review_result(
@@ -185,28 +249,96 @@ class HumanInputRouter:
                 "study_type",
             )
         )
-        long_body = len(body) >= 280
-        if preferred_route == "human_analyst_note" or note_signals or long_body:
+        normalized_body = _normalize_text(body).casefold()
+        study_keyword_hits = sum(
+            1 for term in _STUDY_NOTE_TERMS if term.casefold() in normalized_body
+        )
+        long_body = len(body) >= 140
+        if any(term in body for term in _REAL_ESTATE_TERMS) and len(body) >= 60:
+            note_signals = True
+        if study_keyword_hits >= 2 and len(body) >= 70:
+            note_signals = True
+        if action_requests and study_keyword_hits >= 1 and len(body) >= 30:
+            note_signals = True
+        has_note_content = preferred_route == "human_analyst_note" or note_signals or long_body
+        input_kind = (
+            "mixed"
+            if action_requests and has_note_content
+            else "command"
+            if action_requests
+            else "study_note"
+            if has_note_content
+            else "observation"
+        )
+        investment_note = (
+            _build_investment_note(
+                title=title,
+                body=body,
+                source_refs=source_refs,
+                asset_candidates=asset_candidates,
+                why_now=parsed.values.get("why_now", ""),
+                beneficiary_hints=beneficiary_hints,
+                research_questions=research_questions,
+                supporting_points=supporting_points,
+            )
+            if input_kind in {"study_note", "mixed"}
+            else None
+        )
+        handoff_targets = ["investment_module"] if investment_note is not None else []
+        user_message = _build_user_message(
+            input_kind=input_kind,
+            collector_route="human_analyst_note" if has_note_content else "none" if action_requests else "manual_observation",
+            action_requests=action_requests,
+            handoff_targets=handoff_targets,
+        )
+
+        if action_requests and not has_note_content:
+            return HumanInputRoutingDecision(
+                route="none",
+                collector_route="none",
+                input_kind="command",
+                confidence=max(0.8, action_confidence),
+                rationale="watchlist_command_heuristic",
+                title=title,
+                observation=body,
+                entities=entities,
+                source_refs=source_refs,
+                request_submission_id=request_submission_id,
+                action_requests=action_requests,
+                asset_candidates=asset_candidates,
+                user_message=user_message,
+            )
+
+        if has_note_content:
             return HumanInputRoutingDecision(
                 route="human_analyst_note",
-                confidence=0.84 if preferred_route == "human_analyst_note" else 0.8,
+                collector_route="human_analyst_note",
+                input_kind=input_kind,
+                confidence=max(0.84 if preferred_route == "human_analyst_note" else 0.8, action_confidence),
                 rationale="structured_note_heuristic",
                 title=title,
                 observation=body,
                 entities=entities,
                 why_now=parsed.values.get("why_now", ""),
                 geo=parsed.values.get("geo", "global"),
-                beneficiary_hints=_parse_list(parsed.values.get("beneficiary_hints")),
-                research_questions=_parse_list(parsed.values.get("research_questions")),
+                beneficiary_hints=beneficiary_hints,
+                research_questions=research_questions,
                 source_refs=source_refs,
-                supporting_points=_parse_list(parsed.values.get("supporting_points")),
+                supporting_points=supporting_points,
                 study_type=parsed.values.get("study_type", "analysis_note"),
                 request_submission_id=request_submission_id,
+                action_requests=action_requests,
+                handoff_targets=handoff_targets,
+                asset_candidates=asset_candidates,
+                investment_note=investment_note,
+                user_message=user_message,
             )
 
         if body or entities or envelope.attachment_urls:
             return HumanInputRoutingDecision(
                 route="manual_observation",
+                collector_route="manual_observation",
+                input_kind="observation",
                 confidence=0.78,
                 rationale="default_observation_heuristic",
                 title=title,
@@ -221,6 +353,8 @@ class HumanInputRouter:
                 freshness_ttl=_parse_optional_integer(parsed.values.get("freshness_ttl")) or 86400,
                 observation=body,
                 request_submission_id=request_submission_id,
+                asset_candidates=asset_candidates,
+                user_message="관측 입력으로 인식해 collector evidence로 저장합니다.",
             )
 
         return self._review_result(envelope, preferred_route=preferred_route, reason="empty_message")
@@ -257,6 +391,31 @@ class HumanInputRouter:
                 reason=decision.rationale or "classification_low_confidence",
             )
 
+        if route == "none":
+            return decision.model_copy(
+                update={
+                    "collector_route": "none",
+                    "input_kind": decision.input_kind if decision.input_kind != "observation" else fallback.input_kind,
+                    "confidence": confidence,
+                    "title": decision.title or fallback.title or _summarize(envelope.content, 140) or "Human input",
+                    "entities": _dedupe_strings(decision.entities or fallback.entities),
+                    "source_refs": _dedupe_strings(
+                        [
+                            *decision.source_refs,
+                            envelope.message_url,
+                            *envelope.attachment_urls,
+                        ]
+                    ),
+                    "request_submission_id": request_submission_id,
+                    "action_requests": decision.action_requests or fallback.action_requests,
+                    "asset_candidates": decision.asset_candidates or fallback.asset_candidates,
+                    "handoff_targets": decision.handoff_targets or fallback.handoff_targets,
+                    "investment_note": decision.investment_note or fallback.investment_note,
+                    "user_message": decision.user_message or fallback.user_message,
+                },
+                deep=True,
+            )
+
         title = decision.title or fallback.title or _summarize(decision.observation or envelope.content, 140) or "Human input"
         url = decision.url or envelope.attachment_urls[:1] and envelope.attachment_urls[0] or envelope.message_url
         source_refs = _dedupe_strings(
@@ -269,6 +428,8 @@ class HumanInputRouter:
         return decision.model_copy(
             update={
                 "confidence": confidence,
+                "collector_route": route,
+                "input_kind": decision.input_kind if decision.input_kind != "observation" else fallback.input_kind,
                 "title": title,
                 "entities": _dedupe_strings(decision.entities or fallback.entities),
                 "url": url,
@@ -276,6 +437,11 @@ class HumanInputRouter:
                 "request_submission_id": request_submission_id,
                 "freshness_ttl": decision.freshness_ttl or 86400,
                 "trust_score": decision.trust_score or 0.9,
+                "action_requests": decision.action_requests or fallback.action_requests,
+                "handoff_targets": decision.handoff_targets or fallback.handoff_targets,
+                "asset_candidates": decision.asset_candidates or fallback.asset_candidates,
+                "investment_note": decision.investment_note or fallback.investment_note,
+                "user_message": decision.user_message or fallback.user_message,
             },
             deep=True,
         )
@@ -343,6 +509,8 @@ class HumanInputRouter:
         route_hint = preferred_route or "manual_observation / human_analyst_note / human_curated_dataset"
         return HumanInputRoutingDecision(
             route="needs_review",
+            collector_route="needs_review",
+            input_kind="observation",
             confidence=0.0,
             rationale=reason,
             request_submission_id=envelope.request_submission_id,
@@ -451,3 +619,165 @@ def _coerce_optional_integer(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value or "").strip()
+
+
+def _contains_any(value: str, candidates: tuple[str, ...]) -> bool:
+    lowered = _normalize_text(value).casefold()
+    return any(candidate.casefold() in lowered for candidate in candidates)
+
+
+def _stock_candidate(ticker: str, display_name: str, rationale: str, confidence: float) -> AssetCandidate:
+    return AssetCandidate(
+        asset_type="stock",
+        asset_key=f"stock:{ticker}",
+        display_name=display_name,
+        ticker=ticker,
+        market="KRX",
+        confidence=confidence,
+        rationale=rationale,
+    )
+
+
+def _extract_asset_candidates(
+    content: str,
+    *,
+    title: str,
+    raw_entities: list[str],
+    stock_hint: str | None,
+) -> list[AssetCandidate]:
+    candidates: list[AssetCandidate] = []
+    search_space = [content, title, *raw_entities]
+    normalized_blobs = [_normalize_text(item) for item in search_space if item.strip()]
+
+    if stock_hint and re.fullmatch(r"\d{6}", stock_hint.strip()):
+        ticker = stock_hint.strip()
+        display_name = next(
+            (name for known_ticker, name in _KNOWN_STOCK_ALIASES.values() if known_ticker == ticker),
+            ticker,
+        )
+        candidates.append(_stock_candidate(ticker, display_name, "explicit_ticker_hint", 0.98))
+
+    for blob in normalized_blobs:
+        for alias, (ticker, display_name) in _KNOWN_STOCK_ALIASES.items():
+            if blob.casefold() == alias.casefold() or alias.casefold() in blob.casefold():
+                candidates.append(_stock_candidate(ticker, display_name, f"matched_alias:{alias}", 0.92))
+        for match in re.findall(r"\b\d{6}\b", blob):
+            display_name = next(
+                (name for known_ticker, name in _KNOWN_STOCK_ALIASES.values() if known_ticker == match),
+                match,
+            )
+            candidates.append(_stock_candidate(match, display_name, "matched_ticker_literal", 0.95))
+
+    if not candidates and any(term in content for term in _REAL_ESTATE_TERMS):
+        candidates.append(
+            AssetCandidate(
+                asset_type="real_estate",
+                asset_key=None,
+                display_name=title,
+                confidence=0.6,
+                rationale="real_estate_keyword_detected",
+            )
+        )
+
+    if not candidates and raw_entities:
+        candidates.extend(
+            AssetCandidate(
+                asset_type="topic",
+                asset_key=None,
+                display_name=entity,
+                confidence=0.55,
+                rationale="entity_candidate_hint",
+            )
+            for entity in raw_entities
+        )
+
+    deduped: list[AssetCandidate] = []
+    seen: set[tuple[str, str]] = set()
+    for candidate in candidates:
+        dedupe_key = (candidate.asset_type, candidate.asset_key or candidate.display_name.casefold())
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        deduped.append(candidate)
+    return deduped
+
+
+def _detect_action_requests(content: str, asset_candidates: list[AssetCandidate]) -> list[ActionRequest]:
+    lowered = _normalize_text(content).casefold()
+    if not _contains_any(lowered, _WATCHLIST_TERMS):
+        return []
+
+    wants_add = _contains_any(lowered, _ADD_TERMS)
+    wants_remove = _contains_any(lowered, _REMOVE_TERMS)
+    if wants_add == wants_remove:
+        return []
+
+    action = "watchlist_add" if wants_add else "watchlist_remove"
+    requests: list[ActionRequest] = []
+    for candidate in asset_candidates:
+        if candidate.asset_type != "stock" or not candidate.asset_key or not candidate.ticker:
+            continue
+        requests.append(
+            ActionRequest(
+                action=action,
+                asset_key=candidate.asset_key,
+                ticker=candidate.ticker,
+                display_name=candidate.display_name,
+                confidence=max(candidate.confidence, 0.9),
+                rationale="watchlist_command_detected",
+            )
+        )
+    return requests
+
+
+def _build_investment_note(
+    *,
+    title: str,
+    body: str,
+    source_refs: list[str],
+    asset_candidates: list[AssetCandidate],
+    why_now: str,
+    beneficiary_hints: list[str],
+    research_questions: list[str],
+    supporting_points: list[str],
+) -> InvestmentNoteDraft:
+    summary = _summarize(body or title, 220) or title
+    structured_summary = supporting_points or ([summary] if summary else [])
+    open_questions = research_questions or (
+        ["Which investable beneficiary captures this demand earliest?"]
+        if asset_candidates
+        else ["Which asset or beneficiary should this note attach to?"]
+    )
+    status = "resolved" if any(candidate.asset_key for candidate in asset_candidates) else "unresolved"
+    return InvestmentNoteDraft(
+        title=title,
+        summary=summary,
+        structured_summary=structured_summary,
+        why_it_might_matter=why_now or summary,
+        beneficiary_hints=beneficiary_hints,
+        open_questions=open_questions,
+        references=source_refs,
+        asset_candidates=asset_candidates,
+        status=status,
+    )
+
+
+def _build_user_message(
+    *,
+    input_kind: str,
+    collector_route: str,
+    action_requests: list[ActionRequest],
+    handoff_targets: list[str],
+) -> str:
+    if input_kind == "command" and action_requests:
+        labels = ", ".join(f"{item.display_name} ({item.ticker})" for item in action_requests)
+        return f"watchlist 명령으로 해석했습니다: {labels}"
+    if input_kind in {"study_note", "mixed"} and "investment_module" in handoff_targets:
+        return "자유 형식 스터디 입력으로 해석해 collector note와 투자모듈 handoff를 함께 준비합니다."
+    if collector_route == "manual_observation":
+        return "자유 형식 관측 입력으로 해석해 collector evidence로 저장합니다."
+    return "자유 형식 입력을 구조화해 처리합니다."

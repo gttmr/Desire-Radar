@@ -1361,6 +1361,31 @@ class IngestionEngine:
                 )
                 return updated
 
+            if decision.route == "none":
+                updated = self.submission_store.update(
+                    record.submission_id,
+                    status="completed",
+                    snapshot_ids=snapshot_ids,
+                    processed_at=self._now(),
+                    metadata=metadata,
+                )
+                updated = self._update_submission_progress(
+                    record.submission_id,
+                    stage="completed",
+                    message="human input classified without collector-native routing",
+                    payload_total=1,
+                    payloads_processed=1,
+                    snapshot_total=len(snapshot_ids),
+                    evidence_total=0,
+                )
+                self.source_registry.record_processing(
+                    record.source_id,
+                    success=True,
+                    snapshot_total=1,
+                    is_submission=True,
+                )
+                return updated
+
             self._update_submission_progress(
                 record.submission_id,
                 stage="dispatching_human_input",

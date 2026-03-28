@@ -17,6 +17,12 @@ import type {
   ResearchResult,
   VerdictResult,
 } from './orchestrator.js';
+import type {
+  ActionRequest,
+  AssetCandidate,
+  HumanInputInputKind,
+  InvestmentNoteDraft,
+} from './collector-api.js';
 import type { EvidenceBundle } from './evidence.js';
 
 // POST /runs/submit-evidence
@@ -192,4 +198,54 @@ export type ListResearchRequestsResponse = {
   run_id: string;
   requests: ResearchResult[];
   count: number;
+};
+
+export type InvestmentIntakeRequest = {
+  source_submission_id: string;
+  input_kind: HumanInputInputKind;
+  raw_input: string;
+  channel_ref?: string;
+  asset_candidates: AssetCandidate[];
+  auto_actions: ActionRequest[];
+  investment_note: InvestmentNoteDraft;
+};
+
+export type InvestmentIntakeRecord = {
+  intake_id: string;
+  source_submission_id: string;
+  created_at: string;
+  asset_candidates: AssetCandidate[];
+  asset_type: AssetCandidate['asset_type'] | 'unresolved';
+  input_kind: HumanInputInputKind;
+  channel_ref?: string | null;
+  auto_actions: ActionRequest[];
+  note_path: string;
+  raw_input: string;
+  investment_note: InvestmentNoteDraft;
+};
+
+export type InvestmentAssetDossier = {
+  asset_key: string;
+  asset_type: AssetCandidate['asset_type'];
+  display_name: string;
+  note_count: number;
+  linked_submission_ids: string[];
+  intake_ids: string[];
+  dossier_path: string;
+  updated_at: string;
+};
+
+export type InvestmentIntakeResponse = {
+  intake: InvestmentIntakeRecord;
+  dossiers: InvestmentAssetDossier[];
+};
+
+export type GetInvestmentIntakeResponse = {
+  intake: InvestmentIntakeRecord;
+  markdown: string;
+};
+
+export type GetInvestmentAssetResponse = {
+  asset: InvestmentAssetDossier;
+  markdown: string;
 };

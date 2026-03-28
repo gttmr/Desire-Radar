@@ -46,22 +46,16 @@ export function buildHumanInputPayload(message: Message<boolean>): HumanInputMes
 
 export function formatExpectedTemplate(): string {
   return [
-    '입력 채널 사용 예시:',
-    '1. 빠른 관측',
-    'title: Cursor adoption spike',
-    'entities: Cursor, OpenAI',
+    '자유 형식 입력이 기본입니다. 아래 예시는 선택사항입니다.',
     '',
-    '짧은 관측 내용을 자유롭게 적으세요.',
+    '예시 1. 자연어 명령',
+    '삼성전자 와치리스트에 추가해',
     '',
-    '2. 분석/스터디 결과',
-    'title: Developer workflow study',
-    'entities: Cursor',
-    'why_now: weekly seat growth accelerated',
-    'supporting_points: review workflow lock-in; repeat seat expansion',
+    '예시 2. 자유 형식 스터디 메모',
+    '삼성전자 쪽을 다시 보고 있다. HBM 고객사 수요가 빨라지고 있고,',
+    '메모리 업사이클보다 AI 서버 믹스 변화가 더 중요해 보인다.',
     '',
-    '분석 본문을 아래에 이어서 적으세요.',
-    '',
-    '3. 구조화된 데이터',
+    '예시 3. 구조화된 데이터(JSON도 계속 지원)',
     '```json',
     '{',
     '  "evidence_items": [',
@@ -76,6 +70,6 @@ export function formatExpectedTemplate(): string {
     '}',
     '```',
     '',
-    `내용 요약: ${trimTo('observation / study / dataset 중 하나로 collector가 자동 분류합니다.', 120)}`,
+    trimTo('collector가 observation / study note / dataset / command로 자동 해석하고, 저위험 watchlist 액션과 투자 메모 handoff를 처리합니다.', 140),
   ].join('\n');
 }

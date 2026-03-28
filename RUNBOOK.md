@@ -257,6 +257,19 @@ curl http://127.0.0.1:5002/runtime/status
 ## Discord Human Input Test
 현재 구조는 단일 human input 채널 기준이다.
 
+입력은 자유 형식이 기본이다.
+
+예:
+- `삼성전자 와치리스트에 추가해`
+- 장문 주식/부동산 스터디 메모
+- 구조화된 JSON evidence batch
+
+collector가 이를 해석해서:
+- collector-native ingest route
+- low-risk watchlist auto action
+- orchestrator investment-module handoff
+를 결정한다.
+
 ## Discord Slash Commands
 현재 운영 명령 표면은 5개 namespace로 고정한다.
 

@@ -1,5 +1,6 @@
 import type { ReportDetailLevel } from '../types/domain.js';
 import type { ReportDispatch, ReportService } from './reportService.js';
+import type { ActionRequest } from '@agentic/shared-types';
 
 function normalizeTicker(input: string): string {
   return input.trim().toUpperCase();
@@ -86,5 +87,31 @@ export class ReportCommandService {
       `자동 발송: ${config.enabled ? `활성화 (${config.timezone})` : '비활성화'}`,
       `최근 실행: ${last}`,
     ].join('\n');
+  }
+
+  async applyWatchlistAction(
+    guildId: string,
+    action: ActionRequest['action'],
+    rawTicker: string,
+    displayName?: string,
+  ): Promise<string> {
+    const ticker = normalizeTicker(rawTicker);
+    if (!isValidTicker(ticker)) {
+      throw new Error('종목 코드는 6자리 숫자여야 합니다. 예: `005930`');
+    }
+    if (action === 'watchlist_add') {
+      await this.reports.addTicker(
+        guildId,
+        this.resolveDefaultReportChannelId(guildId),
+        ticker,
+      );
+      return `watchlist 자동 추가: ${displayName ?? ticker} (\`${ticker}\`)`;
+    }
+    await this.reports.removeTicker(
+      guildId,
+      this.resolveDefaultReportChannelId(guildId),
+      ticker,
+    );
+    return `watchlist 자동 제거: ${displayName ?? ticker} (\`${ticker}\`)`;
   }
 }

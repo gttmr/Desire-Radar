@@ -44,6 +44,7 @@ Orchestrator owns:
 - research request generation and submission polling
 - provider selection and model policy
 - provider session orchestration and transport dispatch
+- investment-note intake and asset dossier storage
 - final verdict generation
 - report synthesis
 
@@ -55,6 +56,8 @@ Orchestrator is the decision engine, not the source-of-truth store for raw evide
 Discord bot owns:
 - Discord commands and operator-facing outputs
 - single-channel human input forwarding
+- low-risk auto-action execution for free-form human input
+- forwarding investment-module handoffs to orchestrator
 - provider health alerts
 - light operational controls
 
@@ -94,7 +97,15 @@ Important property:
 Important property:
 - research requests are first-class tracked objects, not ad hoc chat notes.
 
-### 5. Provider Operations
+### 5. Free-Form Human Investment Input
+`Discord message -> collector raw submission -> HumanInputInterpretation -> collector-native route and/or low-risk action and/or investment-module handoff -> orchestrator Markdown archive`
+
+Important property:
+- collector decides what the input means
+- discord-bot only executes low-risk actions
+- orchestrator owns durable investment-note storage
+
+### 6. Provider Operations
 `provider health probe -> optional repair attempt -> orchestrator /health -> discord alert`
 
 Important property:
@@ -133,11 +144,12 @@ This keeps traceability and retry behavior consistent.
 #### HumanInputRouter
 `packages/collector/src/ingest/human_input_router.py`
 
-The router classifies free-form human input into a structured ingest path.
+The router classifies free-form human input into a structured interpretation object.
 
 Key idea:
 - Discord or other clients do not need to pre-classify human input perfectly
-- the collector can route input into observation, study result, curated data, or review
+- the collector can route input into observation, study result, curated data, review, or command-only handling
+- the same interpretation can include low-risk auto-actions and downstream handoff targets
 
 This keeps external ingress clients thin.
 
@@ -231,6 +243,16 @@ The run orchestrator coordinates phases, but each phase stays replaceable.
 Key idea:
 - `triage`, `debate`, `research-loop`, `verdict`, and `report` are separable services with distinct cost profiles and responsibilities
 
+#### InvestmentIntakeService, InvestmentMarkdownStore, InvestmentContextProvider
+`packages/mcp-orchestrator/src/investment/`
+
+These components store free-form study and research input as durable Markdown assets.
+
+Key idea:
+- intake notes preserve structured summaries of free-form human research
+- asset dossiers provide a stable future hook for verdict/report context
+- this module is an interface and archive layer first, not a second verdict engine
+
 #### ProviderHealthMonitor
 `packages/mcp-orchestrator/src/providers/providerHealthMonitor.ts`
 
@@ -246,6 +268,16 @@ Key idea:
 `packages/discord-bot/src/services/`
 
 The bot should forward human input and consume status through service clients, not inline fetch logic in command handlers.
+
+#### HumanInputFollowUpService
+`packages/discord-bot/src/services/humanInputFollowUpService.ts`
+
+This component executes only the safe side effects from collector's human input interpretation.
+
+Key idea:
+- collector decides what the message means
+- bot may auto-apply only low-risk stock watchlist actions
+- investment-note handoff is forwarded to orchestrator, not stored locally
 
 #### ProviderHealthMonitor
 `packages/discord-bot/src/services/providerHealthMonitor.ts`
