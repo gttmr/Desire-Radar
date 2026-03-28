@@ -9,6 +9,9 @@ type ProviderSmokeResult = {
   provider: string;
   healthAvailable: boolean;
   healthStatus?: string;
+  authStatus?: string;
+  executeReadinessStatus?: string;
+  readyForExecution?: boolean;
   healthError?: string;
   healthRecoverable?: boolean;
   executeOk: boolean;
@@ -78,12 +81,15 @@ async function smokeProvider(provider: string, registry: ProviderRegistry): Prom
       provider,
       healthAvailable: false,
       healthStatus: health.status,
-      healthError: health.error,
+      authStatus: health.auth_status,
+      executeReadinessStatus: health.execute_status,
+      readyForExecution: health.ready_for_execution,
+      healthError: health.error_summary ?? health.error,
       healthRecoverable: health.recoverable,
       executeOk: false,
       executeStatus: 'degraded',
       durationMs: 0,
-      preview: previewText(health.error ?? ''),
+      preview: previewText(health.error_summary ?? health.error ?? ''),
     };
   }
 
@@ -102,7 +108,10 @@ async function smokeProvider(provider: string, registry: ProviderRegistry): Prom
     provider,
     healthAvailable: health.available,
     healthStatus: health.status,
-    healthError: health.error,
+    authStatus: health.auth_status,
+    executeReadinessStatus: health.execute_status,
+    readyForExecution: health.ready_for_execution,
+    healthError: health.error_summary ?? health.error,
     healthRecoverable: health.recoverable,
     executeOk: !degraded,
     executeStatus: result.status,

@@ -71,6 +71,7 @@ Discord human input / slash commands
 - 모든 운영/개발 명령은 WSL/bash에서 실행한다.
 - Docker Compose도 WSL에서 실행한다.
 - provider CLI 인증은 WSL 홈 기준으로 준비한다.
+- provider smoke와 실제 CLI 실행 신뢰성의 기준값도 WSL 네이티브에서 본다.
 
 ### 1. 환경 변수 준비
 
@@ -102,6 +103,11 @@ CLI 상태 확인/복구 기준:
 - Codex: `codex login status`로 인증 상태를 확인한다. 비대화형 복구가 필요하면 `printenv OPENAI_API_KEY | codex login --with-api-key` 같은 wrapper command를 `PROVIDER_REPAIR_CODEX_COMMAND`에 넣는다.
 - Claude: `claude auth status`로 상태를 확인한다. 복구는 `claude auth login --claudeai` 또는 `claude auth login --console` wrapper를 `PROVIDER_REPAIR_CLAUDE_COMMAND`에 넣는다.
 - Gemini: 현재 설치된 CLI에서는 별도 `auth status/login` 서브커맨드가 보이지 않으므로, health probe는 headless prompt 실행으로 판단하고 자동 repair는 기본 비활성으로 두는 편이 안전하다.
+
+provider health 의미:
+- `/health`의 provider 항목은 단순 `available`만 보지 않는다.
+- `auth_status`, `execute_status`, `ready_for_execution`, `failure_kind`, `error_summary`를 함께 본다.
+- `ready_for_execution=false`면 로그인은 살아 있어도 debate/verdict 경로에는 투입하지 않는다.
 
 ### 2. Discord 설정
 
@@ -187,6 +193,11 @@ collector는 이를 `human_input_inbox` source로 받고 내부 라우터가 적
 - `POST /ingest/human-data-source`
 - `POST /ingest/human-analyst-request`
 
+`POST /collect/run` 기본 의미:
+- connector를 지정하지 않으면 현재 `enabled=true` 인 pull source만 queue에 넣는다.
+- disabled source는 자동 skip 하며 응답에 `queued_sources`, `skipped_sources`, `skipped_disabled_count`가 포함된다.
+- disabled connector를 명시하면 500이 아니라 structured `409`를 반환한다.
+
 ### Collector internal
 - `GET /internal/next-candidates`
 - `POST /internal/build-bundle`
@@ -225,6 +236,7 @@ human input 라우팅도 별도 domain에서 CLI JSON 분류를 사용한다.
 - Docker Compose 기준으로 `${HOME}/.codex`, `${HOME}/.claude`, `${HOME}/.gemini` 및 관련 package 경로가 유효해야 한다.
 - orchestrator는 기본적으로 CLI provider만으로 부팅되며, `OPENAI_API_KEY`가 있을 때만 OpenAI provider를 registry에 추가한다.
 - collector source run은 기본적으로 queue 기반 비동기 실행이다. 장시간 수집은 `submission_id`와 `/sources/status`, `/runtime/status`로 추적한다.
+- `sources/status`와 `runtime/status`는 `last_failure_kind`, `partial_failure_count`, `last_warning_kind`, `last_warning_message` 같은 partial failure metadata도 함께 보여준다.
 
 벤치:
 

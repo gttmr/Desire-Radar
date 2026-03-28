@@ -5,7 +5,7 @@ import logging
 import httpx
 
 from ..config import REDDIT_USER_AGENT
-from .base import BaseConnector, RawPayload
+from .base import BaseConnector, ConnectorWarning, FetchResult, RawPayload
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,9 @@ class RedditMentionsConnector(BaseConnector):
     def __init__(self, subreddits: list[str] | None = None) -> None:
         self.subreddits = subreddits or DEFAULT_SUBREDDITS
 
-    async def fetch(self) -> list[RawPayload]:
+    async def fetch(self) -> list[RawPayload] | FetchResult:
         payloads: list[RawPayload] = []
+        warnings: list[ConnectorWarning] = []
         headers = {"User-Agent": REDDIT_USER_AGENT}
 
         async with httpx.AsyncClient(headers=headers, timeout=15.0) as client:
@@ -51,7 +52,31 @@ class RedditMentionsConnector(BaseConnector):
                                 url_or_ref=f"https://www.reddit.com{post.get('permalink', '')}",
                             )
                         )
-                except Exception:
+                except httpx.HTTPStatusError as exc:
+                    status_code = exc.response.status_code
+                    kind = (
+                        f"http_{status_code}_blocked"
+                        if status_code == 403
+                        else f"http_{status_code}"
+                    )
+                    warnings.append(
+                        ConnectorWarning(
+                            kind=kind,
+                            target=subreddit,
+                            message=f"Failed to fetch r/{subreddit}: HTTP {status_code}",
+                        )
+                    )
+                    logger.exception("Failed to fetch r/%s", subreddit)
+                except Exception as exc:
+                    warnings.append(
+                        ConnectorWarning(
+                            kind="fetch_failed",
+                            target=subreddit,
+                            message=f"Failed to fetch r/{subreddit}: {exc}",
+                        )
+                    )
                     logger.exception("Failed to fetch r/%s", subreddit)
 
+        if warnings:
+            return FetchResult(payloads=payloads, warnings=warnings)
         return payloads

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from ..analysis.engine import AnalysisEngine
-from ..connectors.base import BaseConnector, RawPayload
+from ..connectors.base import BaseConnector, ConnectorWarning, FetchResult, RawPayload
 from ..ingest.derived import build_derived_evidence
 from ..ingest.human_input_models import HumanInputEnvelope, HumanInputRoutingDecision
 from ..ingest.human_input_router import HumanInputRouter
@@ -36,6 +36,7 @@ class IngestionEngine:
         analysis_engine: AnalysisEngine | None = None,
         human_input_router: HumanInputRouter | None = None,
         source_run_worker_concurrency: int = 2,
+        processing_yield_every: int = 1,
     ) -> None:
         self.source_registry = source_registry
         self.submission_store = submission_store
@@ -52,6 +53,7 @@ class IngestionEngine:
         self._source_workers: list[asyncio.Task] = []
         self._running = False
         self._source_run_worker_concurrency = max(1, source_run_worker_concurrency)
+        self._processing_yield_every = max(1, processing_yield_every)
         self._source_runtime: dict[str, dict[str, Any]] = {}
         for source in self.source_registry.list():
             self._source_runtime[source.source_id] = self._new_source_runtime()
@@ -428,7 +430,12 @@ class IngestionEngine:
                 "last_started_at": runtime["last_started_at"],
                 "last_finished_at": runtime["last_finished_at"],
                 "last_error": runtime["last_error"],
+                "last_failure_kind": runtime["last_failure_kind"],
                 "last_outcome": runtime["last_outcome"],
+                "partial_failure_count": runtime["partial_failure_count"],
+                "last_warning_kind": runtime["last_warning_kind"],
+                "last_warning_count": runtime["last_warning_count"],
+                "last_warning_message": runtime["last_warning_message"],
             }
             active_sources += 1 if runtime["active_runs"] > 0 else 0
             sources[source_id] = snapshot
@@ -488,21 +495,28 @@ class IngestionEngine:
                     raise ValueError(
                         f"Runnable source has no connector adapter: {running_record.source_id}"
                     )
-                payloads = await connector.fetch()
+                fetch_result = await connector.fetch()
+                payloads, warnings = self._normalize_fetch_result(fetch_result)
                 running = self.submission_store.update(
                     running_record.submission_id,
                     status="running",
                     payloads=[payload.data for payload in payloads],
+                    metadata={
+                        **running_record.metadata,
+                        "warnings": [self._warning_to_dict(item) for item in warnings],
+                    },
                 )
                 updated = await self._process_raw_payloads(
                     running,
                     source_id=running_record.source_id,
                     source_kind=running_record.source_kind,
                     payloads=payloads,
+                    warnings=warnings,
                     is_run=True,
                     is_submission=False,
                 )
         except Exception as exc:
+            failure_kind = self._classify_runtime_failure(exc)
             updated = self.submission_store.update(
                 running_record.submission_id,
                 status="failed",
@@ -512,6 +526,8 @@ class IngestionEngine:
             self.source_registry.record_processing(
                 running_record.source_id,
                 success=False,
+                failure_kind=failure_kind,
+                failure_message=str(exc),
                 is_run=True,
                 is_submission=False,
             )
@@ -520,14 +536,27 @@ class IngestionEngine:
                 running_record.submission_id,
                 outcome="failed",
                 error_message=str(exc),
+                failure_kind=failure_kind,
             )
             return updated
 
         self._mark_source_finished(
             running_record.source_id,
             running_record.submission_id,
-            outcome=updated.status,
+            outcome=(
+                "completed_with_warnings"
+                if updated.metadata.get("warnings")
+                else updated.status
+            ),
             error_message=updated.error_message,
+            failure_kind=(
+                self._classify_runtime_failure(Exception(updated.error_message))
+                if updated.status == "failed" and updated.error_message
+                else None
+            ),
+            warning_kind=self._primary_warning_value(updated.metadata.get("warnings"), "kind"),
+            warning_count=len(updated.metadata.get("warnings", [])),
+            warning_message=self._primary_warning_value(updated.metadata.get("warnings"), "message"),
         )
         return updated
 
@@ -542,7 +571,12 @@ class IngestionEngine:
             "last_started_at": None,
             "last_finished_at": None,
             "last_error": None,
+            "last_failure_kind": None,
             "last_outcome": None,
+            "partial_failure_count": 0,
+            "last_warning_kind": None,
+            "last_warning_count": 0,
+            "last_warning_message": None,
         }
 
     def _runtime_for_source(self, source_id: str) -> dict[str, Any]:
@@ -573,6 +607,7 @@ class IngestionEngine:
         runtime["last_submission_id"] = submission_id
         runtime["last_started_at"] = self._now()
         runtime["last_error"] = None
+        runtime["last_failure_kind"] = None
 
     def _mark_source_finished(
         self,
@@ -581,6 +616,10 @@ class IngestionEngine:
         *,
         outcome: str,
         error_message: str | None,
+        failure_kind: str | None = None,
+        warning_kind: str | None = None,
+        warning_count: int = 0,
+        warning_message: str | None = None,
     ) -> None:
         runtime = self._runtime_for_source(source_id)
         runtime["active_runs"] = max(0, int(runtime["active_runs"]) - 1)
@@ -592,6 +631,11 @@ class IngestionEngine:
         runtime["last_finished_at"] = self._now()
         runtime["last_outcome"] = outcome
         runtime["last_error"] = error_message
+        runtime["last_failure_kind"] = failure_kind
+        runtime["partial_failure_count"] = warning_count
+        runtime["last_warning_kind"] = warning_kind
+        runtime["last_warning_count"] = warning_count
+        runtime["last_warning_message"] = warning_message
         if runtime["active_runs"] > 0:
             runtime["run_state"] = "running"
         elif runtime["queued_runs"] > 0:
@@ -600,6 +644,47 @@ class IngestionEngine:
             runtime["run_state"] = "failed"
         else:
             runtime["run_state"] = "idle"
+
+    def _normalize_fetch_result(
+        self,
+        result: list[RawPayload] | FetchResult,
+    ) -> tuple[list[RawPayload], list[ConnectorWarning]]:
+        if isinstance(result, FetchResult):
+            return list(result.payloads), list(result.warnings)
+        return list(result), []
+
+    def _warning_to_dict(self, warning: ConnectorWarning) -> dict[str, Any]:
+        return {
+            "kind": warning.kind,
+            "message": warning.message,
+            "target": warning.target,
+            "recoverable": warning.recoverable,
+        }
+
+    def _classify_runtime_failure(self, error: Exception) -> str:
+        message = str(error).lower()
+        if "403" in message or "forbidden" in message or "blocked" in message:
+            return "http_403_blocked"
+        if "timeout" in message:
+            return "timeout"
+        if "normalizer" in message:
+            return "normalizer_failed"
+        if "resolve" in message:
+            return "entity_resolver_failed"
+        return "run_failed"
+
+    def _primary_warning_value(
+        self,
+        warnings: Any,
+        field: str,
+    ) -> str | None:
+        if not isinstance(warnings, list) or not warnings:
+            return None
+        first = warnings[0]
+        if not isinstance(first, dict):
+            return None
+        value = first.get(field)
+        return str(value) if value is not None else None
 
     async def _process_raw_submission(
         self,
@@ -632,20 +717,22 @@ class IngestionEngine:
         source_id: str,
         source_kind: str,
         payloads: list[RawPayload],
+        warnings: list[ConnectorWarning] | None = None,
         is_run: bool,
         is_submission: bool,
     ) -> SubmissionRecord:
         self.submission_store.update(record.submission_id, status="running")
         source = self.source_registry.require(source_id)
         snapshot_ids: list[str] = []
-        evidence_ids: list[str] = []
+        resolved_evidence_ids: list[str] = []
         all_evidences: list[Evidence] = []
         deduped = 0
         resolve_success = 0
         resolve_miss = 0
+        warning_items = warnings or []
 
         try:
-            for payload in payloads:
+            for index, payload in enumerate(payloads, start=1):
                 saved = self.snapshot_store.save_record(
                     source=source_id,
                     payload=payload.data,
@@ -676,7 +763,8 @@ class IngestionEngine:
                 resolve_success += hit_count
                 resolve_miss += miss_count
                 all_evidences.extend(resolved_evidences)
-                evidence_ids.extend([item.evidence_id for item in resolved_evidences])
+                resolved_evidence_ids.extend([item.evidence_id for item in resolved_evidences])
+                await self._maybe_yield_processing(index)
 
             self.evidence_sink.extend(all_evidences)
             await self._trigger_analysis(all_evidences)
@@ -684,8 +772,12 @@ class IngestionEngine:
                 record.submission_id,
                 status="completed",
                 snapshot_ids=snapshot_ids,
-                evidence_ids=evidence_ids,
+                evidence_ids=resolved_evidence_ids,
                 processed_at=self._now(),
+                metadata={
+                    **record.metadata,
+                    "warnings": [self._warning_to_dict(item) for item in warning_items],
+                },
             )
             self.source_registry.record_processing(
                 source_id,
@@ -695,31 +787,44 @@ class IngestionEngine:
                 evidence_total=len(all_evidences),
                 entity_resolve_success_total=resolve_success,
                 entity_resolve_miss_total=resolve_miss,
+                warning_kind=warning_items[0].kind if warning_items else None,
+                warning_message=warning_items[0].message if warning_items else None,
+                warning_count=len(warning_items),
                 is_run=is_run,
                 is_submission=is_submission,
             )
             self._record_research_fulfillment_if_applicable(
                 record,
-                useful=len(evidence_ids) > 0,
+                useful=len(resolved_evidence_ids) > 0,
             )
             return updated
         except Exception as exc:
+            failure_kind = self._classify_runtime_failure(exc)
             updated = self.submission_store.update(
                 record.submission_id,
                 status="failed",
                 error_message=str(exc),
                 snapshot_ids=snapshot_ids,
-                evidence_ids=evidence_ids,
+                evidence_ids=[],
                 processed_at=self._now(),
+                metadata={
+                    **record.metadata,
+                    "warnings": [self._warning_to_dict(item) for item in warning_items],
+                },
             )
             self.source_registry.record_processing(
                 source_id,
                 success=False,
                 snapshot_total=len(payloads),
                 deduped_snapshot_total=deduped,
-                evidence_total=len(all_evidences),
-                entity_resolve_success_total=resolve_success,
-                entity_resolve_miss_total=resolve_miss,
+                evidence_total=0,
+                entity_resolve_success_total=0,
+                entity_resolve_miss_total=0,
+                failure_kind=failure_kind,
+                failure_message=str(exc),
+                warning_kind=warning_items[0].kind if warning_items else None,
+                warning_message=warning_items[0].message if warning_items else None,
+                warning_count=len(warning_items),
                 is_run=is_run,
                 is_submission=is_submission,
             )
@@ -740,7 +845,7 @@ class IngestionEngine:
             evidences: list[Evidence] = []
             resolve_success = 0
             resolve_miss = 0
-            for payload in record.evidence_payloads:
+            for index, payload in enumerate(record.evidence_payloads, start=1):
                 saved = self.snapshot_store.save_record(
                     source=record.source_id,
                     payload=payload,
@@ -775,6 +880,7 @@ class IngestionEngine:
                 resolve_success += hit_count
                 resolve_miss += miss_count
                 evidences.extend(resolved_evidences)
+                await self._maybe_yield_processing(index)
 
             self.evidence_sink.extend(evidences)
             evidence_ids.extend([item.evidence_id for item in evidences])
@@ -1146,6 +1252,10 @@ class IngestionEngine:
         queued = await self.analysis_engine.on_evidence_updated()
         if queued:
             logger.info("Queued %d candidate analyses after ingestion update", len(queued))
+
+    async def _maybe_yield_processing(self, index: int) -> None:
+        if index % self._processing_yield_every == 0:
+            await asyncio.sleep(0.001)
 
     def _gen_id(self) -> str:
         return uuid.uuid4().hex[:16]

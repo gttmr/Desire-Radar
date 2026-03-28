@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/internal")
@@ -140,6 +140,25 @@ async def analysis_preview_batch() -> dict:
 @router.post("/sources/run/{source_id}")
 async def run_source(source_id: str, body: RunSourceRequest | None = None) -> dict:
     ingestion_engine = _deps["ingestion_engine"]
+    registry = _deps["source_registry"]
+    source = registry.get(source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail={"reason": "unknown_source", "source_id": source_id})
+    if not source.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"reason": "source_disabled", "source_id": source_id},
+        )
+    if not source.runnable:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"reason": "source_not_runnable", "source_id": source_id},
+        )
+    if source.kind == "pull" and source.adapter_name not in _deps["connectors"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"reason": "missing_connector_adapter", "source_id": source_id},
+        )
     metadata = dict(body.metadata) if body else {}
     metadata.setdefault("trigger", "manual")
     if body and body.wait_for_completion:

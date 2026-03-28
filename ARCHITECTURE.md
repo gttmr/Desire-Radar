@@ -17,6 +17,7 @@ Operational assumption:
 - provider CLI auth lives in the WSL home directory
 - Docker mounts that auth into `collector` and `mcp-orchestrator`
 - Discord bot is the human/control edge, not the place where source routing logic lives
+- provider execute truth is validated from WSL-native smoke; Docker health should surface degraded readiness honestly when container execution is broken
 
 ## System Boundaries
 
@@ -68,6 +69,7 @@ Shared types exist to keep contracts synchronized across services. Any API shape
 Important property:
 - raw snapshots and provenance remain intact even when analysis layers add derived fields.
 - long-running source collection should not block request/health handling; source execution is queued and runtime state is observable separately
+- source status should expose partial-failure metadata instead of collapsing mixed outcomes into a binary success/failure view
 
 ### 2. Collector Analysis
 `candidate shortlist -> analysis policy -> context packing -> CLI session execution -> analysis projection`
@@ -91,7 +93,7 @@ Important property:
 `provider health probe -> optional repair attempt -> orchestrator /health -> discord alert`
 
 Important property:
-- auth health, execution, repair, and alerting are separate concerns.
+- auth health, execute readiness, repair, and alerting are separate concerns.
 
 ## Core Abstractions
 
@@ -200,7 +202,8 @@ Key idea:
 Health, repair, and readiness state are handled separately from normal inference calls.
 
 Key idea:
-- auth failures, missing binaries, capacity limits, and stale probes should not all collapse into one boolean
+- auth failures, missing binaries, transport failures, capacity limits, and stale probes should not all collapse into one boolean
+- a provider can be auth-healthy and still execution-unready
 
 ### Discord-Bot Abstractions
 
@@ -243,6 +246,7 @@ Provider CLIs change quickly. Commands, flags, output envelopes, auth prompts, a
 - A command that proves installation is not the same as a command that proves login.
 - A command that proves login is not the same as a real execution smoke.
 - Repair commands should be config-driven and optional.
+- debate and verdict phases should only consume providers that are execution-ready, not merely login-healthy.
 
 ### Rule 5: Make Failure Surfaces Rich
 - Carry structured health state, error summaries, and repair metadata through the API.

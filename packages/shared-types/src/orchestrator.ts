@@ -8,6 +8,7 @@ export type ProviderFailureKind =
   | 'binary_missing'
   | 'capacity_limited'
   | 'rate_limited'
+  | 'transport_failed'
   | 'timeout'
   | 'parse_failed'
   | 'unknown';
@@ -121,6 +122,9 @@ export type ProviderExecution = {
 export type ProviderExecutionRequest = {
   prompt: string;
   sessionId?: string;
+  logicalSessionId?: string;
+  workingDirectory?: string;
+  turnCount?: number;
   model?: string;
   modelProfile: ModelProfile;
   phase: ExecutionPhase;
@@ -293,6 +297,8 @@ export type HighLevelRun = {
 /** Provider session */
 export type ProviderSession = {
   session_id: string;
+  provider_session_id?: string | null;
+  session_dir?: string;
   agent_name: string;
   provider: string;
   phase?: ExecutionPhase;
@@ -309,8 +315,13 @@ export type ProviderHealth = {
   provider: string;
   available: boolean;
   status?: ProviderHealthStatus;
+  auth_status?: ProviderHealthStatus;
+  execute_status?: ProviderHealthStatus;
+  ready_for_execution?: boolean;
+  failure_kind?: ProviderFailureKind;
   last_checked_at: string;
   error?: string;
+  error_summary?: string;
   recoverable?: boolean;
   repair_configured?: boolean;
   repair_command_preview?: string;

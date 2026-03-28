@@ -50,6 +50,7 @@ export type CollectorAnalysisStatusSummary = {
 // POST /collect/run
 export type CollectRunRequest = {
   connector?: string;
+  async_mode?: boolean;
   // Legacy field retained for older callers. The current collector only
   // accepts a single connector name.
   sources?: string[];
@@ -59,11 +60,30 @@ export type CollectRunConnectorResponse = {
   connector: string;
   evidence_count: number;
   submission_id?: string;
+  status?: CollectorSubmissionStatus;
+  async_mode?: boolean;
+  queued_sources?: string[];
+  skipped_sources?: Record<string, string>;
+  skipped_disabled_count?: number;
 };
 export type CollectRunAllResponse = {
   total_evidence_count: number;
+  queued_count?: number;
+  queued_sources?: string[];
+  skipped_sources?: Record<string, string>;
+  skipped_disabled_count?: number;
   per_connector: Record<string, number>;
+  source_results?: Record<
+    string,
+    {
+      submission_id?: string;
+      status?: CollectorSubmissionStatus;
+      evidence_count: number;
+      error_message?: string | null;
+    }
+  >;
   submission_ids?: Record<string, string>;
+  async_mode?: boolean;
 };
 export type CollectRunResponse =
   | CollectRunConnectorResponse

@@ -16,6 +16,22 @@ export function classifyProviderFailure(message: string): ProviderFailureKind {
   ) {
     return 'binary_missing';
   }
+  if (
+    includesAny(message, [
+      /certificate verify failed/i,
+      /no native root ca certificates found/i,
+      /\bTLS\b/i,
+      /websocket/i,
+      /ECONNRESET/i,
+      /EAI_AGAIN/i,
+      /socket hang up/i,
+      /connection reset/i,
+      /unable to get local issuer certificate/i,
+      /unable to verify the first certificate/i,
+    ])
+  ) {
+    return 'transport_failed';
+  }
   if (includesAny(message, [/timed out/i, /timeout/i, /aborted/i])) {
     return 'timeout';
   }
@@ -76,6 +92,7 @@ export function isRecoverableFailure(kind: ProviderFailureKind): boolean {
     case 'auth_failed':
     case 'capacity_limited':
     case 'rate_limited':
+    case 'transport_failed':
     case 'timeout':
     case 'parse_failed':
       return true;
@@ -110,7 +127,38 @@ export function buildFailedHealthProbe(message: string): ProviderHealthProbe {
   return {
     available: false,
     status: kind,
+    auth_status: kind === 'auth_failed' ? kind : 'healthy',
+    execute_status: kind === 'auth_failed' ? 'unprobed' : kind,
+    ready_for_execution: false,
+    failure_kind: kind,
+    error_summary: message,
     error: message,
     recoverable: isRecoverableFailure(kind),
+  };
+}
+
+export function buildProviderHealthProbe(params: {
+  auth_status: 'healthy' | 'unprobed' | ProviderFailureKind;
+  execute_status: 'healthy' | 'unprobed' | ProviderFailureKind;
+  error_summary?: string;
+}): ProviderHealthProbe {
+  const ready_for_execution =
+    params.auth_status === 'healthy' && params.execute_status === 'healthy';
+  const failure_kind =
+    params.auth_status !== 'healthy' && params.auth_status !== 'unprobed'
+      ? params.auth_status
+      : params.execute_status !== 'healthy' && params.execute_status !== 'unprobed'
+        ? params.execute_status
+        : undefined;
+  return {
+    available: ready_for_execution,
+    ready_for_execution,
+    status: ready_for_execution ? 'healthy' : failure_kind ?? 'unprobed',
+    auth_status: params.auth_status,
+    execute_status: params.execute_status,
+    failure_kind,
+    error_summary: params.error_summary,
+    error: params.error_summary,
+    recoverable: failure_kind ? isRecoverableFailure(failure_kind) : false,
   };
 }

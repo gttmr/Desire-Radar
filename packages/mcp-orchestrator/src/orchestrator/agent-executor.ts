@@ -5,7 +5,12 @@ import type { PromptComposer } from '../prompt/composer.js';
 import type { RunStore } from './run-store.js';
 import type { CollectorCandidate, CollectorSourceStatus } from '../collector/client.js';
 import type { ResearchResult } from '../collector/research-service.js';
-import type { ExecutionPhase, ModelProfile } from '../providers/base.js';
+import type {
+  ExecutionPhase,
+  ModelProfile,
+  ProviderFailureKind,
+  ProviderHealthProbe,
+} from '../providers/base.js';
 import { ExecutionPolicyResolver } from '../policy/execution.js';
 
 export interface ExecuteAgentParams {
@@ -63,11 +68,9 @@ function buildDegradedResponse(
 
 function tryParseResponse(text: string): AgentResponse {
   try {
-    // Try to extract JSON from the response (may be wrapped in markdown code fences)
     const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
     const jsonStr = jsonMatch ? jsonMatch[1]!.trim() : text.trim();
     const parsed = JSON.parse(jsonStr) as AgentResponse;
-    // Validate required fields exist
     if (typeof parsed.summary === 'string' && typeof parsed.confidence === 'number') {
       return {
         summary: parsed.summary,
@@ -96,7 +99,6 @@ export class AgentExecutor {
 
   async executeAgent(params: ExecuteAgentParams): Promise<AgentTurn[]> {
     const turns: AgentTurn[] = [];
-    const existingTurns = this.runStore.getTurns(params.runId);
     const resolvedPolicy = this.policyResolver.resolve(params.agentName, params.phase);
     const providers =
       params.providers?.length && params.providers.length > 0
@@ -105,11 +107,49 @@ export class AgentExecutor {
 
     for (const providerName of providers) {
       const adapter = this.registry.get(providerName);
-      if (!adapter) continue;
       const modelProfile = params.modelProfile ?? resolvedPolicy.modelProfile;
       const model = this.policyResolver.resolveModel(providerName, modelProfile);
 
-      // 1. Get or create session
+      if (!adapter) {
+        turns.push(
+          this.createDegradedTurn({
+            params,
+            providerName,
+            message: 'Provider not registered',
+            kind: 'unknown',
+            recoverable: false,
+            model,
+            modelProfile,
+          }),
+        );
+        continue;
+      }
+
+      const readiness = await this.probeProviderReadiness(adapter);
+      if (!(readiness.ready_for_execution ?? readiness.available)) {
+        turns.push(
+          this.createDegradedTurn({
+            params,
+            providerName,
+            message:
+              readiness.error_summary ??
+              readiness.error ??
+              `${providerName} is not ready for execution`,
+            kind:
+              readiness.failure_kind ??
+              (readiness.execute_status !== 'healthy' && readiness.execute_status !== 'unprobed'
+                ? readiness.execute_status
+                : readiness.auth_status !== 'healthy' && readiness.auth_status !== 'unprobed'
+                  ? readiness.auth_status
+                  : 'unknown'),
+            recoverable: readiness.recoverable,
+            model,
+            modelProfile,
+          }),
+        );
+        continue;
+      }
+
       let session = this.sessionStore.getSession(params.agentName, providerName, {
         phase: params.phase,
         modelProfile,
@@ -125,7 +165,6 @@ export class AgentExecutor {
         });
       }
 
-      // 2. Compose prompt
       const prompt = await this.promptComposer.compose({
         phase: params.phase,
         agentName: params.agentName,
@@ -143,7 +182,6 @@ export class AgentExecutor {
         verdictSummary: params.verdictSummary,
       });
 
-      // 3. Execute
       const result = await adapter.execute({
         prompt,
         sessionId: session.session_id,
@@ -154,7 +192,6 @@ export class AgentExecutor {
         responseFormat: resolvedPolicy.responseFormat,
       });
 
-      // 4. Parse response
       const response =
         result.status === 'degraded'
           ? buildDegradedResponse(
@@ -164,34 +201,111 @@ export class AgentExecutor {
             )
           : tryParseResponse(result.text);
 
-      // 5. Create turn
-      const turn: AgentTurn = {
-        run_id: params.runId,
-        agent_name: params.agentName,
-        provider: providerName,
-        session_id: result.sessionId,
-        provider_execution_status: result.status,
-        provider_degraded_kind: result.degraded_kind,
-        provider_error: result.degraded_message,
-        provider_recoverable: result.recoverable,
-        turn_index: existingTurns.filter(
-          (t) => t.agent_name === params.agentName && t.provider === providerName,
-        ).length,
-        prompt_summary: prompt.slice(0, 200),
+      const turn = this.buildTurn({
+        params,
+        providerName,
+        sessionId: result.sessionId,
+        status: result.status,
+        kind: result.degraded_kind,
+        message: result.degraded_message,
+        recoverable: result.recoverable,
+        promptSummary: prompt.slice(0, 200),
         response,
-        citations: response.evidence_used,
-        evidence_refs: params.evidenceBundle
-          ? params.evidenceBundle.evidence_items.map((e: { evidence_id: string }) => e.evidence_id)
-          : [],
-        created_at: new Date().toISOString(),
-      };
+      });
 
-      // 6. Save
       this.runStore.saveTurn(turn);
       this.sessionStore.updateSession(session.session_id, turn);
       turns.push(turn);
     }
 
     return turns;
+  }
+
+  private async probeProviderReadiness(adapter: {
+    health(): Promise<boolean>;
+    probeHealth?(): Promise<ProviderHealthProbe>;
+  }): Promise<ProviderHealthProbe> {
+    if (adapter.probeHealth) {
+      return adapter.probeHealth();
+    }
+
+    const available = await adapter.health();
+    return {
+      available,
+      status: available ? 'healthy' : 'unknown',
+      auth_status: available ? 'healthy' : 'unknown',
+      execute_status: available ? 'healthy' : 'unknown',
+      ready_for_execution: available,
+      recoverable: false,
+    };
+  }
+
+  private createDegradedTurn(params: {
+    params: ExecuteAgentParams;
+    providerName: string;
+    message: string;
+    kind?: ProviderFailureKind | string;
+    recoverable?: boolean;
+    model?: string;
+    modelProfile?: ModelProfile;
+  }): AgentTurn {
+    const response = buildDegradedResponse(
+      params.providerName,
+      params.kind,
+      params.message,
+    );
+    const turn = this.buildTurn({
+      params: params.params,
+      providerName: params.providerName,
+      sessionId: `degraded-${params.providerName}-${Date.now()}`,
+      status: 'degraded',
+      kind: params.kind as ProviderFailureKind | undefined,
+      message: params.message,
+      recoverable: params.recoverable,
+      promptSummary:
+        params.model || params.modelProfile
+          ? `provider probe blocked execution (model=${params.model ?? 'default'}, profile=${params.modelProfile ?? 'default'})`
+          : 'provider probe blocked execution',
+      response,
+    });
+    this.runStore.saveTurn(turn);
+    return turn;
+  }
+
+  private buildTurn(args: {
+    params: ExecuteAgentParams;
+    providerName: string;
+    sessionId: string;
+    status: 'completed' | 'degraded';
+    kind?: ProviderFailureKind;
+    message?: string;
+    recoverable?: boolean;
+    promptSummary: string;
+    response: AgentResponse;
+  }): AgentTurn {
+    return {
+      run_id: args.params.runId,
+      agent_name: args.params.agentName,
+      provider: args.providerName,
+      session_id: args.sessionId,
+      provider_execution_status: args.status,
+      provider_degraded_kind: args.kind,
+      provider_error: args.message,
+      provider_recoverable: args.recoverable,
+      turn_index: this.runStore
+        .getTurns(args.params.runId)
+        .filter(
+          (turn) =>
+            turn.agent_name === args.params.agentName &&
+            turn.provider === args.providerName,
+        ).length,
+      prompt_summary: args.promptSummary,
+      response: args.response,
+      citations: args.response.evidence_used,
+      evidence_refs: args.params.evidenceBundle
+        ? args.params.evidenceBundle.evidence_items.map((e: { evidence_id: string }) => e.evidence_id)
+        : [],
+      created_at: new Date().toISOString(),
+    };
   }
 }

@@ -8,6 +8,11 @@ import {
   isWeakBeneficiaryMapping,
   summarizeBeneficiaryMapping,
 } from './beneficiary-mapping.js';
+import type { AgentTurn } from '@agentic/shared-types';
+
+function selectPreferredTurn(turns: AgentTurn[]): AgentTurn | undefined {
+  return turns.find((turn) => turn.provider_execution_status !== 'degraded') ?? turns[0];
+}
 
 export class VerdictService {
   constructor(
@@ -22,7 +27,7 @@ export class VerdictService {
     const entity = this.contextStore.getEntity(runId) ?? bundle?.entity ?? 'unknown';
     const debateTurns = this.runStore.getTurns(runId);
     const researchResults = this.contextStore.getResearchResults(runId);
-    const [beneficiaryMappingTurn] = await this.agentExecutor.executeAgent({
+    const beneficiaryMappingTurn = selectPreferredTurn(await this.agentExecutor.executeAgent({
       runId,
       runScope: runId,
       agentName: 'beneficiary_mapping',
@@ -35,11 +40,11 @@ export class VerdictService {
       orchestratorQuestions: [
         'Map the direct winner, public beneficiary, and second-order beneficiary. Be explicit when monetization is missing or fragile.',
       ],
-    });
+    }));
     const beneficiary_mapping = buildBeneficiaryMapping(beneficiaryMappingTurn);
     const beneficiarySummary = summarizeBeneficiaryMapping(beneficiary_mapping);
 
-    const [primaryTurn] = await this.agentExecutor.executeAgent({
+    const primaryTurn = selectPreferredTurn(await this.agentExecutor.executeAgent({
       runId,
       runScope: runId,
       agentName: this.policy.verdict.primaryAgent,
@@ -58,9 +63,9 @@ export class VerdictService {
       orchestratorQuestions: [
         'Produce the final investment judgement. Be explicit about what could make this thesis wrong.',
       ],
-    });
+    }));
 
-    const [crossCheckTurn] = await this.agentExecutor.executeAgent({
+    const crossCheckTurn = selectPreferredTurn(await this.agentExecutor.executeAgent({
       runId,
       runScope: runId,
       agentName: this.policy.verdict.crossCheckAgent,
@@ -77,7 +82,7 @@ export class VerdictService {
         },
       ],
       orchestratorQuestions: ['Cross-check the final judgement and point out the largest risk.'],
-    });
+    }));
 
     const weakMapping = isWeakBeneficiaryMapping(beneficiary_mapping);
     const degradedTurns = [beneficiaryMappingTurn, primaryTurn, crossCheckTurn].filter(

@@ -56,11 +56,23 @@ describe('/health route', () => {
 
   it('returns provider availability and error details', async () => {
     const registry = new ProviderRegistry();
-    registry.register(new StaticHealthProvider('codex', { available: true }));
+    registry.register(
+      new StaticHealthProvider('codex', {
+        available: true,
+        status: 'healthy',
+        auth_status: 'healthy',
+        execute_status: 'healthy',
+        ready_for_execution: true,
+      }),
+    );
     registry.register(
       new StaticHealthProvider('claude', {
         available: false,
         status: 'auth_failed',
+        auth_status: 'auth_failed',
+        execute_status: 'unprobed',
+        ready_for_execution: false,
+        failure_kind: 'auth_failed',
         error: 'Claude auth status reported loggedIn=false (claude.ai)',
         recoverable: true,
       }),
@@ -82,6 +94,10 @@ describe('/health route', () => {
         provider: string;
         available: boolean;
         status?: string;
+        auth_status?: string;
+        execute_status?: string;
+        ready_for_execution?: boolean;
+        failure_kind?: string;
         recoverable?: boolean;
         error?: string;
       }>;
@@ -94,6 +110,10 @@ describe('/health route', () => {
           provider: 'claude',
           available: false,
           status: 'auth_failed',
+          auth_status: 'auth_failed',
+          execute_status: 'unprobed',
+          ready_for_execution: false,
+          failure_kind: 'auth_failed',
           recoverable: true,
           error: 'Claude auth status reported loggedIn=false (claude.ai)',
         }),

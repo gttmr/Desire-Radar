@@ -32,8 +32,8 @@ class CadenceRunner:
         next_run_time = datetime.now(timezone.utc) if self.bootstrap_on_start else None
         for name, connector in self.connectors.items():
             source = self.source_registry.get(name)
-            if source is None or not source.enabled:
-                logger.info("Skipping scheduler for %s (disabled or missing source)", name)
+            if source is None:
+                logger.info("Skipping scheduler for %s (missing source)", name)
                 continue
             if connector.cadence_seconds <= 0:
                 logger.info(
@@ -69,6 +69,15 @@ class CadenceRunner:
     async def _run_wrapper(self, connector_name: str) -> None:
         """Wrapper for APScheduler to queue an async source run."""
         try:
+            source = self.source_registry.get(connector_name)
+            if source is None or not source.enabled or not source.runnable:
+                logger.info(
+                    "Skipping scheduled run for %s (enabled=%s runnable=%s)",
+                    connector_name,
+                    source.enabled if source is not None else None,
+                    source.runnable if source is not None else None,
+                )
+                return
             record = await self.ingestion_engine.enqueue_source_run(
                 connector_name,
                 metadata={"trigger": "scheduled"},

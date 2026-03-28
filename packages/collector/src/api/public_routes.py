@@ -136,16 +136,35 @@ def _sanitize_submission(record: Any) -> dict:
     )
 
 
+def _collect_run_conflict(reason: str, source_id: str | None = None) -> HTTPException:
+    detail: dict[str, Any] = {"reason": reason}
+    if source_id is not None:
+        detail["source_id"] = source_id
+        detail["connector"] = source_id
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=detail)
+
+
 @router.post("/collect/run")
 async def collect_run(body: CollectRunRequest | None = None) -> dict:
     """Trigger collection for one or all pull connectors."""
     ingestion_engine = _deps["ingestion_engine"]
     connectors = _deps["connectors"]
+    registry = _deps["source_registry"]
+    registry_map = registry.as_map()
     async_mode = body.async_mode if body is not None else True
 
     if body and body.connector:
-        if body.connector not in connectors and body.connector not in _deps["source_registry"].as_map():
+        source = registry_map.get(body.connector)
+        if source is None:
             raise HTTPException(404, f"Unknown connector: {body.connector}")
+        if source.kind != "pull":
+            raise _collect_run_conflict("source_not_pull", body.connector)
+        if not source.enabled:
+            raise _collect_run_conflict("source_disabled", body.connector)
+        if not source.runnable:
+            raise _collect_run_conflict("source_not_runnable", body.connector)
+        if source.adapter_name not in connectors:
+            raise _collect_run_conflict("missing_connector_adapter", body.connector)
         if async_mode:
             submission = await ingestion_engine.enqueue_source_run(
                 body.connector,
@@ -162,34 +181,73 @@ async def collect_run(body: CollectRunRequest | None = None) -> dict:
             "submission_id": submission.submission_id,
             "status": submission.status,
             "async_mode": async_mode,
+            "queued_sources": [body.connector],
+            "skipped_sources": {},
+            "skipped_disabled_count": 0,
         }
 
     total = 0
     results: dict[str, int] = {}
     submission_ids: dict[str, str] = {}
-    registry_map = _deps["source_registry"].as_map()
-    for name in connectors:
-        source = registry_map.get(name)
-        if source is None or not source.enabled:
+    source_results: dict[str, dict[str, Any]] = {}
+    queued_sources: list[str] = []
+    skipped_sources: dict[str, str] = {}
+    for source_id, source in registry_map.items():
+        if source.kind != "pull":
+            continue
+        if not source.enabled:
+            skipped_sources[source_id] = "source_disabled"
+            continue
+        if not source.runnable:
+            skipped_sources[source_id] = "source_not_runnable"
+            continue
+        if source.adapter_name not in connectors:
+            skipped_sources[source_id] = "missing_connector_adapter"
             continue
         if async_mode:
             submission = await ingestion_engine.enqueue_source_run(
-                name,
+                source_id,
                 metadata={"trigger": "manual"},
             )
         else:
             submission = await ingestion_engine.run_source(
-                name,
+                source_id,
                 metadata={"trigger": "manual"},
             )
-        results[name] = len(submission.evidence_ids)
-        submission_ids[name] = submission.submission_id
+        queued_sources.append(source_id)
+        results[source_id] = len(submission.evidence_ids)
+        submission_ids[source_id] = submission.submission_id
+        source_results[source_id] = {
+            "submission_id": submission.submission_id,
+            "status": submission.status,
+            "evidence_count": len(submission.evidence_ids),
+            "error_message": submission.error_message,
+        }
         total += len(submission.evidence_ids)
+
+    if not queued_sources:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "reason": "no_enabled_pull_sources",
+                "queued_sources": [],
+                "skipped_sources": skipped_sources,
+                "skipped_disabled_count": sum(
+                    1 for value in skipped_sources.values() if value == "source_disabled"
+                ),
+            },
+        )
 
     return {
         "total_evidence_count": total,
-        "queued_count": len(submission_ids) if async_mode else 0,
+        "queued_count": len(submission_ids),
+        "queued_sources": queued_sources,
+        "skipped_sources": skipped_sources,
+        "skipped_disabled_count": sum(
+            1 for value in skipped_sources.values() if value == "source_disabled"
+        ),
         "per_connector": results,
+        "source_results": source_results,
         "submission_ids": submission_ids,
         "async_mode": async_mode,
     }

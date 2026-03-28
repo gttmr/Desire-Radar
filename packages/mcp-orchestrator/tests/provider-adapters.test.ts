@@ -13,7 +13,9 @@ import {
   extractGeminiPromptResult,
 } from '../src/providers/gemini.js';
 
-const execFileMock = vi.fn();
+const { execFileMock } = vi.hoisted(() => ({
+  execFileMock: vi.fn(),
+}));
 
 vi.mock('node:child_process', () => ({
   execFile: execFileMock,
@@ -99,45 +101,128 @@ warn line
   });
 
   it('uses codex login status for health probing', async () => {
+    let callCount = 0;
     mockExecFile((_file, args, _options, callback) => {
-      expect(args).toEqual(['login', 'status']);
-      callback(null, '', 'Logged in using ChatGPT');
+      callCount += 1;
+      if (callCount === 1) {
+        expect(args).toEqual(['login', 'status']);
+        callback(null, '', 'Logged in using ChatGPT');
+        return;
+      }
+      expect(args).toEqual([
+        'exec',
+        '--skip-git-repo-check',
+        '--ephemeral',
+        '-C',
+        '/tmp',
+        '-s',
+        'read-only',
+        '--json',
+        'Reply with exactly OK',
+      ]);
+      callback(
+        null,
+        '{"type":"thread.started","thread_id":"thread-health"}\n{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
+        '',
+      );
     });
 
     const provider = new CodexProvider('codex', 30_000);
-    await expect(provider.probeHealth?.()).resolves.toEqual({
-      available: true,
-      status: 'healthy',
-      recoverable: false,
+    await expect(provider.probeHealth?.()).resolves.toEqual(
+      expect.objectContaining({
+        available: true,
+        status: 'healthy',
+        auth_status: 'healthy',
+        execute_status: 'healthy',
+        ready_for_execution: true,
+        recoverable: false,
+      }),
+    );
+  });
+
+  it('classifies codex transport failures during execute probes', async () => {
+    let callCount = 0;
+    mockExecFile((_file, _args, _options, callback) => {
+      callCount += 1;
+      if (callCount === 1) {
+        callback(null, '', 'Logged in using ChatGPT');
+        return;
+      }
+      callback(
+        new Error('Command failed'),
+        '',
+        'error sending websocket request: no native root CA certificates found',
+      );
     });
+
+    const provider = new CodexProvider('codex', 30_000);
+    await expect(provider.probeHealth?.()).resolves.toEqual(
+      expect.objectContaining({
+        available: false,
+        auth_status: 'healthy',
+        execute_status: 'transport_failed',
+        ready_for_execution: false,
+        failure_kind: 'transport_failed',
+        recoverable: true,
+      }),
+    );
   });
 
   it('parses claude auth status JSON', () => {
-    expect(parseClaudeAuthStatus('{"loggedIn":true,"authMethod":"claude.ai"}')).toEqual({
-      available: true,
-      status: 'healthy',
-      recoverable: false,
-    });
-    expect(parseClaudeAuthStatus('{"loggedIn":false,"authMethod":"claude.ai"}')).toEqual({
-      available: false,
-      status: 'auth_failed',
-      error: 'Claude auth status reported loggedIn=false (claude.ai)',
-      recoverable: true,
-    });
+    expect(parseClaudeAuthStatus('{"loggedIn":true,"authMethod":"claude.ai"}')).toEqual(
+      expect.objectContaining({
+        available: true,
+        status: 'healthy',
+        recoverable: false,
+      }),
+    );
+    expect(parseClaudeAuthStatus('{"loggedIn":false,"authMethod":"claude.ai"}')).toEqual(
+      expect.objectContaining({
+        available: false,
+        status: 'auth_failed',
+        error: 'Claude auth status reported loggedIn=false (claude.ai)',
+        recoverable: true,
+      }),
+    );
   });
 
   it('uses claude auth status for health probing', async () => {
+    let callCount = 0;
     mockExecFile((_file, args, _options, callback) => {
-      expect(args).toEqual(['auth', 'status']);
-      callback(null, '{"loggedIn":true}', '');
+      callCount += 1;
+      if (callCount === 1) {
+        expect(args).toEqual(['auth', 'status']);
+        callback(null, '{"loggedIn":true}', '');
+        return;
+      }
+      expect(args).toEqual([
+        '-p',
+        'Reply with exactly OK',
+        '--output-format',
+        'stream-json',
+        '--verbose',
+      ]);
+      callback(
+        null,
+        [
+          '{"type":"assistant","message":{"content":[{"type":"text","text":"OK"}]}}',
+          '{"type":"result","subtype":"success","is_error":false,"result":""}',
+        ].join('\n'),
+        '',
+      );
     });
 
     const provider = new ClaudeProvider('claude', 30_000);
-    await expect(provider.probeHealth?.()).resolves.toEqual({
-      available: true,
-      status: 'healthy',
-      recoverable: false,
-    });
+    await expect(provider.probeHealth?.()).resolves.toEqual(
+      expect.objectContaining({
+        available: true,
+        status: 'healthy',
+        auth_status: 'healthy',
+        execute_status: 'healthy',
+        ready_for_execution: true,
+        recoverable: false,
+      }),
+    );
   });
 
   it('extracts claude assistant text from stream-json output', () => {
@@ -161,6 +246,11 @@ warn line
         '{"type":"result","subtype":"success","is_error":true,"result":"rate limited"}',
       ),
     ).toThrow('Claude CLI returned error output: rate limited');
+    expect(() =>
+      extractClaudePrintResult(
+        '{"type":"result","subtype":"error_during_execution","is_error":false,"result":"temporary failure"}',
+      ),
+    ).toThrow('Claude CLI returned error output: temporary failure');
     expect(() =>
       extractClaudePrintResult(
         '{"type":"result","subtype":"success","is_error":false,"result":""}',
@@ -293,7 +383,7 @@ warn line
 
   it('surfaces gemini probe failures with classified errors', async () => {
     mockExecFile((_file, args, _options, callback) => {
-      expect(args).toEqual(['-p', 'Reply with exactly OK']);
+      expect(args).toEqual(['-o', 'json', '-p', 'Reply with exactly OK']);
       callback(
         new Error('Command failed'),
         '',
@@ -302,12 +392,34 @@ warn line
     });
 
     const provider = new GeminiProvider('gemini', 30_000);
-    await expect(provider.probeHealth?.()).resolves.toEqual({
-      available: false,
-      status: 'capacity_limited',
-      error: 'Gemini reachable but temporarily unavailable (capacity/rate limit).',
-      recoverable: true,
+    await expect(provider.probeHealth?.()).resolves.toEqual(
+      expect.objectContaining({
+        available: false,
+        status: 'capacity_limited',
+        auth_status: 'healthy',
+        execute_status: 'capacity_limited',
+        ready_for_execution: false,
+        error: 'Gemini reachable but temporarily unavailable (capacity/rate limit).',
+        recoverable: true,
+      }),
+    );
+  });
+
+  it('marks gemini empty output as execute-unready even when the command succeeds', async () => {
+    mockExecFile((_file, _args, _options, callback) => {
+      callback(null, '', '');
     });
+
+    const provider = new GeminiProvider('gemini', 30_000);
+    await expect(provider.probeHealth?.()).resolves.toEqual(
+      expect.objectContaining({
+        available: false,
+        auth_status: 'healthy',
+        execute_status: 'parse_failed',
+        ready_for_execution: false,
+        failure_kind: 'parse_failed',
+      }),
+    );
   });
 
   it('uses gemini JSON output for execution', async () => {

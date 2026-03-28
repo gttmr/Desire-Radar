@@ -49,11 +49,13 @@ RUN printf '#!/bin/sh\nexec node /usr/local/lib/node_modules/@google/gemini-cli/
 # Copy built application
 COPY --from=build /app/packages/mcp-orchestrator/dist ./dist
 COPY --from=build /app/packages/mcp-orchestrator/node_modules ./node_modules
+COPY --from=build /app/packages/mcp-orchestrator/src/agents ./dist/mcp-orchestrator/src/agents
 COPY --from=build /app/packages/mcp-orchestrator/src/agents ./src/agents
+COPY packages/mcp-orchestrator/policy ./policy
 COPY packages/mcp-orchestrator/package.json ./package.json
 
 # Run as node user so $HOME resolves to /home/node
 USER node
 
 EXPOSE 5003
-CMD ["node", "dist/src/index.js"]
+CMD ["node", "dist/mcp-orchestrator/src/index.js"]

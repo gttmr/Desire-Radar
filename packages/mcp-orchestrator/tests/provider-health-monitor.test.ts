@@ -49,6 +49,9 @@ describe('ProviderHealthMonitor', () => {
         provider: 'codex',
         available: true,
         status: 'healthy',
+        auth_status: 'healthy',
+        execute_status: 'healthy',
+        ready_for_execution: true,
         repair_configured: false,
       }),
     ]);
@@ -58,8 +61,24 @@ describe('ProviderHealthMonitor', () => {
     const registry = new ProviderRegistry();
     registry.register(
       new ProbeProvider('claude', [
-        { available: false, status: 'auth_failed', error: 'auth expired', recoverable: true },
-        { available: true, status: 'healthy', recoverable: false },
+        {
+          available: false,
+          status: 'auth_failed',
+          auth_status: 'auth_failed',
+          execute_status: 'unprobed',
+          ready_for_execution: false,
+          failure_kind: 'auth_failed',
+          error: 'auth expired',
+          recoverable: true,
+        },
+        {
+          available: true,
+          status: 'healthy',
+          auth_status: 'healthy',
+          execute_status: 'healthy',
+          ready_for_execution: true,
+          recoverable: false,
+        },
       ]),
     );
 
@@ -79,6 +98,9 @@ describe('ProviderHealthMonitor', () => {
         provider: 'claude',
         available: true,
         status: 'healthy',
+        auth_status: 'healthy',
+        execute_status: 'healthy',
+        ready_for_execution: true,
         repair_configured: true,
         repair_command_preview: 'claude auth login',
         last_repair_summary: 'claude: auth login completed',
@@ -90,9 +112,36 @@ describe('ProviderHealthMonitor', () => {
     const registry = new ProviderRegistry();
     registry.register(
       new ProbeProvider('gemini', [
-        { available: false, status: 'auth_failed', error: 'auth expired', recoverable: true },
-        { available: false, status: 'auth_failed', error: 'auth expired', recoverable: true },
-        { available: false, status: 'auth_failed', error: 'auth expired', recoverable: true },
+        {
+          available: false,
+          status: 'auth_failed',
+          auth_status: 'auth_failed',
+          execute_status: 'unprobed',
+          ready_for_execution: false,
+          failure_kind: 'auth_failed',
+          error: 'auth expired',
+          recoverable: true,
+        },
+        {
+          available: false,
+          status: 'auth_failed',
+          auth_status: 'auth_failed',
+          execute_status: 'unprobed',
+          ready_for_execution: false,
+          failure_kind: 'auth_failed',
+          error: 'auth expired',
+          recoverable: true,
+        },
+        {
+          available: false,
+          status: 'auth_failed',
+          auth_status: 'auth_failed',
+          execute_status: 'unprobed',
+          ready_for_execution: false,
+          failure_kind: 'auth_failed',
+          error: 'auth expired',
+          recoverable: true,
+        },
       ]),
     );
 
@@ -117,7 +166,18 @@ describe('ProviderHealthMonitor', () => {
   it('does not run repair for non-auth availability failures', async () => {
     const registry = new ProviderRegistry();
     registry.register(
-      new ProbeProvider('gemini', [{ available: false, status: 'rate_limited', error: 'rate limited', recoverable: true }]),
+      new ProbeProvider('gemini', [
+        {
+          available: false,
+          status: 'rate_limited',
+          auth_status: 'healthy',
+          execute_status: 'rate_limited',
+          ready_for_execution: false,
+          failure_kind: 'rate_limited',
+          error: 'rate limited',
+          recoverable: true,
+        },
+      ]),
     );
 
     const runRepairCommand = vi.fn(async () => 'gemini: repair completed');
@@ -136,6 +196,7 @@ describe('ProviderHealthMonitor', () => {
         provider: 'gemini',
         available: false,
         status: 'rate_limited',
+        ready_for_execution: false,
         error: 'rate limited',
       }),
     ]);
@@ -165,12 +226,18 @@ describe('ProviderHealthMonitor', () => {
         provider: 'codex',
         available: false,
         status: 'unknown',
+        auth_status: 'unprobed',
+        execute_status: 'unknown',
+        ready_for_execution: false,
         error: 'probe crashed',
       }),
       expect.objectContaining({
         provider: 'claude',
         available: true,
         status: 'healthy',
+        auth_status: 'healthy',
+        execute_status: 'healthy',
+        ready_for_execution: true,
       }),
     ]);
   });
@@ -219,6 +286,9 @@ describe('ProviderHealthMonitor', () => {
         provider: 'codex',
         available: false,
         status: 'unprobed',
+        auth_status: 'unprobed',
+        execute_status: 'unprobed',
+        ready_for_execution: false,
         repair_configured: true,
         repair_command_preview: 'printenv OPENAI_API_KEY | codex login --with-api-key',
       }),

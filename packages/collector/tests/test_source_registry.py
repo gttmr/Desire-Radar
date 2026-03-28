@@ -84,6 +84,8 @@ def test_source_registry_surfaces_selection_metadata(tmp_path):
     assert status["request_kinds_supported"] == ["run_source"]
     assert status["normalizer_key"] == "alpha"
     assert status["manifest_path"] is None
+    assert status["runnable"] is True
+    assert status["adapter_name"] == "alpha"
     assert catalog["alpha"]["capabilities"] == ["demand"]
     assert catalog["alpha"]["request_kinds_supported"] == ["run_source"]
 
@@ -105,3 +107,21 @@ def test_source_registry_tracks_downstream_usefulness_metrics(tmp_path):
     assert current["metrics"]["research_fulfillment_total"] == 1
     assert current["metrics"]["research_useful_total"] == 1
     assert current["validity_score"] >= baseline["validity_score"]
+
+
+def test_source_registry_tracks_partial_failure_metadata(tmp_path):
+    registry = SourceRegistry(str(tmp_path / "sources.json"), _defaults())
+
+    registry.record_processing(
+        "alpha",
+        success=True,
+        warning_kind="http_403_blocked",
+        warning_message="Failed to fetch r/gadgets: HTTP 403",
+        warning_count=2,
+        is_run=True,
+    )
+
+    status = registry.status()["alpha"]
+    assert status["partial_failure_count"] == 2
+    assert status["last_warning_kind"] == "http_403_blocked"
+    assert status["last_warning_message"] == "Failed to fetch r/gadgets: HTTP 403"

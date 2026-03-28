@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 import asyncio
+import time
 
 import pytest
 
-from src.connectors.base import BaseConnector, RawPayload
+from src.connectors.base import BaseConnector, ConnectorWarning, FetchResult, RawPayload
 from src.ingest.engine import IngestionEngine
 from src.ingest.human_input_models import HumanInputRoutingDecision
 from src.ingest.store import SubmissionStore
@@ -52,6 +53,70 @@ class BlockingConnector(BaseConnector):
                 request_params={},
                 url_or_ref="",
             )
+        ]
+
+
+class PartialFailureConnector(BaseConnector):
+    name = "partial_pull"
+    cadence_seconds = 60
+    source_tier = 2
+
+    async def fetch(self) -> list[RawPayload] | FetchResult:
+        return FetchResult(
+            payloads=[
+                RawPayload(
+                    source=self.name,
+                    data={"title": "Cursor demand rising", "entities": ["Cursor"]},
+                    request_params={"subreddit": "technology"},
+                    url_or_ref="",
+                )
+            ],
+            warnings=[
+                ConnectorWarning(
+                    kind="http_403_blocked",
+                    target="gadgets",
+                    message="Failed to fetch r/gadgets: HTTP 403",
+                )
+            ],
+        )
+
+
+class MixedFailureConnector(BaseConnector):
+    name = "mixed_failure_pull"
+    cadence_seconds = 60
+    source_tier = 2
+
+    async def fetch(self) -> list[RawPayload]:
+        return [
+            RawPayload(
+                source=self.name,
+                data={"title": "Cursor demand rising", "entities": ["Cursor"]},
+                request_params={"index": 0},
+                url_or_ref="",
+            ),
+            RawPayload(
+                source=self.name,
+                data={"title": "Broken payload", "explode": True},
+                request_params={"index": 1},
+                url_or_ref="",
+            ),
+        ]
+
+
+class SlowProcessingConnector(BaseConnector):
+    name = "slow_processing_pull"
+    cadence_seconds = 60
+    source_tier = 2
+
+    async def fetch(self) -> list[RawPayload]:
+        return [
+            RawPayload(
+                source=self.name,
+                data={"title": f"Signal {index}", "entities": ["Cursor"]},
+                request_params={"index": index},
+                url_or_ref="",
+            )
+            for index in range(8)
         ]
 
 
@@ -335,7 +400,6 @@ async def test_enqueue_source_run_reports_runtime_state_while_running(tmp_path):
     assert runtime["sources"]["blocking_pull"]["last_outcome"] == "completed"
 
 
-@pytest.mark.asyncio
 async def test_request_human_analyst_note_creates_pending_human_submission(tmp_path):
     engine, registry, _ = _build_engine(tmp_path)
 
@@ -392,6 +456,78 @@ async def test_request_human_analyst_note_stores_research_metadata(tmp_path):
     ]
     assert stored.metadata["preferred_capabilities"] == ["beneficiary", "monetization"]
     assert stored.metadata["source_hints"] == ["agent_evidence"]
+
+
+@pytest.mark.asyncio
+async def test_run_source_records_partial_failures_without_failing_submission(tmp_path):
+    connectors = {PartialFailureConnector.name: PartialFailureConnector()}
+    registry = SourceRegistry(
+        str(tmp_path / "sources.json"),
+        build_default_sources(connectors),
+    )
+    engine = IngestionEngine(
+        source_registry=registry,
+        submission_store=SubmissionStore(str(tmp_path / "submissions.json")),
+        snapshot_store=RawSnapshotStore(str(tmp_path / "snapshots")),
+        evidence_sink=EvidenceSink(),
+        entity_resolver=EntityResolver(EntityStore(str(tmp_path / "entities.json"))),
+        normalizer_fn=_normalizer,
+        connectors=connectors,
+        analysis_engine=StubAnalysisEngine(),
+    )
+
+    record = await engine.run_source("partial_pull")
+
+    assert record.status == "completed"
+    assert record.metadata["warnings"] == [
+        {
+            "kind": "http_403_blocked",
+            "message": "Failed to fetch r/gadgets: HTTP 403",
+            "target": "gadgets",
+            "recoverable": True,
+        }
+    ]
+    runtime = engine.get_runtime_status()
+    assert runtime["sources"]["partial_pull"]["last_outcome"] == "completed_with_warnings"
+    assert runtime["sources"]["partial_pull"]["last_warning_kind"] == "http_403_blocked"
+    assert runtime["sources"]["partial_pull"]["last_warning_count"] == 1
+    status = registry.status()["partial_pull"]
+    assert status["partial_failure_count"] == 1
+    assert status["last_warning_kind"] == "http_403_blocked"
+
+
+@pytest.mark.asyncio
+async def test_failed_raw_run_does_not_claim_unpersisted_evidence(tmp_path):
+    connectors = {MixedFailureConnector.name: MixedFailureConnector()}
+    registry = SourceRegistry(
+        str(tmp_path / "sources.json"),
+        build_default_sources(connectors),
+    )
+
+    def normalizer(source: str, raw_payload: dict, snapshot_ref: str) -> list[Evidence]:
+        if raw_payload.get("explode"):
+            raise RuntimeError("normalizer exploded")
+        return _normalizer(source, raw_payload, snapshot_ref)
+
+    engine = IngestionEngine(
+        source_registry=registry,
+        submission_store=SubmissionStore(str(tmp_path / "submissions.json")),
+        snapshot_store=RawSnapshotStore(str(tmp_path / "snapshots")),
+        evidence_sink=EvidenceSink(),
+        entity_resolver=EntityResolver(EntityStore(str(tmp_path / "entities.json"))),
+        normalizer_fn=normalizer,
+        connectors=connectors,
+        analysis_engine=StubAnalysisEngine(),
+    )
+
+    record = await engine.run_source("mixed_failure_pull")
+
+    assert record.status == "failed"
+    assert record.evidence_ids == []
+    assert engine.evidence_sink.get_all() == []
+    runtime = engine.get_runtime_status()
+    assert runtime["sources"]["mixed_failure_pull"]["last_outcome"] == "failed"
+    assert runtime["sources"]["mixed_failure_pull"]["last_failure_kind"] == "normalizer_failed"
 
 
 @pytest.mark.asyncio

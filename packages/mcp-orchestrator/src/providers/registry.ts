@@ -18,7 +18,7 @@ export class ProviderRegistry {
         const probe = adapter.probeHealth
           ? await adapter.probeHealth()
           : { available: await adapter.health() };
-        if (probe.available) {
+        if (probe.ready_for_execution ?? probe.available) {
           results.push(adapter);
         }
       } catch {

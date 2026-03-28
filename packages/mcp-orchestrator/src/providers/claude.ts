@@ -6,7 +6,11 @@ import type {
   ProviderHealthProbe,
   ProviderResult,
 } from './base.js';
-import { buildDegradedProviderResult, buildFailedHealthProbe } from './errors.js';
+import {
+  buildDegradedProviderResult,
+  buildFailedHealthProbe,
+  buildProviderHealthProbe,
+} from './errors.js';
 
 export function parseClaudeAuthStatus(stdout: string): ProviderHealthProbe {
   try {
@@ -41,12 +45,16 @@ export function extractClaudePrintResult(stdout: string): string {
     try {
       const payload = JSON.parse(line) as {
         type?: string;
+        subtype?: string;
         is_error?: boolean;
         result?: string;
         message?: { content?: Array<{ type?: string; text?: string }> };
       };
 
-      if (payload.type === 'result' && payload.is_error) {
+      if (
+        payload.type === 'result' &&
+        (payload.is_error || /error/i.test(payload.subtype ?? ''))
+      ) {
         const detail =
           typeof payload.result === 'string' && payload.result.trim()
             ? payload.result.trim()
@@ -133,7 +141,30 @@ export class ClaudeProvider implements ProviderAdapter {
   async probeHealth(): Promise<ProviderHealthProbe> {
     try {
       const output = await this.run(['auth', 'status'], 10_000);
-      return parseClaudeAuthStatus(output);
+      const auth = parseClaudeAuthStatus(output);
+      if (!auth.available) {
+        return auth;
+      }
+
+      try {
+        const executeOutput = await this.run(
+          ['-p', 'Reply with exactly OK', '--output-format', 'stream-json', '--verbose'],
+          20_000,
+        );
+        extractClaudePrintResult(executeOutput);
+        return buildProviderHealthProbe({
+          auth_status: 'healthy',
+          execute_status: 'healthy',
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const classified = buildFailedHealthProbe(message);
+        return buildProviderHealthProbe({
+          auth_status: 'healthy',
+          execute_status: classified.failure_kind ?? 'unknown',
+          error_summary: classified.error_summary ?? classified.error,
+        });
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return buildFailedHealthProbe(message);
@@ -156,7 +187,7 @@ export class ClaudeProvider implements ProviderAdapter {
         },
         (err, stdout, stderr) => {
           if (err) {
-            if (stdout.trim()) {
+            if (this.shouldAcceptStdoutOnError(stdout, stderr)) {
               return resolve(stdout.trim());
             }
             const detail = stderr?.trim() ? `${err.message}: ${stderr.trim()}` : err.message;
@@ -167,5 +198,13 @@ export class ClaudeProvider implements ProviderAdapter {
       );
       proc.stdin?.end();
     });
+  }
+
+  private shouldAcceptStdoutOnError(stdout: string, stderr: string): boolean {
+    const trimmed = stdout.trim();
+    if (!trimmed || stderr.trim()) {
+      return false;
+    }
+    return trimmed.includes('"type":"assistant"') || trimmed.includes('"type":"result"');
   }
 }

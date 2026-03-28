@@ -6,7 +6,11 @@ import type {
   ProviderHealthProbe,
   ProviderResult,
 } from './base.js';
-import { buildDegradedProviderResult, buildFailedHealthProbe } from './errors.js';
+import {
+  buildDegradedProviderResult,
+  buildFailedHealthProbe,
+  buildProviderHealthProbe,
+} from './errors.js';
 
 type CodexUsage = {
   inputTokens?: number;
@@ -25,6 +29,8 @@ type CommandOutput = {
   stdout: string;
   stderr: string;
 };
+
+const CODEX_HEALTH_PROMPT = 'Reply with exactly OK';
 
 export function extractCodexExecResult(stdout: string): CodexExecResult {
   let messageText: string | undefined;
@@ -150,12 +156,41 @@ export class CodexProvider implements ProviderAdapter {
   async probeHealth(): Promise<ProviderHealthProbe> {
     try {
       const output = await this.runCombined(['login', 'status'], undefined, 10_000);
-      if (/logged in/i.test(output)) {
-        return { available: true, status: 'healthy', recoverable: false };
+      if (!/logged in/i.test(output)) {
+        return buildFailedHealthProbe(
+          `Codex login status did not confirm authentication: ${output.trim()}`,
+        );
       }
-      return buildFailedHealthProbe(
-        `Codex login status did not confirm authentication: ${output.trim()}`,
-      );
+
+      try {
+        const execOutput = await this.runDetailed(
+          [
+            'exec',
+            '--skip-git-repo-check',
+            '--ephemeral',
+            '-C',
+            '/tmp',
+            '-s',
+            'read-only',
+            '--json',
+            CODEX_HEALTH_PROMPT,
+          ],
+          undefined,
+          20_000,
+        );
+        extractCodexExecResult(execOutput.stdout);
+        return buildProviderHealthProbe({
+          auth_status: 'healthy',
+          execute_status: 'healthy',
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return buildProviderHealthProbe({
+          auth_status: 'healthy',
+          execute_status: buildFailedHealthProbe(message).failure_kind ?? 'unknown',
+          error_summary: message,
+        });
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return buildFailedHealthProbe(message);

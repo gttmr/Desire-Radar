@@ -6,6 +6,7 @@ export type ProviderFailureKind =
   | 'binary_missing'
   | 'capacity_limited'
   | 'rate_limited'
+  | 'transport_failed'
   | 'timeout'
   | 'parse_failed'
   | 'unknown';
@@ -27,6 +28,11 @@ export type ProviderExecutionRequest = {
 export type ProviderHealthProbe = {
   available: boolean;
   status?: ProviderHealthStatus;
+  auth_status?: ProviderHealthStatus;
+  execute_status?: ProviderHealthStatus;
+  ready_for_execution?: boolean;
+  failure_kind?: ProviderFailureKind;
+  error_summary?: string;
   error?: string;
   recoverable?: boolean;
 };

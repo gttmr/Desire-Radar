@@ -57,8 +57,12 @@ export class ProviderHealthMonitor {
           provider,
           available: false,
           status: 'unprobed',
+          auth_status: 'unprobed',
+          execute_status: 'unprobed',
+          ready_for_execution: false,
           last_checked_at: new Date(0).toISOString(),
           error: 'provider health has not been probed yet',
+          error_summary: 'provider health has not been probed yet',
           recoverable: false,
           repair_configured: this.hasRepairCommand(provider),
           repair_command_preview: this.getRepairCommandPreview(provider),
@@ -116,7 +120,13 @@ export class ProviderHealthMonitor {
         provider,
         available: result.available,
         status: result.status ?? (result.available ? 'healthy' : 'unknown'),
-        error: result.error,
+        auth_status: result.auth_status ?? (result.available ? 'healthy' : 'unprobed'),
+        execute_status: result.execute_status ?? (result.available ? 'healthy' : 'unprobed'),
+        ready_for_execution:
+          result.ready_for_execution ?? result.available,
+        failure_kind: result.failure_kind,
+        error: result.error ?? result.error_summary,
+        error_summary: result.error_summary ?? result.error,
         recoverable: result.recoverable,
         last_checked_at: this.now().toISOString(),
         repair_configured: this.hasRepairCommand(provider),
@@ -141,10 +151,26 @@ export class ProviderHealthMonitor {
     try {
       return adapter.probeHealth
         ? await adapter.probeHealth()
-        : { available: await adapter.health(), status: 'healthy', recoverable: false };
+        : {
+            available: await adapter.health(),
+            status: 'healthy',
+            auth_status: 'healthy',
+            execute_status: 'healthy',
+            ready_for_execution: true,
+            recoverable: false,
+          };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { available: false, status: 'unknown', error: message, recoverable: false };
+      return {
+        available: false,
+        status: 'unknown',
+        auth_status: 'unprobed',
+        execute_status: 'unknown',
+        ready_for_execution: false,
+        error: message,
+        error_summary: message,
+        recoverable: false,
+      };
     }
   }
 
@@ -152,7 +178,7 @@ export class ProviderHealthMonitor {
     if (!this.options.repairCommands[provider]) {
       return false;
     }
-    return result.status === 'auth_failed';
+    return result.auth_status === 'auth_failed' || result.failure_kind === 'auth_failed';
   }
 
   private async tryRepair(

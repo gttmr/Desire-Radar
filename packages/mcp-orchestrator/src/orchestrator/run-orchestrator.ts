@@ -105,7 +105,7 @@ export class RunOrchestrator {
       runScope: runId,
       agentName,
       phase: agentName === 'report' ? 'report' : 'debate',
-      providers: providers ?? this.defaultProviders,
+      providers,
       evidenceBundle: this.contextStore.getBundle(runId),
       otherAgentMessages: this.collectMessagesForAgent(runId, agentName),
       researchResults: this.contextStore.getResearchResults(runId),
@@ -127,12 +127,12 @@ export class RunOrchestrator {
       : undefined;
 
     const result = await this.options.debateService.run({
-      runId,
-      plan,
-      maxRounds,
-      providers: providers ?? this.defaultProviders,
-      sourceStatus,
-    });
+        runId,
+        plan,
+        maxRounds,
+        providers,
+        sourceStatus,
+      });
 
     return {
       turns: result.turns,
@@ -146,7 +146,7 @@ export class RunOrchestrator {
     _style?: string,
   ): Promise<SynthesizeReportResponse> {
     if (this.options.verdictService && !this.contextStore.getVerdict(runId)) {
-      await this.options.verdictService.run(runId, this.defaultProviders);
+      await this.options.verdictService.run(runId);
     }
 
     const reportResult = this.options.reportService
@@ -199,7 +199,7 @@ export class RunOrchestrator {
           runId: run_id,
           plan: params.plan,
           maxRounds: params.maxRounds,
-          providers: params.providers ?? this.defaultProviders,
+          providers: params.providers,
           sourceStatus: await this.options.candidateService.getSourcesCatalog(),
         })
       : undefined;
@@ -210,12 +210,12 @@ export class RunOrchestrator {
             runId: run_id,
             entity: bundle.entity,
             latestDebate: debate,
-            providers: params.providers ?? this.defaultProviders,
+            providers: params.providers,
           })
         : undefined;
 
     const verdict = this.options.verdictService
-      ? await this.options.verdictService.run(run_id, params.providers ?? this.defaultProviders)
+      ? await this.options.verdictService.run(run_id, params.providers)
       : undefined;
 
     const report = this.options.reportService
@@ -256,7 +256,7 @@ export class RunOrchestrator {
       runId,
       entity,
       latestDebate,
-      providers: this.defaultProviders,
+      providers: undefined,
     });
   }
 
@@ -264,7 +264,7 @@ export class RunOrchestrator {
     if (!this.options.verdictService) {
       throw new Error('Verdict service not configured');
     }
-    return this.options.verdictService.run(runId, this.defaultProviders);
+    return this.options.verdictService.run(runId);
   }
 
   listResearchRequests(runId: string) {

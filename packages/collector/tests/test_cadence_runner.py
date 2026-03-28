@@ -14,11 +14,19 @@ class DummyConnector(BaseConnector):
 
 
 class StubSourceRegistry:
-    def get(self, source_id: str):
-        class Source:
-            enabled = True
+    def __init__(self, *, enabled: bool = True, runnable: bool = True) -> None:
+        self.enabled = enabled
+        self.runnable = runnable
 
-        return Source()
+    def get(self, source_id: str):
+        return type(
+            "Source",
+            (),
+            {
+                "enabled": self.enabled,
+                "runnable": self.runnable,
+            },
+        )()
 
     def status(self):
         return {}
@@ -51,3 +59,18 @@ async def test_cadence_runner_queues_source_runs() -> None:
 
     assert engine.calls == [("dummy_pull", {"trigger": "scheduled"})]
     assert runner.runtime_status()["bootstrap_on_start"] is False
+
+
+@pytest.mark.asyncio
+async def test_cadence_runner_skips_disabled_sources_at_runtime() -> None:
+    engine = StubIngestionEngine()
+    runner = CadenceRunner(
+        connectors={DummyConnector.name: DummyConnector()},
+        ingestion_engine=engine,
+        source_registry=StubSourceRegistry(enabled=False),
+        bootstrap_on_start=False,
+    )
+
+    await runner._run_wrapper("dummy_pull")
+
+    assert engine.calls == []

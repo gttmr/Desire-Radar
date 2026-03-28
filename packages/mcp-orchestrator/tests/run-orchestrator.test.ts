@@ -5,7 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
-import type { ProviderAdapter, ProviderExecutionRequest, ProviderResult } from '../src/providers/base.js';
+import type {
+  ProviderAdapter,
+  ProviderExecutionRequest,
+  ProviderHealthProbe,
+  ProviderResult,
+} from '../src/providers/base.js';
 import type { EvidenceBundle, AgentResponse } from '@agentic/shared-types';
 import { ProviderRegistry } from '../src/providers/registry.js';
 import { SessionStore } from '../src/sessions/session-store.js';
@@ -66,6 +71,17 @@ class MockProvider implements ProviderAdapter {
 
   async health(): Promise<boolean> {
     return true;
+  }
+
+  async probeHealth(): Promise<ProviderHealthProbe> {
+    return {
+      available: true,
+      status: 'healthy',
+      auth_status: 'healthy',
+      execute_status: 'healthy',
+      ready_for_execution: true,
+      recoverable: false,
+    };
   }
 }
 
@@ -239,6 +255,32 @@ describe('RunOrchestrator', () => {
     expect(turns[0]!.response.summary).toContain('[provider-degraded]');
     expect(executions.executions[0]!.status).toBe('degraded');
     expect(executions.executions[0]!.degraded_kind).toBe('rate_limited');
+  });
+
+  it('marks a provider degraded before execution when readiness probe fails', async () => {
+    const bundle = makeBundle();
+    const { run_id } = await orchestrator.submitEvidence('Test', bundle);
+
+    vi.spyOn(mockProvider, 'probeHealth').mockResolvedValueOnce({
+      available: false,
+      status: 'transport_failed',
+      auth_status: 'healthy',
+      execute_status: 'transport_failed',
+      ready_for_execution: false,
+      failure_kind: 'transport_failed',
+      error_summary: 'TLS handshake failed',
+      error: 'TLS handshake failed',
+      recoverable: true,
+    });
+    const executeSpy = vi.spyOn(mockProvider, 'execute');
+
+    const turns = await orchestrator.runAgentRound(run_id, 'search_intent', ['mock']);
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.provider_execution_status).toBe('degraded');
+    expect(turns[0]!.provider_degraded_kind).toBe('transport_failed');
+    expect(turns[0]!.provider_error).toBe('TLS handshake failed');
   });
 
   it('should throw for non-existent run', async () => {

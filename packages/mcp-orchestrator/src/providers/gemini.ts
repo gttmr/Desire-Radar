@@ -7,7 +7,11 @@ import type {
   ProviderHealthProbe,
   ProviderResult,
 } from './base.js';
-import { buildDegradedProviderResult, buildFailedHealthProbe } from './errors.js';
+import {
+  buildDegradedProviderResult,
+  buildFailedHealthProbe,
+  buildProviderHealthProbe,
+} from './errors.js';
 
 export function classifyGeminiError(message: string): string {
   if (/MODEL_CAPACITY_EXHAUSTED|RESOURCE_EXHAUSTED|status 429|Too Many Requests/i.test(message)) {
@@ -95,11 +99,24 @@ export class GeminiProvider implements ProviderAdapter {
 
   async probeHealth(): Promise<ProviderHealthProbe> {
     try {
-      await this.run(['-p', 'Reply with exactly OK'], 20_000);
-      return { available: true, status: 'healthy', recoverable: false };
+      const output = await this.run(['-o', 'json', '-p', 'Reply with exactly OK'], 20_000);
+      extractGeminiPromptResult(output);
+      return buildProviderHealthProbe({
+        auth_status: 'healthy',
+        execute_status: 'healthy',
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return buildFailedHealthProbe(classifyGeminiError(message));
+      const classified = buildFailedHealthProbe(classifyGeminiError(message));
+      const failureKind = classified.failure_kind ?? 'unknown';
+      if (failureKind === 'auth_failed') {
+        return classified;
+      }
+      return buildProviderHealthProbe({
+        auth_status: 'healthy',
+        execute_status: failureKind,
+        error_summary: classified.error_summary ?? classified.error,
+      });
     }
   }
 

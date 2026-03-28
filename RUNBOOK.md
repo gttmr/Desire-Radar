@@ -34,6 +34,16 @@ claude auth status
 gemini -p "Reply with exactly OK"
 ```
 
+현재 WSL node 경로:
+
+```bash
+export PATH=/home/ilmaswsl/.nvm/versions/node/v24.13.0/bin:$PATH
+node -v
+npm -v
+```
+
+`nvm` 초기화가 셸에서 자동으로 안 잡히면 위 경로를 먼저 PATH에 넣고 smoke와 build를 실행한다.
+
 ## Start And Rebuild
 루트에서 실행:
 
@@ -88,6 +98,7 @@ PYTHONPATH=. python3 -m uvicorn src.server:app --host 127.0.0.1 --port 5002
 터미널 2, orchestrator:
 
 ```bash
+export PATH=/home/ilmaswsl/.nvm/versions/node/v24.13.0/bin:$PATH
 cd /mnt/c/Users/ilmas/workspace/Agentic-World/packages/mcp-orchestrator
 npm run build
 npm run start
@@ -96,6 +107,7 @@ npm run start
 터미널 3, discord-bot:
 
 ```bash
+export PATH=/home/ilmaswsl/.nvm/versions/node/v24.13.0/bin:$PATH
 cd /mnt/c/Users/ilmas/workspace/Agentic-World/packages/discord-bot
 npm run build
 npm run start
@@ -141,6 +153,13 @@ curl http://127.0.0.1:5003/health
 주의:
 - `/health`는 provider probe 때문에 즉시가 아니라 수 초 이상 걸릴 수 있다.
 - 이것은 현재 설계상 정상이다.
+- provider 항목은 `available`만 보지 말고 아래 필드를 같이 본다.
+  - `auth_status`
+  - `execute_status`
+  - `ready_for_execution`
+  - `failure_kind`
+  - `error_summary`
+- `auth_status=healthy`여도 `ready_for_execution=false`면 실제 debate/verdict 경로에서는 제외된다.
 
 ### Discord Bot
 
@@ -167,6 +186,20 @@ curl -X POST http://127.0.0.1:5002/collect/run \
   -d '{"connector":"reddit_mentions","async_mode":true}'
 ```
 
+connector를 생략하면:
+
+```bash
+curl -X POST http://127.0.0.1:5002/collect/run \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+의미:
+- 현재 `enabled=true` 인 pull source만 queue에 넣는다.
+- disabled source는 자동 skip 한다.
+- 응답에는 `queued_sources`, `skipped_sources`, `skipped_disabled_count`가 포함된다.
+- enabled pull source가 하나도 없으면 `409 no_enabled_pull_sources`가 반환된다.
+
 3. submission 상태 확인
 
 ```bash
@@ -188,6 +221,11 @@ curl http://127.0.0.1:5002/runtime/status
 - `last_finished_at`
 - `last_error`
 - `last_outcome`
+- `last_failure_kind`
+- `partial_failure_count`
+- `last_warning_kind`
+- `last_warning_count`
+- `last_warning_message`
 
 ## Discord Human Input Test
 현재 구조는 단일 human input 채널 기준이다.
@@ -211,6 +249,13 @@ Provider smoke:
 npm --prefix packages/mcp-orchestrator run smoke:providers
 ```
 
+이 workstation에서는 WSL node를 명시해서 돌리는 편이 안전하다:
+
+```bash
+export PATH=/home/ilmaswsl/.nvm/versions/node/v24.13.0/bin:$PATH
+npm --prefix packages/mcp-orchestrator run smoke:providers
+```
+
 end-to-end smoke:
 
 ```bash
@@ -228,6 +273,7 @@ curl http://127.0.0.1:5003/health
 - `codex`: `codex login status`
 - `claude`: `claude auth status`
 - `gemini`: 별도 status 명령이 불안정하면 headless prompt probe 기준
+- 실제 readiness 판단은 auth probe가 아니라 execute probe까지 통과했는지로 본다.
 
 ## Collector Test Mode
 로컬 Discord 테스트에서 collector pull source 때문에 noisy startup이 문제면, pull source를 잠시 꺼도 된다.
@@ -268,6 +314,7 @@ curl http://127.0.0.1:5002/sources/status
 - `SOURCE_RUN_WORKER_CONCURRENCY`를 낮춘다
 - noisy pull source를 잠시 disable 한다
 - `collect/run`은 sync가 아니라 async 기본값으로 사용한다
+- `sources/status`와 `runtime/status`가 오래 걸리면 active source run 중 cooperative yield가 충분한지, connector fetch 또는 normalizer가 event loop를 오래 점유하는지 본다
 
 ### Orchestrator health가 느린 경우
 - provider probe가 돌고 있는지 먼저 본다

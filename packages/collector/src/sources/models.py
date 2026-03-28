@@ -16,6 +16,7 @@ class SourceMetrics(BaseModel):
     runs_total: int = 0
     submissions_total: int = 0
     failures_total: int = 0
+    partial_failure_total: int = 0
     snapshot_total: int = 0
     deduped_snapshot_total: int = 0
     evidence_total: int = 0
@@ -31,6 +32,11 @@ class SourceMetrics(BaseModel):
     last_run: str | None = None
     last_submission: str | None = None
     last_success: str | None = None
+    last_failure_kind: str | None = None
+    last_failure_message: str | None = None
+    last_warning_kind: str | None = None
+    last_warning_message: str | None = None
+    last_warning_count: int = 0
 
 
 class SourceDefinition(BaseModel):

@@ -83,6 +83,11 @@ class SourceRegistry:
         evidence_total: int = 0,
         entity_resolve_success_total: int = 0,
         entity_resolve_miss_total: int = 0,
+        failure_kind: str | None = None,
+        failure_message: str | None = None,
+        warning_kind: str | None = None,
+        warning_message: str | None = None,
+        warning_count: int = 0,
         is_run: bool = False,
         is_submission: bool = False,
     ) -> None:
@@ -96,8 +101,21 @@ class SourceRegistry:
             )
         if not success:
             source.metrics.failures_total += 1
+            source.metrics.last_failure_kind = failure_kind
+            source.metrics.last_failure_message = failure_message
         if success:
             source.metrics.last_success = self._now()
+            source.metrics.last_failure_kind = None
+            source.metrics.last_failure_message = None
+            if warning_count > 0:
+                source.metrics.partial_failure_total += warning_count
+                source.metrics.last_warning_kind = warning_kind
+                source.metrics.last_warning_message = warning_message
+                source.metrics.last_warning_count = warning_count
+            else:
+                source.metrics.last_warning_kind = None
+                source.metrics.last_warning_message = None
+                source.metrics.last_warning_count = 0
 
         source.metrics.snapshot_total += snapshot_total
         source.metrics.deduped_snapshot_total += deduped_snapshot_total
@@ -184,11 +202,22 @@ class SourceRegistry:
                 "source_tier": source.effective_tier,
                 "scheduled": source.scheduled,
                 "enabled": source.enabled,
+                "runnable": source.runnable,
+                "adapter_name": source.adapter_name,
+                "default_producer_ref": source.default_producer_ref,
+                "tier_override_reason": source.tier_override_reason,
+                "description": source.description,
                 "last_run": source.metrics.last_run,
                 "last_submission": source.metrics.last_submission,
                 "last_success": source.metrics.last_success,
                 "pending_submissions": source.metrics.pending_submissions,
                 "failure_count": source.metrics.failures_total,
+                "partial_failure_count": source.metrics.partial_failure_total,
+                "last_failure_kind": source.metrics.last_failure_kind,
+                "last_failure_message": source.metrics.last_failure_message,
+                "last_warning_kind": source.metrics.last_warning_kind,
+                "last_warning_message": source.metrics.last_warning_message,
+                "last_warning_count": source.metrics.last_warning_count,
                 "cadence_seconds": source.cadence_seconds or 0,
                 "validity_status": source.validity_status,
                 "validity_score": source.validity_score,

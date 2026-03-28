@@ -160,6 +160,19 @@ export function createRoutes(
                 probeStatus = result.status;
                 error = result.error;
                 recoverable = result.recoverable;
+                return {
+                  provider: name,
+                  available,
+                  status: probeStatus,
+                  auth_status: result.auth_status,
+                  execute_status: result.execute_status,
+                  ready_for_execution: result.ready_for_execution ?? result.available,
+                  failure_kind: result.failure_kind,
+                  error_summary: result.error_summary ?? result.error,
+                  last_checked_at: new Date().toISOString(),
+                  ...(typeof recoverable === 'boolean' ? { recoverable } : {}),
+                  ...(error ? { error } : {}),
+                };
               } else {
                 available = adapter ? await adapter.health() : false;
                 probeStatus = available ? 'healthy' : 'unknown';
@@ -172,8 +185,12 @@ export function createRoutes(
               provider: name,
               available,
               status: probeStatus,
+              auth_status: available ? 'healthy' : 'unknown',
+              execute_status: available ? 'healthy' : 'unknown',
+              ready_for_execution: available,
               last_checked_at: new Date().toISOString(),
               ...(typeof recoverable === 'boolean' ? { recoverable } : {}),
+              ...(error ? { error_summary: error } : {}),
               ...(error ? { error } : {}),
             };
           }),

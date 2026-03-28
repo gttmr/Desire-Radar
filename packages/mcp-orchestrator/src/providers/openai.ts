@@ -5,7 +5,11 @@ import type {
   ProviderHealthProbe,
   ProviderResult,
 } from './base.js';
-import { buildDegradedProviderResult, buildFailedHealthProbe } from './errors.js';
+import {
+  buildDegradedProviderResult,
+  buildFailedHealthProbe,
+  buildProviderHealthProbe,
+} from './errors.js';
 
 export class OpenAIProvider implements ProviderAdapter {
   readonly name = 'openai';
@@ -95,7 +99,10 @@ export class OpenAIProvider implements ProviderAdapter {
       });
       clearTimeout(timer);
       if (response.ok) {
-        return { available: true, status: 'healthy', recoverable: false };
+        return buildProviderHealthProbe({
+          auth_status: 'healthy',
+          execute_status: 'healthy',
+        });
       }
       return buildFailedHealthProbe(
         `OpenAI API health check failed with status ${response.status}`,
