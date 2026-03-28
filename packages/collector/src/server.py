@@ -3,9 +3,11 @@
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from .analysis import (
     AnalysisPolicy,
@@ -14,7 +16,7 @@ from .analysis import (
     SessionPool,
 )
 from .analysis.engine import AnalysisEngine
-from .api import public_routes, internal_routes
+from .api import dashboard_routes, public_routes, internal_routes
 from .builder.signal_candidate_builder import SignalCandidateBuilder
 from .config import (
     COLLECTOR_HOST, COLLECTOR_PORT, DATA_DIR,
@@ -312,6 +314,7 @@ async def lifespan(app: FastAPI):
     }
     public_routes.init_dependencies(deps)
     internal_routes.init_dependencies(deps)
+    dashboard_routes.init_dependencies(deps)
 
     # Start cadence runner
     await analysis_engine.start()
@@ -356,6 +359,12 @@ app = FastAPI(
 
 app.include_router(public_routes.router)
 app.include_router(internal_routes.router)
+app.include_router(dashboard_routes.router)
+app.mount(
+    "/dashboard/assets",
+    StaticFiles(directory=Path(dashboard_routes.STATIC_DIR)),
+    name="dashboard-assets",
+)
 
 
 @app.get("/health")

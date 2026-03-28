@@ -35,6 +35,7 @@ services:
       - "5002:5002"
     volumes:
       - ./data/collector:/app/data
+      - ./.env:/app/.env
       - ${HOME}/.claude:/home/collector/.claude:ro
       - ${HOME}/.codex:/home/collector/.codex:ro
       - ${HOME}/.gemini:/home/collector/.gemini

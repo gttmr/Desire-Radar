@@ -144,6 +144,13 @@ docker compose up --build
 - `collector` : `http://localhost:5002`
 - `mcp-orchestrator` : `http://localhost:5003`
 
+운영용 collector 대시보드:
+- `http://localhost:5002/dashboard`
+- source enable/disable, tier 변경, source run, source-agent run, 최근 evidence/submission/candidate 조회를 한 화면에서 볼 수 있다.
+- source별 `packages/collector/src/agents/sources/*.md` 프롬프트를 대시보드에서 수정할 수 있다.
+- allowlist 된 일부 collector `.env` 값도 편집할 수 있다.
+- `.env` 저장 후 collector 재기동 전까지는 startup-time 설정이 즉시 반영되지 않는다.
+
 자세한 재기동/강제 recreate/troubleshooting은 [RUNBOOK.md](RUNBOOK.md)를 따른다.
 
 ## Human Input 운영 방식
@@ -218,6 +225,13 @@ collector는 이를 `human_input_inbox` source로 받고 내부 라우터가 적
 - `POST /ingest/human-study-result`
 - `POST /ingest/human-data-source`
 - `POST /ingest/human-analyst-request`
+- `GET /dashboard`
+- `GET /dashboard/api/overview`
+- `GET /dashboard/api/env-settings`
+- `PATCH /dashboard/api/env-settings`
+- `GET /dashboard/api/source-prompts`
+- `GET /dashboard/api/source-prompts/{source_id}`
+- `PATCH /dashboard/api/source-prompts/{source_id}`
 
 `POST /collect/run` 기본 의미:
 - connector를 지정하지 않으면 현재 `enabled=true` 인 pull source만 queue에 넣는다.
