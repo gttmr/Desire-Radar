@@ -37,7 +37,8 @@ services:
       - ./data/collector:/app/data
       - ./.env:/app/.env
       - ${HOME}/.claude:/home/collector/.claude:ro
-      - ${HOME}/.codex:/home/collector/.codex:ro
+      # Codex uses home-local state/cache paths during session reuse and fallback reconnects.
+      - ${HOME}/.codex:/home/collector/.codex
       - ${HOME}/.gemini:/home/collector/.gemini
       - ${HOME}/.local/share/claude:/home/collector/.local/share/claude:ro
       - ${HOME}/.nvm/versions/node/v24.13.0/lib/node_modules/@openai/codex:/usr/local/lib/node_modules/@openai/codex:ro

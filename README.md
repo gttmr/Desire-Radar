@@ -18,7 +18,7 @@
 | 서비스 | 경로 | 언어 | 역할 |
 |--------|------|------|------|
 | `discord-bot` | `packages/discord-bot/` | TypeScript | Discord 명령, 스케줄 리포트, 단일 human input 채널 수집 |
-| `collector` | `packages/collector/` | Python | 다중 소스 ingestion, source registry, submission tracking, candidate 생성, collector-side CLI 분석, evidence graph snapshot |
+| `collector` | `packages/collector/` | Python | 다중 소스 ingestion, source registry, submission tracking, cluster/event 기반 candidate 생성, collector-side CLI 분석, evidence graph snapshot |
 | `mcp-orchestrator` | `packages/mcp-orchestrator/` | TypeScript | `triage -> debate -> research-loop -> verdict -> report` 투자 판단 파이프라인과 provider session orchestration |
 | `shared-types` | `packages/shared-types/` | TypeScript | 서비스 간 공용 타입 |
 
@@ -53,6 +53,7 @@ Discord human input / slash commands
 - source registry가 각 source의 `kind`, `ingestion_mode`, `configured_tier`, `effective_tier`, validity 상태를 관리한다.
 - source별 `agent.md`를 통해 source submission 단위 요약과 파생 evidence를 만들 수 있다.
 - candidate 분석은 기본적으로 `batch` 모드로 돌아가며, 상위 후보를 묶어 CLI 기반 LLM 호출을 수행한다.
+- collector candidate는 raw title token 목록이 아니라 canonical entity cluster를 기본 단위로 하고, 가능하면 `event_summary`, `theme_tags`, `graph_summary`, `supporting_terms`를 함께 노출한다.
 - `POST /ingest/human-input`는 free-form 입력을 받아 collector 내부에서 해석 결과 객체를 만든다.
   - `collector_route`
   - `input_kind`
@@ -118,6 +119,7 @@ cp .env.example .env
 - Docker에서 특정 provider가 TLS/CA 같은 이유로 계속 깨지면 `ENABLED_PROVIDERS`에서 빼고 재기동하는 쪽이 맞다.
 - `mcp-orchestrator` Docker 이미지는 Codex/Gemini TLS probe를 위해 system CA bundle을 포함해야 한다. 현재 이미지는 `ca-certificates`와 `SSL_CERT_FILE`/`NODE_EXTRA_CA_CERTS`를 같이 설정한다.
 - `mcp-orchestrator`에서 Codex를 실제로 쓸 때는 `${HOME}/.codex` mount를 writable로 두는 편이 낫다. WebSocket 고부하 시 HTTPS fallback과 모델 cache 갱신이 read-only mount에서 실패할 수 있다.
+- `collector`도 source-agent와 candidate analysis에서 같은 Codex CLI 세션을 쓰므로 `${HOME}/.codex` mount를 writable로 두는 편이 낫다.
 - Gemini도 `${HOME}/.gemini` 아래에 state/history/tmp를 쓰므로, Docker에서 실제 실행/health probe를 돌릴 때는 writable mount가 안전하다.
 - provider session artifact는 `data/provider-sessions`, collector CLI session artifact는 `data/llm-session-workdirs` 아래에 쌓인다.
 - collector source-agent artifact는 `data/source_agent_artifacts.json`과 source-agent session workdir 아래에 남는다.
@@ -155,6 +157,7 @@ docker compose up --build
 운영용 collector 대시보드:
 - `http://localhost:5002/dashboard`
 - source enable/disable, tier 변경, source run, source-agent run, 최근 evidence/submission/candidate 조회를 한 화면에서 볼 수 있다.
+- source row에는 현재 stage 메시지, 마지막 warning/failure, source-agent error가 함께 보여서 “fetch가 느린지 / 부분 실패인지 / agent 후처리가 깨졌는지”를 구분할 수 있다.
 - source별 `packages/collector/src/agents/sources/*.md` 프롬프트를 대시보드에서 수정할 수 있다.
 - allowlist 된 일부 collector `.env` 값도 편집할 수 있다.
 - `.env` 저장 후 collector 재기동 전까지는 startup-time 설정이 즉시 반영되지 않는다.

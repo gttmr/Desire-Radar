@@ -39,6 +39,7 @@ export type CollectorSourceCatalogEntry = {
   agent_output_mode?: 'artifact_only' | 'artifact_and_derived';
   last_agent_run?: string | null;
   last_agent_status?: string | null;
+  last_agent_error?: string | null;
   description?: string | null;
 };
 

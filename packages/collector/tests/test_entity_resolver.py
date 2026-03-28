@@ -85,3 +85,17 @@ class TestReviewQueue:
         entity_store.reject_review("badthing")
         queue = entity_store.get_review_queue()
         assert len(queue) == 0
+
+    def test_resolve_candidates_batches_meaningful_review_terms(self, resolver, entity_store):
+        resolved = resolver.resolve_candidates(
+            ["says", "report", "AV1", "Brand New Thing"],
+            source="reddit_mentions",
+        )
+
+        assert resolved == []
+        queue = entity_store.get_review_queue()
+        queued = {item["raw_text"] for item in queue}
+        assert "AV1" in queued
+        assert "Brand New Thing" in queued
+        assert "says" not in queued
+        assert "report" not in queued

@@ -29,6 +29,7 @@ Collector owns:
 - source provenance, source tier, and source validity state
 - submission tracking and human follow-up queues
 - normalized evidence and candidate construction
+- candidate construction uses canonical entity clusters with optional event/theme/graph facets instead of exposing raw lexical token lists as the primary operator view
 - source-specific collector-owned source-agents and external push agents under the same source registry
 - event and relationship preservation inside evidence bundles
 - low-cost, batch-first CLI analysis for candidate enrichment and human-input routing

@@ -25,14 +25,85 @@ _STOP_WORDS = {
     "who", "whom", "this", "that", "these", "those", "am",
 }
 
+_GENERIC_TITLE_WORDS = {
+    "agent", "agents", "airport", "accounts", "announces", "app", "apps",
+    "building", "business", "charged", "coding", "confirms", "continued",
+    "crash", "crashes", "dies", "digital", "director", "energy", "era",
+    "explained", "feature", "feels", "fishy", "free", "getting", "great",
+    "hacked", "heel", "holder", "home", "human", "independence",
+    "invincibility", "keep", "laws", "market", "mini", "music", "old",
+    "outrage", "personal", "phone", "plan", "practical", "prediction",
+    "product", "promoting", "prompts", "rate", "released", "report",
+    "reports", "require", "review", "rise", "rises", "royalty", "run",
+    "says", "school", "scientific", "seat", "season", "service",
+    "shocking", "signals", "solar", "speed", "start", "story", "study",
+    "subscription", "suddenly", "tell", "testing", "theme", "ticket",
+    "tracking", "verify", "video", "violates", "watchlist", "week", "year",
+}
+
+_TITLE_TOKEN_RE = re.compile(r"[A-Za-z0-9가-힣]+(?:'[A-Za-z]+)?")
+
 
 def _extract_title_keywords(title: str) -> list[str]:
-    """Extract potential entity candidates from a title string."""
-    words = re.findall(r"[A-Za-z0-9]+(?:'[A-Za-z]+)?", title)
-    candidates = []
-    for word in words:
-        if word.lower() not in _STOP_WORDS and len(word) > 2:
-            candidates.append(word)
+    """Extract entity-shaped candidates from a noisy title string."""
+    words = _TITLE_TOKEN_RE.findall(title)
+    candidates: list[str] = []
+
+    def add_candidate(value: str) -> None:
+        cleaned = value.strip()
+        if cleaned.lower().endswith("'s"):
+            cleaned = cleaned[:-2]
+        if cleaned and cleaned not in candidates:
+            candidates.append(cleaned)
+
+    def is_hangul_token(word: str) -> bool:
+        return bool(re.search(r"[가-힣]", word))
+
+    def is_strong_entity_token(word: str) -> bool:
+        return (
+            (is_hangul_token(word) and len(word) >= 2)
+            or (any(char.isdigit() for char in word) and any(char.isalpha() for char in word))
+            or (word.isupper() and len(word) >= 2)
+            or any(char.isupper() for char in word[1:])
+        )
+
+    def is_simple_titlecase_token(word: str) -> bool:
+        return len(word) > 2 and word[:1].isupper() and word[1:].islower()
+
+    def is_entityish(word: str) -> bool:
+        lowered = word.lower()
+        return (
+            lowered not in _STOP_WORDS
+            and lowered not in _GENERIC_TITLE_WORDS
+            and (is_strong_entity_token(word) or is_simple_titlecase_token(word))
+        )
+
+    index = 0
+    while index < len(words):
+        token = words[index]
+        if not is_entityish(token):
+            index += 1
+            continue
+
+        phrase = [token]
+        lookahead = index + 1
+        while lookahead < len(words):
+            next_token = words[lookahead]
+            if not is_entityish(next_token):
+                break
+            phrase.append(next_token)
+            lookahead += 1
+
+        if len(phrase) >= 2:
+            add_candidate(" ".join(phrase[:4]))
+            for part in phrase:
+                if is_strong_entity_token(part):
+                    add_candidate(part)
+        else:
+            add_candidate(token)
+
+        index = lookahead
+
     return candidates
 
 

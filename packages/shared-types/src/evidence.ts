@@ -115,6 +115,15 @@ export type EvidenceBundle = {
 /** Signal candidate produced by the collector */
 export type SignalCandidate = {
   entity: string;
+  cluster_id?: string | null;
+  candidate_kind?: 'entity_cluster';
+  display_label?: string | null;
+  primary_entity?: string | null;
+  aliases?: string[];
+  supporting_terms?: string[];
+  theme_tags?: string[];
+  event_summary?: string | null;
+  graph_summary?: string | null;
   status: CandidateStatus;
   emergence_score: number;
   velocity_score: number;
@@ -208,12 +217,14 @@ export type SourceStatus = {
   agent_output_mode?: 'artifact_only' | 'artifact_and_derived';
   last_agent_run?: string | null;
   last_agent_status?: string | null;
+  last_agent_error?: string | null;
   adapter_name?: string;
   default_producer_ref?: string | null;
   tier_override_reason?: string | null;
   description?: string | null;
   source_agent_status?: string | null;
   source_agent_artifact_id?: string | null;
+  source_agent_error?: string | null;
   derived_evidence_total?: number;
 
   // Legacy / forward-compatible fields.

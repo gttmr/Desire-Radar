@@ -1,19 +1,44 @@
-"""Signal candidate builder: groups evidence by entity and computes scores."""
+"""Signal candidate builder: groups evidence into entity-centric clusters."""
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import re
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..analysis.store import AnalysisStore
 from ..normalizer.evidence_schema import Evidence
+from ..resolver.alias_dict import ALIAS_DICT
 from ..sources.registry import SourceRegistry
 from ..store.entity_store import EntityStore
+
+_GENERIC_CANDIDATE_TERMS = {
+    "says", "said", "report", "reports", "reported", "free", "crash", "crashes",
+    "bots", "bot", "music", "royalty", "dies", "keep", "phone", "airport",
+    "year", "years", "shocking", "speed", "scientific", "practical", "building",
+    "energy", "independence", "feels", "mini", "home", "solar", "farms",
+    "today", "week", "month", "people", "thing", "things", "post", "posts",
+    "video", "videos", "thread", "threads", "update", "updates", "launch",
+    "launches", "feature", "features", "use", "uses", "using", "new", "great",
+    "good", "bad", "best", "worst", "story", "stories", "news", "leak",
+    "leaks", "rumor", "rumors", "issue", "issues", "problem", "problems",
+}
+_ACRONYM_OR_DIGIT_PATTERN = re.compile(r"^(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z]+[0-9]+[A-Za-z0-9]*)$")
+_NON_WORD_PATTERN = re.compile(r"[^a-z0-9]+")
 
 
 class SignalCandidate(BaseModel):
     entity: str
+    cluster_id: str | None = None
+    candidate_kind: Literal["entity_cluster"] = "entity_cluster"
+    display_label: str | None = None
+    primary_entity: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    supporting_terms: list[str] = Field(default_factory=list)
+    theme_tags: list[str] = Field(default_factory=list)
+    event_summary: str | None = None
+    graph_summary: str | None = None
     status: Literal["emerging", "preheat", "spreading"]
     emergence_score: float
     velocity_score: float
@@ -25,10 +50,10 @@ class SignalCandidate(BaseModel):
     source_quality_score: float | None = None
 
     # LLM-enriched aggregated fields
-    desire_types: list[str] = []  # Aggregated desire types from evidence
-    behavioral_signals: list[str] = []  # Aggregated behavioral descriptions
+    desire_types: list[str] = Field(default_factory=list)  # Aggregated desire types from evidence
+    behavioral_signals: list[str] = Field(default_factory=list)  # Aggregated behavioral descriptions
     avg_intensity: float | None = None  # Average desire intensity
-    demographic_hints: list[str] = []  # Aggregated demographics
+    demographic_hints: list[str] = Field(default_factory=list)  # Aggregated demographics
     desire_summary: str | None = None  # Best LLM summary for this entity
     analysis_status: str | None = None
     analysis_summary: str | None = None
@@ -62,13 +87,16 @@ class SignalCandidateBuilder:
     def build_candidates(
         self, evidence_list: list[Evidence]
     ) -> list[SignalCandidate]:
-        """Group evidence by entity and compute signal candidates."""
-        # Group evidence by each entity candidate, filtering T3
+        """Group evidence by canonical cluster and compute signal candidates."""
         entity_evidence: dict[str, list[Evidence]] = defaultdict(list)
+        entity_aliases: dict[str, set[str]] = defaultdict(set)
+        entity_supporting_terms: dict[str, set[str]] = defaultdict(set)
         for ev in evidence_list:
-            for entity in ev.entity_candidates:
+            for entity, aliases, supporting_terms in self._cluster_entries_for_evidence(ev):
                 if self._is_t3_allowed(ev, entity):
                     entity_evidence[entity].append(ev)
+                    entity_aliases[entity].update(aliases)
+                    entity_supporting_terms[entity].update(supporting_terms)
 
         candidates: list[SignalCandidate] = []
         now = datetime.now(timezone.utc)
@@ -154,6 +182,9 @@ class SignalCandidateBuilder:
                 if self.analysis_store is not None
                 else None
             )
+            theme_tags = self._aggregate_theme_tags(evidences)
+            event_summary = self._pick_event_summary(evidences)
+            graph_summary = self._build_graph_summary(evidences, source_count)
 
             if projection is not None:
                 desire_types = projection.desire_types or desire_types
@@ -165,6 +196,14 @@ class SignalCandidateBuilder:
             candidates.append(
                 SignalCandidate(
                     entity=entity,
+                    cluster_id=self._cluster_id(entity),
+                    display_label=entity,
+                    primary_entity=entity,
+                    aliases=sorted(entity_aliases.get(entity, set())),
+                    supporting_terms=sorted(entity_supporting_terms.get(entity, set())),
+                    theme_tags=theme_tags,
+                    event_summary=event_summary,
+                    graph_summary=graph_summary,
                     status=status,
                     emergence_score=round(emergence_score, 2),
                     velocity_score=round(velocity_score, 2),
@@ -191,6 +230,138 @@ class SignalCandidateBuilder:
         # Sort by emergence score descending
         candidates.sort(key=lambda c: c.emergence_score, reverse=True)
         return candidates
+
+    def _cluster_entries_for_evidence(
+        self,
+        evidence: Evidence,
+    ) -> list[tuple[str, list[str], list[str]]]:
+        raw_terms = self._raw_terms_for_evidence(evidence)
+        resolved_entities: list[str] = []
+        aliases_by_entity: dict[str, set[str]] = defaultdict(set)
+        unresolved_terms: list[str] = []
+
+        for raw_term in raw_terms:
+            canonical = self._resolve_entity_candidate(raw_term)
+            if canonical:
+                if canonical not in resolved_entities:
+                    resolved_entities.append(canonical)
+                if raw_term.lower() != canonical.lower():
+                    aliases_by_entity[canonical].add(raw_term)
+                continue
+            if self._is_meaningful_fallback_term(raw_term):
+                unresolved_terms.append(raw_term)
+
+        if resolved_entities:
+            entries: list[tuple[str, list[str], list[str]]] = []
+            unresolved_unique = self._dedupe_terms(unresolved_terms)
+            for entity in resolved_entities:
+                supporting = set(unresolved_unique)
+                supporting.update(
+                    other for other in resolved_entities
+                    if other.lower() != entity.lower()
+                )
+                entries.append(
+                    (
+                        entity,
+                        sorted(aliases_by_entity.get(entity, set())),
+                        sorted(
+                            term for term in supporting
+                            if term and term.lower() != entity.lower()
+                        ),
+                    )
+                )
+            return entries
+
+        fallback_terms = self._dedupe_terms(unresolved_terms)
+        if not fallback_terms:
+            return []
+        primary = fallback_terms[0]
+        return [(primary, [], fallback_terms[1:])]
+
+    def _raw_terms_for_evidence(self, evidence: Evidence) -> list[str]:
+        ordered: list[str] = []
+        if evidence.event_frame is not None:
+            ordered.extend(evidence.event_frame.subjects)
+            ordered.extend(evidence.event_frame.objects)
+        ordered.extend(evidence.entity_candidates)
+        return self._dedupe_terms(ordered)
+
+    def _resolve_entity_candidate(self, raw_text: str) -> str | None:
+        normalized = raw_text.strip()
+        if not normalized:
+            return None
+        alias = ALIAS_DICT.get(normalized.lower())
+        if alias:
+            return alias
+        if self.entity_store is not None:
+            return self.entity_store.resolve(normalized)
+        return None
+
+    def _is_meaningful_fallback_term(self, raw_text: str) -> bool:
+        normalized = raw_text.strip()
+        if not normalized:
+            return False
+        lowered = normalized.lower()
+        if lowered in _GENERIC_CANDIDATE_TERMS or len(lowered) < 3:
+            return False
+        if " " in normalized:
+            return True
+        if any("\uac00" <= char <= "\ud7a3" for char in normalized):
+            return True
+        return bool(_ACRONYM_OR_DIGIT_PATTERN.match(normalized))
+
+    def _dedupe_terms(self, values: list[str]) -> list[str]:
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            normalized = value.strip()
+            if not normalized:
+                continue
+            key = normalized.lower()
+            if key in seen:
+                continue
+            ordered.append(normalized)
+            seen.add(key)
+        return ordered
+
+    def _aggregate_theme_tags(self, evidences: list[Evidence]) -> list[str]:
+        tags: list[str] = []
+        for evidence in evidences:
+            if evidence.event_frame is not None and evidence.event_frame.event_type:
+                tags.append(evidence.event_frame.event_type)
+            for hint in evidence.relationship_hints:
+                if hint.kind:
+                    tags.append(hint.kind)
+        return self._dedupe_terms(tags)[:6]
+
+    def _pick_event_summary(self, evidences: list[Evidence]) -> str | None:
+        summaries = [
+            evidence.event_frame.summary.strip()
+            for evidence in evidences
+            if evidence.event_frame is not None and evidence.event_frame.summary
+        ]
+        if not summaries:
+            return None
+        summaries = self._dedupe_terms(summaries)
+        summaries.sort(key=len, reverse=True)
+        return summaries[0]
+
+    def _build_graph_summary(self, evidences: list[Evidence], source_count: int) -> str | None:
+        event_frame_count = sum(1 for evidence in evidences if evidence.event_frame is not None)
+        relationship_count = sum(len(evidence.relationship_hints) for evidence in evidences)
+        if event_frame_count <= 0 and relationship_count <= 0:
+            return None
+        parts: list[str] = []
+        if event_frame_count > 0:
+            parts.append(f"{event_frame_count} event frames")
+        if relationship_count > 0:
+            parts.append(f"{relationship_count} relationship hints")
+        parts.append(f"{source_count} sources")
+        return ", ".join(parts)
+
+    def _cluster_id(self, entity: str) -> str:
+        slug = _NON_WORD_PATTERN.sub("-", entity.strip().lower()).strip("-")
+        return f"entity:{slug or 'cluster'}"
 
     def _source_weight(self, source: str, evidences: list[Evidence]) -> float:
         source_evidences = [ev for ev in evidences if ev.source == source]

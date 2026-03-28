@@ -49,10 +49,40 @@ class TestRedditNormalizer:
         results = normalize("reddit_mentions", raw, "snap_003")
         assert len(results) == 1
         ev = results[0]
-        # "The", "new", "is" should be filtered; "Apple", "product", "great" kept
+        # Generic title words should be filtered even when the title is loosely capitalized.
         assert "The" not in ev.entity_candidates
         assert "is" not in ev.entity_candidates
         assert "Apple" in ev.entity_candidates
+        assert "product" not in ev.entity_candidates
+        assert "great" not in ev.entity_candidates
+
+    def test_normalize_reddit_prefers_entity_shaped_terms(self):
+        raw = {
+            "title": "How to Keep ICE Agents Out of Your Phone at the Airport",
+            "subreddit": "technology",
+            "score": 320,
+            "upvote_ratio": 0.87,
+            "permalink": "/r/technology/test_ice/",
+        }
+        results = normalize("reddit_mentions", raw, "snap_004")
+        assert len(results) == 1
+        ev = results[0]
+        assert ev.entity_candidates == ["ICE"]
+
+    def test_normalize_reddit_keeps_entity_phrases(self):
+        raw = {
+            "title": "DOJ confirms FBI Director Kash Patel's personal email was hacked",
+            "subreddit": "technology",
+            "score": 420,
+            "upvote_ratio": 0.91,
+            "permalink": "/r/technology/test_doj/",
+        }
+        results = normalize("reddit_mentions", raw, "snap_005")
+        assert len(results) == 1
+        ev = results[0]
+        assert "DOJ" in ev.entity_candidates
+        assert "FBI" in ev.entity_candidates
+        assert "Kash Patel" in ev.entity_candidates
 
 
 class TestManualObservationNormalizer:

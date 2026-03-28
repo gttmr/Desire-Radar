@@ -214,6 +214,7 @@ class SourceRegistry:
                 "agent_output_mode": source.agent_output_mode,
                 "last_agent_run": source.metrics.last_agent_run,
                 "last_agent_status": source.metrics.last_agent_status,
+                "last_agent_error": source.metrics.last_agent_error,
             }
             for source in self._sources.values()
         ]
@@ -259,6 +260,7 @@ class SourceRegistry:
                 "agent_output_mode": source.agent_output_mode,
                 "last_agent_run": source.metrics.last_agent_run,
                 "last_agent_status": source.metrics.last_agent_status,
+                "last_agent_error": source.metrics.last_agent_error,
             }
             for source in self._sources.values()
         }

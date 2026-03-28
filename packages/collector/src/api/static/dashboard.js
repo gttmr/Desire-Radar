@@ -181,11 +181,18 @@ function renderSources() {
       const id = source.source_id || "";
       const tier = source.configured_tier ?? "";
       const promptHint = source.agent_prompt_path ? source.agent_prompt_path.split("/").slice(-2).join("/") : "no prompt";
+      const sourceDetail =
+        source.current_stage_message ||
+        source.source_agent_error ||
+        source.last_agent_error ||
+        source.last_warning_message ||
+        source.last_failure_message ||
+        `${source.kind || "source"} · ${promptHint}`;
       return `
         <tr>
           <td data-label="Source">
             <div class="source-name">${escapeHtml(id)}</div>
-            <div class="source-sub">${escapeHtml(source.kind || "source")} · ${escapeHtml(promptHint)}</div>
+            <div class="source-sub">${escapeHtml(sourceDetail)}</div>
           </td>
           <td data-label="Status">
             <div class="inline">
@@ -239,7 +246,16 @@ function renderSources() {
 }
 
 function candidateText(candidate) {
-  return candidate.entity || candidate.name || candidate.label || candidate.topic || candidate.id || "Candidate";
+  return (
+    candidate.display_label ||
+    candidate.primary_entity ||
+    candidate.entity ||
+    candidate.name ||
+    candidate.label ||
+    candidate.topic ||
+    candidate.id ||
+    "Candidate"
+  );
 }
 
 function renderCandidates() {
@@ -250,15 +266,22 @@ function renderCandidates() {
         const entity = candidateText(candidate);
         const score = candidate.emergence_score ?? candidate.velocity_score ?? candidate.score ?? "";
         const summary =
+          candidate.event_summary ||
           candidate.analysis_summary ||
           candidate.desire_summary ||
           candidate.analysis_reason ||
           "Emerging signal";
+        const facetSummary = [
+          candidate.graph_summary,
+          candidate.theme_tags?.length ? `themes: ${candidate.theme_tags.join(", ")}` : "",
+          candidate.supporting_terms?.length ? `terms: ${candidate.supporting_terms.slice(0, 4).join(", ")}` : "",
+        ].filter(Boolean).join(" · ");
         return `
           <article class="card">
             <div class="stacked">
               <h3>${escapeHtml(entity)}</h3>
               <p class="muted">${escapeHtml(summary)}</p>
+              ${facetSummary ? `<p class="muted">${escapeHtml(facetSummary)}</p>` : ""}
               <div class="row">
                 <span class="pill">${escapeHtml(score === "" ? "n/a" : score)}</span>
                 <span class="muted">${escapeHtml(candidate.source_count ? `${candidate.source_count} sources` : candidate.status || "")}</span>
@@ -328,7 +351,7 @@ function renderSubmissions() {
 }
 
 function topEntityChoices() {
-  return (state.overview?.top_entities || []).map((item) => item.entity).filter(Boolean);
+  return (state.overview?.top_entities || []).map((item) => item.display_label || item.entity).filter(Boolean);
 }
 
 function renderEntityPanel() {
@@ -476,7 +499,7 @@ async function loadOverview() {
   try {
     state.overview = await fetchJson(overviewEndpoint);
     if (!state.selectedEntity) {
-      state.selectedEntity = topEntityChoices()[0] || state.overview.candidates?.[0]?.entity || "";
+      state.selectedEntity = topEntityChoices()[0] || candidateText(state.overview.candidates?.[0] || {}) || "";
     }
     renderSummary();
     renderSources();

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from src.builder.signal_candidate_builder import SignalCandidateBuilder
 from src.connectors.base import BaseConnector
-from src.normalizer.evidence_schema import Evidence
+from src.normalizer.evidence_schema import Evidence, EvidenceEventFrame, EvidenceRelationshipHint
 from src.sources.defaults import build_default_sources
 from src.sources.registry import SourceRegistry
 
@@ -122,6 +122,69 @@ class TestSignalCandidateBuilder:
         candidates = builder.build_candidates(evidence)
         assert len(candidates) == 1
         assert candidates[0].velocity_score > 0
+
+    def test_aliases_group_into_one_canonical_candidate(self):
+        builder = SignalCandidateBuilder()
+        evidence = [
+            _make_evidence(["ChatGPT"], source="reddit_mentions", evidence_id="ev1"),
+            _make_evidence(["GPT"], source="google_trends", evidence_id="ev2"),
+        ]
+
+        candidates = builder.build_candidates(evidence)
+
+        assert len(candidates) == 1
+        assert candidates[0].entity == "ChatGPT"
+        assert "GPT" in candidates[0].aliases
+
+    def test_generic_reddit_tokens_do_not_form_standalone_candidates(self):
+        builder = SignalCandidateBuilder()
+        evidence = [
+            _make_evidence(
+                ["says", "report", "free", "Microsoft", "AV1"],
+                evidence_id="ev1",
+                title_or_label="Microsoft AV1 crash report says royalty free codec issue",
+            )
+        ]
+
+        candidates = builder.build_candidates(evidence)
+
+        assert [candidate.entity for candidate in candidates] == ["Microsoft"]
+        assert "AV1" in candidates[0].supporting_terms
+
+    def test_candidate_includes_event_and_graph_facets(self):
+        builder = SignalCandidateBuilder()
+        evidence = [
+            _make_evidence(
+                ["Microsoft"],
+                evidence_id="ev1",
+                event_frame=EvidenceEventFrame(
+                    event_type="codec_rollout",
+                    summary="AV1 playback changes are triggering crash chatter",
+                    subjects=["Microsoft"],
+                    objects=["AV1"],
+                ),
+                relationship_hints=[
+                    EvidenceRelationshipHint(
+                        **{
+                            "from": "Microsoft",
+                            "to": "AV1",
+                            "kind": "codec_dependency",
+                            "confidence": 0.72,
+                        }
+                    )
+                ],
+            )
+        ]
+
+        candidates = builder.build_candidates(evidence)
+
+        assert len(candidates) == 1
+        candidate = candidates[0]
+        assert candidate.event_summary == "AV1 playback changes are triggering crash chatter"
+        assert "codec_rollout" in candidate.theme_tags
+        assert "codec_dependency" in candidate.theme_tags
+        assert candidate.graph_summary is not None
+        assert candidate.cluster_id == "entity:microsoft"
 
     def test_source_validity_lowers_emergence_score(self, tmp_path):
         registry = SourceRegistry(

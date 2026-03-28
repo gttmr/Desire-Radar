@@ -106,7 +106,7 @@ def _normalizer(source: str, raw_payload: dict, snapshot_ref: str) -> list[Evide
     ]
 
 
-def _build_client(tmp_path) -> tuple[TestClient, SourceRegistry]:
+def _build_client(tmp_path) -> tuple[TestClient, SourceRegistry, IngestionEngine]:
     connectors = {
         EnabledConnector.name: EnabledConnector(),
         DisabledConnector.name: DisabledConnector(),
@@ -145,11 +145,11 @@ def _build_client(tmp_path) -> tuple[TestClient, SourceRegistry]:
     app = FastAPI()
     app.include_router(public_routes.router)
     app.include_router(internal_routes.router)
-    return TestClient(app), registry
+    return TestClient(app), registry, engine
 
 
 def test_collect_run_skips_disabled_pull_sources_by_default(tmp_path):
-    client, registry = _build_client(tmp_path)
+    client, registry, _ = _build_client(tmp_path)
     registry.set_enabled("disabled_pull", False)
 
     response = client.post("/collect/run", json={"async_mode": True})
@@ -163,7 +163,7 @@ def test_collect_run_skips_disabled_pull_sources_by_default(tmp_path):
 
 
 def test_collect_run_returns_structured_conflict_for_disabled_connector(tmp_path):
-    client, registry = _build_client(tmp_path)
+    client, registry, _ = _build_client(tmp_path)
     registry.set_enabled("disabled_pull", False)
 
     response = client.post("/collect/run", json={"connector": "disabled_pull", "async_mode": True})
@@ -177,7 +177,7 @@ def test_collect_run_returns_structured_conflict_for_disabled_connector(tmp_path
 
 
 def test_collect_run_returns_no_enabled_pull_sources_when_all_pull_sources_are_disabled(tmp_path):
-    client, registry = _build_client(tmp_path)
+    client, registry, _ = _build_client(tmp_path)
     registry.set_enabled("enabled_pull", False)
     registry.set_enabled("disabled_pull", False)
 
@@ -191,7 +191,7 @@ def test_collect_run_returns_no_enabled_pull_sources_when_all_pull_sources_are_d
 
 
 def test_internal_run_source_returns_structured_conflict_for_disabled_source(tmp_path):
-    client, registry = _build_client(tmp_path)
+    client, registry, _ = _build_client(tmp_path)
     registry.set_enabled("disabled_pull", False)
 
     response = client.post("/internal/sources/run/disabled_pull", json={})
@@ -204,7 +204,7 @@ def test_internal_run_source_returns_structured_conflict_for_disabled_source(tmp
 
 
 def test_internal_source_agent_routes_return_runner_payloads(tmp_path):
-    client, _ = _build_client(tmp_path)
+    client, _, _ = _build_client(tmp_path)
 
     status_response = client.get("/internal/source-agents/enabled_pull/status")
     preview_response = client.get("/internal/source-agents/enabled_pull/preview")
@@ -216,3 +216,21 @@ def test_internal_source_agent_routes_return_runner_payloads(tmp_path):
     assert preview_response.json()["prompt"] == "preview"
     assert run_response.status_code == 200
     assert run_response.json()["artifact"]["artifact_id"] == "artifact-enabled_pull"
+
+
+def test_sources_status_surfaces_source_agent_errors(tmp_path):
+    client, registry, engine = _build_client(tmp_path)
+    registry.record_source_agent_outcome(
+        "enabled_pull",
+        status="failed",
+        artifact_id="artifact-enabled_pull",
+        error_message="collector codex session failed",
+    )
+    engine._runtime_for_source("enabled_pull")["source_agent_error"] = "collector codex session failed"
+
+    response = client.get("/sources/status")
+
+    assert response.status_code == 200
+    source = response.json()["sources"]["enabled_pull"]
+    assert source["last_agent_error"] == "collector codex session failed"
+    assert source["source_agent_error"] == "collector codex session failed"

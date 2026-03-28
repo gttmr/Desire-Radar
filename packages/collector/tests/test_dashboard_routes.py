@@ -180,7 +180,11 @@ def test_dashboard_overview_returns_runtime_data(tmp_path, monkeypatch):
     assert payload["candidates"][0]["entity"] == "Cursor"
     assert payload["recent_evidence"][0]["title_or_label"] == "Cursor demand rising"
     assert payload["submissions"][0]["submission_id"] == "sub-1"
-    assert payload["top_entities"][0] == {"entity": "Cursor", "count": 1}
+    assert payload["top_entities"][0] == {
+        "entity": "Cursor",
+        "display_label": "Cursor",
+        "count": 1,
+    }
     assert payload["source_agents"]["enabled_source_count"] >= 1
 
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -99,11 +98,6 @@ async def dashboard_overview() -> dict[str, Any]:
         if source_id in sources:
             sources[source_id].update(runtime_state)
 
-    entity_counter: Counter[str] = Counter()
-    for item in evidence:
-        for entity in item.entity_candidates:
-            entity_counter[entity] += 1
-
     recent_evidence = sorted(
         evidence,
         key=lambda item: _parse_timestamp(item.collected_at),
@@ -141,8 +135,12 @@ async def dashboard_overview() -> dict[str, Any]:
         "recent_evidence": [item.model_dump() for item in recent_evidence],
         "submissions": [_submission_summary(record) for record in recent_submissions],
         "top_entities": [
-            {"entity": entity, "count": count}
-            for entity, count in entity_counter.most_common(8)
+            {
+                "entity": candidate.entity,
+                "display_label": candidate.display_label or candidate.entity,
+                "count": len(candidate.evidence_ids),
+            }
+            for candidate in candidates[:8]
         ],
     }
 

@@ -444,6 +444,7 @@ class IngestionEngine:
                 "evidence_total": runtime["evidence_total"],
                 "source_agent_status": runtime["source_agent_status"],
                 "source_agent_artifact_id": runtime["source_agent_artifact_id"],
+                "source_agent_error": runtime["source_agent_error"],
                 "derived_evidence_total": runtime["derived_evidence_total"],
                 "resolve_success_total": runtime["resolve_success_total"],
                 "resolve_miss_total": runtime["resolve_miss_total"],
@@ -635,6 +636,7 @@ class IngestionEngine:
             "evidence_total": 0,
             "source_agent_status": None,
             "source_agent_artifact_id": None,
+            "source_agent_error": None,
             "derived_evidence_total": 0,
             "resolve_success_total": 0,
             "resolve_miss_total": 0,
@@ -686,6 +688,7 @@ class IngestionEngine:
         runtime["evidence_total"] = 0
         runtime["source_agent_status"] = None
         runtime["source_agent_artifact_id"] = None
+        runtime["source_agent_error"] = None
         runtime["derived_evidence_total"] = 0
         runtime["resolve_success_total"] = 0
         runtime["resolve_miss_total"] = 0
@@ -845,6 +848,8 @@ class IngestionEngine:
             runtime["source_agent_status"] = counts["source_agent_status"]
         if counts.get("source_agent_artifact_id") is not None:
             runtime["source_agent_artifact_id"] = counts["source_agent_artifact_id"]
+        if "source_agent_error" in counts:
+            runtime["source_agent_error"] = counts.get("source_agent_error")
         if counts.get("last_warning_kind") is not None:
             runtime["last_warning_kind"] = counts["last_warning_kind"]
         if counts.get("last_warning_message") is not None:
@@ -1627,6 +1632,7 @@ class IngestionEngine:
                 derived_evidence_total=len(result.derived_evidence),
                 source_agent_status=artifact.status,
                 source_agent_artifact_id=artifact.artifact_id,
+                source_agent_error=artifact.error_message,
             )
         else:
             self._update_submission_progress(
@@ -1636,6 +1642,7 @@ class IngestionEngine:
                 derived_evidence_total=len(result.derived_evidence),
                 source_agent_status=artifact.status,
                 source_agent_artifact_id=artifact.artifact_id,
+                source_agent_error=artifact.error_message,
             )
         return metadata, [item for item in result.derived_evidence if isinstance(item, Evidence)]
 

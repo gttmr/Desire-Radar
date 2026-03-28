@@ -61,23 +61,39 @@ class EntityStore:
 
     def add_to_review_queue(self, raw_text: str, source: str) -> None:
         """Add an unresolved entity mention to the review queue."""
-        # Avoid duplicates
-        for item in self._data["review_queue"]:
-            if item["raw_text"].lower() == raw_text.lower():
+        self.add_many_to_review_queue([raw_text], source)
+
+    def add_many_to_review_queue(self, raw_texts: list[str], source: str) -> None:
+        """Add unresolved entity mentions to the review queue and save once."""
+        changed = False
+        existing = {
+            item["raw_text"].lower(): item
+            for item in self._data["review_queue"]
+        }
+
+        for raw_text in raw_texts:
+            normalized = raw_text.strip()
+            if not normalized:
+                continue
+            key = normalized.lower()
+            item = existing.get(key)
+            if item is not None:
                 item["count"] = item.get("count", 1) + 1
                 item["sources"] = list(set(item.get("sources", []) + [source]))
-                self._save()
-                return
-
-        self._data["review_queue"].append(
-            {
-                "raw_text": raw_text,
+                changed = True
+                continue
+            item = {
+                "raw_text": normalized,
                 "sources": [source],
                 "count": 1,
                 "added_at": datetime.now(timezone.utc).isoformat(),
             }
-        )
-        self._save()
+            self._data["review_queue"].append(item)
+            existing[key] = item
+            changed = True
+
+        if changed:
+            self._save()
 
     def get_review_queue(self) -> list[dict]:
         """Return the current review queue."""
