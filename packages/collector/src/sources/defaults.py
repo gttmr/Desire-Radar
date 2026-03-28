@@ -3,8 +3,17 @@
 from __future__ import annotations
 
 from ..connectors.base import BaseConnector
+from ..source_agents.prompts import get_source_agent_prompt_path
 from .manifests import load_checked_in_source_manifests
 from .models import SourceDefinition, SourceManifest
+
+
+def _default_agent_enabled(kind: str) -> bool:
+    return kind in {"pull", "agent"}
+
+
+def _default_agent_session_domain(source_id: str) -> str:
+    return f"source-agent:{source_id}"
 
 
 def _definition_from_manifest(
@@ -48,6 +57,14 @@ def _definition_from_manifest(
         request_kinds_supported=list(manifest.request_kinds_supported),
         normalizer_key=manifest.normalizer_key,
         manifest_path=manifest.manifest_path,
+        agent_enabled=(
+            manifest.agent_enabled
+            if manifest.agent_enabled is not None
+            else _default_agent_enabled(manifest.kind)
+        ),
+        agent_prompt_path=manifest.agent_prompt_path or get_source_agent_prompt_path(manifest.source_id),
+        agent_session_domain=manifest.agent_session_domain or _default_agent_session_domain(manifest.source_id),
+        agent_output_mode=manifest.agent_output_mode or "artifact_and_derived",
     )
 
 
@@ -68,6 +85,10 @@ def _connector_default_source(name: str, connector: BaseConnector) -> SourceDefi
         capabilities=["validation"],
         request_kinds_supported=["run_source"],
         normalizer_key=name,
+        agent_enabled=True,
+        agent_prompt_path=get_source_agent_prompt_path(name),
+        agent_session_domain=_default_agent_session_domain(name),
+        agent_output_mode="artifact_and_derived",
     )
 
 
@@ -89,6 +110,10 @@ def _non_connector_defaults() -> list[SourceDefinition]:
             capabilities=["validation"],
             request_kinds_supported=["request_human_note"],
             normalizer_key=None,
+            agent_enabled=False,
+            agent_prompt_path=get_source_agent_prompt_path("human_input_inbox"),
+            agent_session_domain=_default_agent_session_domain("human_input_inbox"),
+            agent_output_mode="artifact_and_derived",
         ),
         SourceDefinition(
             source_id="manual_observation",
@@ -106,6 +131,10 @@ def _non_connector_defaults() -> list[SourceDefinition]:
             capabilities=["validation"],
             request_kinds_supported=["request_human_note"],
             normalizer_key="manual_observation",
+            agent_enabled=False,
+            agent_prompt_path=get_source_agent_prompt_path("manual_observation"),
+            agent_session_domain=_default_agent_session_domain("manual_observation"),
+            agent_output_mode="artifact_and_derived",
         ),
         SourceDefinition(
             source_id="human_analyst_note",
@@ -123,6 +152,10 @@ def _non_connector_defaults() -> list[SourceDefinition]:
             capabilities=["demand", "monetization", "beneficiary", "validation"],
             request_kinds_supported=["request_human_note"],
             normalizer_key=None,
+            agent_enabled=False,
+            agent_prompt_path=get_source_agent_prompt_path("human_analyst_note"),
+            agent_session_domain=_default_agent_session_domain("human_analyst_note"),
+            agent_output_mode="artifact_and_derived",
         ),
         SourceDefinition(
             source_id="human_curated_dataset",
@@ -140,6 +173,10 @@ def _non_connector_defaults() -> list[SourceDefinition]:
             capabilities=["demand", "ranking", "pricing", "supply", "validation"],
             request_kinds_supported=["request_human_note"],
             normalizer_key=None,
+            agent_enabled=False,
+            agent_prompt_path=get_source_agent_prompt_path("human_curated_dataset"),
+            agent_session_domain=_default_agent_session_domain("human_curated_dataset"),
+            agent_output_mode="artifact_and_derived",
         ),
         SourceDefinition(
             source_id="co_mention_surge",
@@ -157,6 +194,10 @@ def _non_connector_defaults() -> list[SourceDefinition]:
             capabilities=["demand", "validation"],
             request_kinds_supported=["run_source"],
             normalizer_key=None,
+            agent_enabled=False,
+            agent_prompt_path=get_source_agent_prompt_path("co_mention_surge"),
+            agent_session_domain=_default_agent_session_domain("co_mention_surge"),
+            agent_output_mode="artifact_and_derived",
         ),
         SourceDefinition(
             source_id="search_rank_divergence",
@@ -174,6 +215,10 @@ def _non_connector_defaults() -> list[SourceDefinition]:
             capabilities=["ranking", "validation"],
             request_kinds_supported=["run_source"],
             normalizer_key=None,
+            agent_enabled=False,
+            agent_prompt_path=get_source_agent_prompt_path("search_rank_divergence"),
+            agent_session_domain=_default_agent_session_domain("search_rank_divergence"),
+            agent_output_mode="artifact_and_derived",
         ),
         SourceDefinition(
             source_id="persistence_acceleration",
@@ -191,6 +236,10 @@ def _non_connector_defaults() -> list[SourceDefinition]:
             capabilities=["demand", "validation"],
             request_kinds_supported=["run_source"],
             normalizer_key=None,
+            agent_enabled=False,
+            agent_prompt_path=get_source_agent_prompt_path("persistence_acceleration"),
+            agent_session_domain=_default_agent_session_domain("persistence_acceleration"),
+            agent_output_mode="artifact_and_derived",
         ),
         SourceDefinition(
             source_id="supply_tightness_proxy",
@@ -208,6 +257,10 @@ def _non_connector_defaults() -> list[SourceDefinition]:
             capabilities=["pricing", "supply", "validation"],
             request_kinds_supported=["run_source"],
             normalizer_key=None,
+            agent_enabled=False,
+            agent_prompt_path=get_source_agent_prompt_path("supply_tightness_proxy"),
+            agent_session_domain=_default_agent_session_domain("supply_tightness_proxy"),
+            agent_output_mode="artifact_and_derived",
         ),
     ]
 

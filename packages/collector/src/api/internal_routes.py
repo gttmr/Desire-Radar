@@ -31,6 +31,10 @@ class RunSourceRequest(BaseModel):
     wait_for_completion: bool = False
 
 
+class RunSourceAgentRequest(BaseModel):
+    submission_id: str | None = None
+
+
 class UpdateSourceTierRequest(BaseModel):
     configured_tier: int
     tier_override_reason: str | None = None
@@ -135,6 +139,53 @@ async def analysis_preview(entity: str) -> dict:
 async def analysis_preview_batch() -> dict:
     engine = _deps["analysis_engine"]
     return engine.preview_batch()
+
+
+@router.get("/source-agents/{source_id}/status")
+async def source_agent_status(source_id: str) -> dict:
+    runner = _deps["source_agent_runner"]
+    try:
+        return runner.status(source_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"reason": "unknown_source", "source_id": source_id}) from exc
+
+
+@router.get("/source-agents/{source_id}/preview")
+async def source_agent_preview(source_id: str, submission_id: str | None = None) -> dict:
+    runner = _deps["source_agent_runner"]
+    try:
+        return runner.preview(source_id, submission_id=submission_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"reason": "unknown_source", "source_id": source_id}) from exc
+
+
+@router.post("/source-agents/run/{source_id}")
+async def run_source_agent(source_id: str, body: RunSourceAgentRequest | None = None) -> dict:
+    runner = _deps["source_agent_runner"]
+    try:
+        result = await runner.run_latest(
+            source_id,
+            submission_id=body.submission_id if body is not None else None,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail={"reason": "unknown_source", "source_id": source_id}) from exc
+    except RuntimeError as exc:
+        message = str(exc)
+        reason = "source_agent_unavailable"
+        if "globally disabled" in message:
+            reason = "source_agent_globally_disabled"
+        elif "disabled for" in message:
+            reason = "source_agent_disabled"
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"reason": reason, "source_id": source_id, "message": message},
+        ) from exc
+    return {
+        "source_id": source_id,
+        "artifact": result.artifact.model_dump(),
+        "derived_evidence_ids": result.artifact.derived_evidence_ids,
+        "derived_evidence_count": len(result.artifact.derived_evidence_ids),
+    }
 
 
 @router.post("/sources/run/{source_id}")

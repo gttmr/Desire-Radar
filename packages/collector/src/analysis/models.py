@@ -131,6 +131,10 @@ class RawExecutionResult(BaseModel):
     payload: object | None = None
     usage: ExecutionUsage = Field(default_factory=ExecutionUsage)
     raw_text: str = ""
+    session_dir: str | None = None
+    turn_index: int | None = None
+    request_artifact_path: str | None = None
+    response_artifact_path: str | None = None
 
 
 class AnalysisProjection(BaseModel):

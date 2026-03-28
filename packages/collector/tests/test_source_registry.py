@@ -84,10 +84,27 @@ def test_source_registry_surfaces_selection_metadata(tmp_path):
     assert status["request_kinds_supported"] == ["run_source"]
     assert status["normalizer_key"] == "alpha"
     assert status["manifest_path"] is None
+    assert status["agent_enabled"] is False
+    assert status["agent_prompt_path"] is None
+    assert status["agent_session_domain"] is None
     assert status["runnable"] is True
     assert status["adapter_name"] == "alpha"
     assert catalog["alpha"]["capabilities"] == ["demand"]
     assert catalog["alpha"]["request_kinds_supported"] == ["run_source"]
+
+
+def test_source_registry_tracks_source_agent_status(tmp_path):
+    registry = SourceRegistry(str(tmp_path / "sources.json"), _defaults())
+
+    registry.record_source_agent_outcome(
+        "alpha",
+        status="completed",
+        artifact_id="artifact-123",
+    )
+
+    status = registry.status()["alpha"]
+    assert status["last_agent_status"] == "completed"
+    assert status["last_agent_run"] is not None
 
 
 def test_source_registry_tracks_downstream_usefulness_metrics(tmp_path):

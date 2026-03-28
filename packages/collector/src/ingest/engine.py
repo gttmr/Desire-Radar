@@ -17,6 +17,7 @@ from ..ingest.models import SubmissionRecord
 from ..ingest.store import SubmissionStore
 from ..normalizer.evidence_schema import Evidence
 from ..resolver.entity_resolver import EntityResolver
+from ..source_agents.runner import SourceAgentRunner
 from ..sources.registry import SourceRegistry
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ class IngestionEngine:
         connectors: dict[str, BaseConnector],
         analysis_engine: AnalysisEngine | None = None,
         human_input_router: HumanInputRouter | None = None,
+        source_agent_runner: SourceAgentRunner | None = None,
         source_run_worker_concurrency: int = 2,
         processing_yield_every: int = 1,
     ) -> None:
@@ -47,6 +49,7 @@ class IngestionEngine:
         self.connectors = connectors
         self.analysis_engine = analysis_engine
         self.human_input_router = human_input_router
+        self.source_agent_runner = source_agent_runner
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._source_run_queue: asyncio.Queue[str] = asyncio.Queue()
         self._worker: asyncio.Task | None = None
@@ -439,6 +442,9 @@ class IngestionEngine:
                 "payloads_processed": runtime["payloads_processed"],
                 "snapshot_total": runtime["snapshot_total"],
                 "evidence_total": runtime["evidence_total"],
+                "source_agent_status": runtime["source_agent_status"],
+                "source_agent_artifact_id": runtime["source_agent_artifact_id"],
+                "derived_evidence_total": runtime["derived_evidence_total"],
                 "resolve_success_total": runtime["resolve_success_total"],
                 "resolve_miss_total": runtime["resolve_miss_total"],
                 "partial_failure_count": runtime["partial_failure_count"],
@@ -627,6 +633,9 @@ class IngestionEngine:
             "payloads_processed": 0,
             "snapshot_total": 0,
             "evidence_total": 0,
+            "source_agent_status": None,
+            "source_agent_artifact_id": None,
+            "derived_evidence_total": 0,
             "resolve_success_total": 0,
             "resolve_miss_total": 0,
             "partial_failure_count": 0,
@@ -675,6 +684,9 @@ class IngestionEngine:
         runtime["payloads_processed"] = 0
         runtime["snapshot_total"] = 0
         runtime["evidence_total"] = 0
+        runtime["source_agent_status"] = None
+        runtime["source_agent_artifact_id"] = None
+        runtime["derived_evidence_total"] = 0
         runtime["resolve_success_total"] = 0
         runtime["resolve_miss_total"] = 0
         runtime["partial_failure_count"] = 0
@@ -821,6 +833,7 @@ class IngestionEngine:
             "payloads_processed",
             "snapshot_total",
             "evidence_total",
+            "derived_evidence_total",
             "resolve_success_total",
             "resolve_miss_total",
             "partial_failure_count",
@@ -828,6 +841,10 @@ class IngestionEngine:
         ):
             if key in counts and counts[key] is not None:
                 runtime[key] = counts[key]
+        if counts.get("source_agent_status") is not None:
+            runtime["source_agent_status"] = counts["source_agent_status"]
+        if counts.get("source_agent_artifact_id") is not None:
+            runtime["source_agent_artifact_id"] = counts["source_agent_artifact_id"]
         if counts.get("last_warning_kind") is not None:
             runtime["last_warning_kind"] = counts["last_warning_kind"]
         if counts.get("last_warning_message") is not None:
@@ -967,8 +984,8 @@ class IngestionEngine:
                 await self._maybe_yield_processing(index)
 
             progress_update(
-                stage="triggering_analysis",
-                message="writing evidence and triggering analysis",
+                stage="source_agent_analysis",
+                message="writing evidence and running source agent",
                 payload_total=len(payloads),
                 payloads_processed=len(payloads),
                 snapshot_total=len(snapshot_ids),
@@ -982,16 +999,43 @@ class IngestionEngine:
                 last_warning_message=warning_items[0].message if warning_items else None,
             )
             self.evidence_sink.extend(all_evidences)
-            await self._trigger_analysis(all_evidences)
+            source_agent_metadata, source_agent_evidence = await self._run_source_agent(
+                record=record,
+                evidences=all_evidences,
+                is_run=is_run,
+            )
+            if source_agent_evidence:
+                self.evidence_sink.extend(source_agent_evidence)
+            combined_evidences = [*all_evidences, *source_agent_evidence]
+            progress_update(
+                stage="triggering_analysis",
+                message="triggering candidate analysis",
+                payload_total=len(payloads),
+                payloads_processed=len(payloads),
+                snapshot_total=len(snapshot_ids),
+                evidence_total=len(resolved_evidence_ids),
+                derived_evidence_total=len(source_agent_evidence),
+                source_agent_status=source_agent_metadata.get("source_agent_status"),
+                source_agent_artifact_id=source_agent_metadata.get("source_agent_artifact_id"),
+                resolve_success_total=resolve_success,
+                resolve_miss_total=resolve_miss,
+                partial_failure_count=len(warning_items),
+                last_warning_count=len(warning_items),
+                last_warning_targets=[item.target for item in warning_items if item.target][:5],
+                last_warning_kind=warning_items[0].kind if warning_items else None,
+                last_warning_message=warning_items[0].message if warning_items else None,
+            )
+            await self._trigger_analysis(combined_evidences)
             updated = self.submission_store.update(
                 record.submission_id,
                 status="completed",
                 snapshot_ids=snapshot_ids,
-                evidence_ids=resolved_evidence_ids,
+                evidence_ids=resolved_evidence_ids + [item.evidence_id for item in source_agent_evidence],
                 processed_at=self._now(),
                 metadata={
                     **record.metadata,
                     "warnings": [self._warning_to_dict(item) for item in warning_items],
+                    **source_agent_metadata,
                 },
             )
             updated = progress_update(
@@ -1001,6 +1045,9 @@ class IngestionEngine:
                 payloads_processed=len(payloads),
                 snapshot_total=len(snapshot_ids),
                 evidence_total=len(resolved_evidence_ids),
+                derived_evidence_total=len(source_agent_evidence),
+                source_agent_status=source_agent_metadata.get("source_agent_status"),
+                source_agent_artifact_id=source_agent_metadata.get("source_agent_artifact_id"),
                 resolve_success_total=resolve_success,
                 resolve_miss_total=resolve_miss,
                 partial_failure_count=len(warning_items),
@@ -1152,6 +1199,14 @@ class IngestionEngine:
 
             self.evidence_sink.extend(evidences)
             evidence_ids.extend([item.evidence_id for item in evidences])
+            source_agent_metadata, source_agent_evidence = await self._run_source_agent(
+                record=record,
+                evidences=evidences,
+                is_run=False,
+            )
+            if source_agent_evidence:
+                self.evidence_sink.extend(source_agent_evidence)
+                evidence_ids.extend([item.evidence_id for item in source_agent_evidence])
             self._update_submission_progress(
                 record.submission_id,
                 stage="triggering_analysis",
@@ -1159,17 +1214,24 @@ class IngestionEngine:
                 payload_total=len(record.evidence_payloads),
                 payloads_processed=len(record.evidence_payloads),
                 snapshot_total=len(snapshot_ids),
-                evidence_total=len(evidence_ids),
+                evidence_total=len([item.evidence_id for item in evidences]),
+                derived_evidence_total=len(source_agent_evidence),
+                source_agent_status=source_agent_metadata.get("source_agent_status"),
+                source_agent_artifact_id=source_agent_metadata.get("source_agent_artifact_id"),
                 resolve_success_total=resolve_success,
                 resolve_miss_total=resolve_miss,
             )
-            await self._trigger_analysis(evidences)
+            await self._trigger_analysis([*evidences, *source_agent_evidence])
             updated = self.submission_store.update(
                 record.submission_id,
                 status="completed",
                 snapshot_ids=snapshot_ids,
                 evidence_ids=evidence_ids,
                 processed_at=self._now(),
+                metadata={
+                    **record.metadata,
+                    **source_agent_metadata,
+                },
             )
             updated = self._update_submission_progress(
                 record.submission_id,
@@ -1178,7 +1240,10 @@ class IngestionEngine:
                 payload_total=len(record.evidence_payloads),
                 payloads_processed=len(record.evidence_payloads),
                 snapshot_total=len(snapshot_ids),
-                evidence_total=len(evidence_ids),
+                evidence_total=len([item.evidence_id for item in evidences]),
+                derived_evidence_total=len(source_agent_evidence),
+                source_agent_status=source_agent_metadata.get("source_agent_status"),
+                source_agent_artifact_id=source_agent_metadata.get("source_agent_artifact_id"),
                 resolve_success_total=resolve_success,
                 resolve_miss_total=resolve_miss,
             )
@@ -1395,26 +1460,43 @@ class IngestionEngine:
                 evidences,
             )
             self.evidence_sink.extend(resolved_evidences)
+            source_agent_metadata, source_agent_evidence = await self._run_source_agent(
+                record=record,
+                evidences=resolved_evidences,
+                is_run=True,
+            )
+            if source_agent_evidence:
+                self.evidence_sink.extend(source_agent_evidence)
             self._update_submission_progress(
                 record.submission_id,
                 stage="triggering_analysis",
                 message="writing derived evidence and triggering analysis",
                 evidence_total=len(resolved_evidences),
+                derived_evidence_total=len(source_agent_evidence),
+                source_agent_status=source_agent_metadata.get("source_agent_status"),
+                source_agent_artifact_id=source_agent_metadata.get("source_agent_artifact_id"),
                 resolve_success_total=hit_count,
                 resolve_miss_total=miss_count,
             )
-            await self._trigger_analysis(resolved_evidences)
+            await self._trigger_analysis([*resolved_evidences, *source_agent_evidence])
             updated = self.submission_store.update(
                 record.submission_id,
                 status="completed",
-                evidence_ids=[item.evidence_id for item in resolved_evidences],
+                evidence_ids=[item.evidence_id for item in resolved_evidences] + [item.evidence_id for item in source_agent_evidence],
                 processed_at=self._now(),
+                metadata={
+                    **record.metadata,
+                    **source_agent_metadata,
+                },
             )
             updated = self._update_submission_progress(
                 record.submission_id,
                 stage="completed",
                 message="derived source completed",
                 evidence_total=len(resolved_evidences),
+                derived_evidence_total=len(source_agent_evidence),
+                source_agent_status=source_agent_metadata.get("source_agent_status"),
+                source_agent_artifact_id=source_agent_metadata.get("source_agent_artifact_id"),
                 resolve_success_total=hit_count,
                 resolve_miss_total=miss_count,
             )
@@ -1485,6 +1567,52 @@ class IngestionEngine:
             resolved_evidences.append(evidence)
 
         return resolved_evidences, success_count, miss_count
+
+    async def _run_source_agent(
+        self,
+        *,
+        record: SubmissionRecord,
+        evidences: list[Evidence],
+        is_run: bool,
+    ) -> tuple[dict[str, Any], list[Evidence]]:
+        if self.source_agent_runner is None or not evidences:
+            return {"source_agent_status": "skipped"}, []
+
+        result = await self.source_agent_runner.run_for_submission(record, evidences)
+        if result is None:
+            return {"source_agent_status": "skipped"}, []
+
+        artifact = result.artifact
+        metadata = {
+            "source_agent_status": artifact.status,
+            "source_agent_artifact_id": artifact.artifact_id,
+            "source_agent_summary": artifact.summary,
+            "source_agent_confidence": artifact.confidence,
+            "derived_evidence_ids": artifact.derived_evidence_ids,
+        }
+        if artifact.error_message:
+            metadata["source_agent_error"] = artifact.error_message
+
+        if is_run:
+            self._update_source_progress(
+                record.source_id,
+                record.submission_id,
+                stage="source_agent_analysis",
+                message=artifact.summary or artifact.error_message or "source agent completed",
+                derived_evidence_total=len(result.derived_evidence),
+                source_agent_status=artifact.status,
+                source_agent_artifact_id=artifact.artifact_id,
+            )
+        else:
+            self._update_submission_progress(
+                record.submission_id,
+                stage="source_agent_analysis",
+                message=artifact.summary or artifact.error_message or "source agent completed",
+                derived_evidence_total=len(result.derived_evidence),
+                source_agent_status=artifact.status,
+                source_agent_artifact_id=artifact.artifact_id,
+            )
+        return metadata, [item for item in result.derived_evidence if isinstance(item, Evidence)]
 
     def _finalize_human_request(
         self,

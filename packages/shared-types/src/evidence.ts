@@ -202,10 +202,19 @@ export type SourceStatus = {
   request_kinds_supported?: string[];
   normalizer_key?: string | null;
   manifest_path?: string | null;
+  agent_enabled?: boolean;
+  agent_prompt_path?: string | null;
+  agent_session_domain?: string | null;
+  agent_output_mode?: 'artifact_only' | 'artifact_and_derived';
+  last_agent_run?: string | null;
+  last_agent_status?: string | null;
   adapter_name?: string;
   default_producer_ref?: string | null;
   tier_override_reason?: string | null;
   description?: string | null;
+  source_agent_status?: string | null;
+  source_agent_artifact_id?: string | null;
+  derived_evidence_total?: number;
 
   // Legacy / forward-compatible fields.
   source?: string;

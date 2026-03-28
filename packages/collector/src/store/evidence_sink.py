@@ -77,6 +77,15 @@ class EvidenceSink:
                     result.append(ev)
             return result
 
+    def query_by_source(self, source: str) -> list[Evidence]:
+        with self._lock:
+            return [ev for ev in self._items if ev.source == source]
+
+    def query_by_ids(self, evidence_ids: list[str]) -> list[Evidence]:
+        wanted = set(evidence_ids)
+        with self._lock:
+            return [ev for ev in self._items if ev.evidence_id in wanted]
+
     def enforce_ttl(self) -> int:
         """Remove evidence older than freshness_ttl. Return number of items removed."""
         cutoff = datetime.now(timezone.utc) - self.freshness_ttl

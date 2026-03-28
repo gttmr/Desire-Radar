@@ -10,6 +10,7 @@ SourceKind = Literal["pull", "push", "agent", "human", "derived"]
 IngestionMode = Literal["raw", "evidence"]
 ValidityStatus = Literal["healthy", "noisy", "degraded", "blocked"]
 RequestKind = Literal["run_source", "submit_agent_evidence", "request_human_note"]
+SourceAgentOutputMode = Literal["artifact_only", "artifact_and_derived"]
 
 
 class SourceMetrics(BaseModel):
@@ -37,6 +38,12 @@ class SourceMetrics(BaseModel):
     last_warning_kind: str | None = None
     last_warning_message: str | None = None
     last_warning_count: int = 0
+    source_agent_runs_total: int = 0
+    source_agent_failures_total: int = 0
+    last_agent_run: str | None = None
+    last_agent_status: str | None = None
+    last_agent_artifact_id: str | None = None
+    last_agent_error: str | None = None
 
 
 class SourceDefinition(BaseModel):
@@ -61,6 +68,10 @@ class SourceDefinition(BaseModel):
     request_kinds_supported: list[RequestKind] = Field(default_factory=list)
     normalizer_key: str | None = None
     manifest_path: str | None = None
+    agent_enabled: bool = False
+    agent_prompt_path: str | None = None
+    agent_session_domain: str | None = None
+    agent_output_mode: SourceAgentOutputMode = "artifact_and_derived"
     metrics: SourceMetrics = Field(default_factory=SourceMetrics)
 
 
@@ -80,3 +91,7 @@ class SourceManifest(BaseModel):
     request_kinds_supported: list[RequestKind] = Field(default_factory=list)
     normalizer_key: str | None = None
     manifest_path: str | None = None
+    agent_enabled: bool | None = None
+    agent_prompt_path: str | None = None
+    agent_session_domain: str | None = None
+    agent_output_mode: SourceAgentOutputMode | None = None

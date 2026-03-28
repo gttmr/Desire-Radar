@@ -33,6 +33,12 @@ export type CollectorSourceCatalogEntry = {
   request_kinds_supported?: string[];
   normalizer_key?: string | null;
   manifest_path?: string | null;
+  agent_enabled?: boolean;
+  agent_prompt_path?: string | null;
+  agent_session_domain?: string | null;
+  agent_output_mode?: 'artifact_only' | 'artifact_and_derived';
+  last_agent_run?: string | null;
+  last_agent_status?: string | null;
   description?: string | null;
 };
 
@@ -45,6 +51,67 @@ export type CollectorAnalysisStatusSummary = {
   enabled: boolean;
   queue_size: number;
   execution_mode?: string;
+};
+
+export type SourceAgentArtifact = {
+  artifact_id: string;
+  source_id: string;
+  submission_id?: string | null;
+  status: 'completed' | 'failed' | 'skipped';
+  output_mode: 'artifact_only' | 'artifact_and_derived';
+  session_domain: string;
+  session_id?: string | null;
+  session_dir?: string | null;
+  request_artifact_path?: string | null;
+  response_artifact_path?: string | null;
+  model?: string | null;
+  summary?: string | null;
+  confidence?: number | null;
+  warnings?: string[];
+  theme_tags?: string[];
+  event_summary?: string | null;
+  entity_hints?: string[];
+  derived_evidence_ids?: string[];
+  raw_text?: string;
+  error_message?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SourceAgentStatusResponse = {
+  source_id: string;
+  global_enabled: boolean;
+  agent_enabled: boolean;
+  agent_prompt_path?: string | null;
+  agent_session_domain?: string | null;
+  agent_output_mode?: 'artifact_only' | 'artifact_and_derived';
+  latest_artifact?: SourceAgentArtifact | null;
+  session?: Record<string, unknown> | null;
+};
+
+export type SourceAgentPreviewResponse = {
+  source_id: string;
+  submission_id?: string | null;
+  session_domain: string;
+  output_mode: 'artifact_only' | 'artifact_and_derived';
+  prompt: string;
+  char_count: number;
+  evidence_count: number;
+  evidence_ids: string[];
+  prompt_path?: string | null;
+  agent_enabled: boolean;
+  global_enabled: boolean;
+};
+
+export type RunSourceAgentRequest = {
+  submission_id?: string;
+};
+
+export type RunSourceAgentResponse = {
+  source_id: string;
+  artifact: SourceAgentArtifact;
+  derived_evidence_ids: string[];
+  derived_evidence_count: number;
 };
 
 // POST /collect/run

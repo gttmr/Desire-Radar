@@ -29,6 +29,9 @@ def test_build_default_sources_loads_checked_in_manifest_examples():
     assert google_trends.request_kinds_supported == ["run_source"]
     assert google_trends.normalizer_key == "google_trends"
     assert google_trends.manifest_path is not None
+    assert google_trends.agent_enabled is True
+    assert google_trends.agent_prompt_path is not None
+    assert google_trends.agent_session_domain == "source-agent:google_trends"
     assert google_trends.cadence_seconds == 3600
     assert google_trends.runnable is True
     assert agent_evidence.capabilities == [
@@ -41,6 +44,8 @@ def test_build_default_sources_loads_checked_in_manifest_examples():
     ]
     assert agent_evidence.request_kinds_supported == ["submit_agent_evidence"]
     assert agent_evidence.normalizer_key is None
+    assert agent_evidence.agent_enabled is True
+    assert agent_evidence.agent_prompt_path is not None
 
 
 def test_build_default_sources_supports_custom_manifest_dir(tmp_path):
@@ -73,3 +78,5 @@ def test_build_default_sources_supports_custom_manifest_dir(tmp_path):
     assert alpha.capabilities == ["pricing"]
     assert alpha.normalizer_key == "alpha"
     assert alpha.manifest_path is not None
+    assert alpha.agent_enabled is True
+    assert alpha.agent_prompt_path is not None

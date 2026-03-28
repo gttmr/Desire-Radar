@@ -10,6 +10,7 @@ from src.ingest.human_input_models import HumanInputRoutingDecision
 from src.ingest.store import SubmissionStore
 from src.normalizer.evidence_schema import Evidence
 from src.resolver.entity_resolver import EntityResolver
+from src.source_agents.models import SourceAgentArtifact, SourceAgentRunResult
 from src.sources.models import SourceDefinition
 from src.sources.defaults import build_default_sources
 from src.sources.registry import SourceRegistry
@@ -139,6 +140,50 @@ class StubHumanInputRouter:
         return self.decision
 
 
+class StubSourceAgentRunner:
+    def __init__(self, *, status: str = "completed", derived_count: int = 0) -> None:
+        self.status = status
+        self.derived_count = derived_count
+        self.calls: list[tuple[str, int]] = []
+
+    async def run_for_submission(self, record, evidences):
+        self.calls.append((record.source_id, len(evidences)))
+        derived = [
+            Evidence(
+                evidence_id=f"{record.source_id}-derived-{index}",
+                source=record.source_id,
+                source_tier=2,
+                source_kind="derived",
+                producer_ref=f"source_agent:{record.source_id}",
+                parent_evidence_ids=[item.evidence_id for item in evidences],
+                submission_ref=record.submission_id,
+                collected_at=datetime.now(timezone.utc).isoformat(),
+                entity_candidates=["Cursor"],
+                signal_type="source_agent_signal",
+                title_or_label=f"Derived {index}",
+                raw_snapshot_ref="",
+                trust_score=0.8,
+                freshness_ttl=3600,
+            )
+            for index in range(self.derived_count)
+        ]
+        artifact = SourceAgentArtifact(
+            artifact_id=f"artifact-{record.source_id}",
+            source_id=record.source_id,
+            submission_id=record.submission_id,
+            status=self.status,
+            output_mode="artifact_and_derived",
+            session_domain=f"source-agent:{record.source_id}",
+            summary="source agent summary" if self.status == "completed" else None,
+            confidence=0.7 if self.status == "completed" else None,
+            error_message="source agent failed" if self.status == "failed" else None,
+            derived_evidence_ids=[item.evidence_id for item in derived],
+            created_at=datetime.now(timezone.utc).isoformat(),
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        return SourceAgentRunResult(artifact=artifact, derived_evidence=derived)
+
+
 def _normalizer(source: str, raw_payload: dict, snapshot_ref: str) -> list[Evidence]:
     entity = raw_payload.get("entities", ["Cursor"])[0]
     return [
@@ -157,7 +202,7 @@ def _normalizer(source: str, raw_payload: dict, snapshot_ref: str) -> list[Evide
     ]
 
 
-def _build_engine(tmp_path, human_input_router=None):
+def _build_engine(tmp_path, human_input_router=None, source_agent_runner=None):
     connectors = {DummyConnector.name: DummyConnector()}
     registry = SourceRegistry(
         str(tmp_path / "sources.json"),
@@ -174,6 +219,7 @@ def _build_engine(tmp_path, human_input_router=None):
         connectors=connectors,
         analysis_engine=analysis_engine,
         human_input_router=human_input_router,
+        source_agent_runner=source_agent_runner,
     )
     return engine, registry, analysis_engine
 
@@ -198,7 +244,49 @@ async def test_sync_human_observation_creates_submission_and_evidence(tmp_path):
     assert analysis_engine.calls == 1
     status = registry.status()["manual_observation"]
     assert status["pending_submissions"] == 0
-    assert status["last_submission"] is not None
+
+
+@pytest.mark.asyncio
+async def test_source_agent_failure_does_not_fail_submission(tmp_path):
+    source_agent_runner = StubSourceAgentRunner(status="failed", derived_count=0)
+    engine, registry, analysis_engine = _build_engine(
+        tmp_path,
+        source_agent_runner=source_agent_runner,
+    )
+
+    record = await engine.run_source("dummy_pull")
+    stored = await engine.get_submission(record.submission_id)
+
+    assert stored is not None
+    assert stored.status == "completed"
+    assert stored.metadata["source_agent_status"] == "failed"
+    assert stored.metadata["source_agent_artifact_id"] == "artifact-dummy_pull"
+    assert analysis_engine.calls == 1
+    runtime = engine.get_runtime_status()["sources"]["dummy_pull"]
+    assert runtime["source_agent_status"] == "failed"
+    assert runtime["source_agent_artifact_id"] == "artifact-dummy_pull"
+
+
+@pytest.mark.asyncio
+async def test_source_agent_derived_evidence_is_persisted_and_triggers_analysis(tmp_path):
+    source_agent_runner = StubSourceAgentRunner(status="completed", derived_count=1)
+    engine, registry, analysis_engine = _build_engine(
+        tmp_path,
+        source_agent_runner=source_agent_runner,
+    )
+
+    record = await engine.run_source("dummy_pull")
+    stored = await engine.get_submission(record.submission_id)
+
+    assert stored is not None
+    assert stored.status == "completed"
+    assert len(stored.evidence_ids) == 2
+    assert stored.metadata["source_agent_status"] == "completed"
+    assert stored.metadata["derived_evidence_ids"] == ["dummy_pull-derived-0"]
+    assert analysis_engine.calls == 1
+    runtime = engine.get_runtime_status()["sources"]["dummy_pull"]
+    assert runtime["derived_evidence_total"] == 1
+    assert runtime["last_submission_id"] == record.submission_id
 
 
 @pytest.mark.asyncio

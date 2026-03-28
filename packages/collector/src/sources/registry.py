@@ -164,6 +164,26 @@ class SourceRegistry:
         self._refresh_validity(source)
         self._save()
 
+    def record_source_agent_outcome(
+        self,
+        source_id: str,
+        *,
+        status: str,
+        artifact_id: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        if source_id not in self._sources:
+            return
+        source = self._sources[source_id]
+        source.metrics.source_agent_runs_total += 1
+        if status == "failed":
+            source.metrics.source_agent_failures_total += 1
+        source.metrics.last_agent_run = self._now()
+        source.metrics.last_agent_status = status
+        source.metrics.last_agent_artifact_id = artifact_id
+        source.metrics.last_agent_error = error_message
+        self._save()
+
     def catalog(self) -> list[dict]:
         return [
             {
@@ -188,6 +208,12 @@ class SourceRegistry:
                 "request_kinds_supported": source.request_kinds_supported,
                 "normalizer_key": source.normalizer_key,
                 "manifest_path": source.manifest_path,
+                "agent_enabled": source.agent_enabled,
+                "agent_prompt_path": source.agent_prompt_path,
+                "agent_session_domain": source.agent_session_domain,
+                "agent_output_mode": source.agent_output_mode,
+                "last_agent_run": source.metrics.last_agent_run,
+                "last_agent_status": source.metrics.last_agent_status,
             }
             for source in self._sources.values()
         ]
@@ -227,6 +253,12 @@ class SourceRegistry:
                 "request_kinds_supported": source.request_kinds_supported,
                 "normalizer_key": source.normalizer_key,
                 "manifest_path": source.manifest_path,
+                "agent_enabled": source.agent_enabled,
+                "agent_prompt_path": source.agent_prompt_path,
+                "agent_session_domain": source.agent_session_domain,
+                "agent_output_mode": source.agent_output_mode,
+                "last_agent_run": source.metrics.last_agent_run,
+                "last_agent_status": source.metrics.last_agent_status,
             }
             for source in self._sources.values()
         }
@@ -269,6 +301,10 @@ class SourceRegistry:
             current.request_kinds_supported = list(default.request_kinds_supported)
             current.normalizer_key = default.normalizer_key
             current.manifest_path = default.manifest_path
+            current.agent_enabled = default.agent_enabled
+            current.agent_prompt_path = default.agent_prompt_path
+            current.agent_session_domain = default.agent_session_domain
+            current.agent_output_mode = default.agent_output_mode
         for source in self._sources.values():
             self._refresh_validity(source)
         self._save()

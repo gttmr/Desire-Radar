@@ -8,6 +8,7 @@ from src.ingest.store import SubmissionStore
 from src.normalizer.evidence_schema import Evidence
 from src.resolver.entity_resolver import EntityResolver
 from src.scheduler.cadence_runner import CadenceRunner
+from src.source_agents.models import SourceAgentArtifact, SourceAgentPromptPreview, SourceAgentRunResult
 from src.sources.defaults import build_default_sources
 from src.sources.registry import SourceRegistry
 from src.store.entity_store import EntityStore
@@ -45,6 +46,47 @@ class StubAnalysisEngine:
 
     def get_status(self, _entity: str):
         return {"queue_size": 0}
+
+
+class StubSourceAgentRunner:
+    def status(self, source_id: str):
+        return {
+            "source_id": source_id,
+            "global_enabled": True,
+            "agent_enabled": True,
+            "agent_prompt_path": f"/tmp/{source_id}.md",
+            "agent_session_domain": f"source-agent:{source_id}",
+            "agent_output_mode": "artifact_and_derived",
+            "latest_artifact": None,
+            "session": None,
+        }
+
+    def preview(self, source_id: str, submission_id: str | None = None):
+        return SourceAgentPromptPreview(
+            source_id=source_id,
+            submission_id=submission_id,
+            session_domain=f"source-agent:{source_id}",
+            output_mode="artifact_and_derived",
+            prompt="preview",
+            char_count=7,
+            evidence_count=1,
+            evidence_ids=["ev-1"],
+            prompt_path=f"/tmp/{source_id}.md",
+        ).model_dump() | {"agent_enabled": True, "global_enabled": True}
+
+    async def run_latest(self, source_id: str, *, submission_id: str | None = None):
+        artifact = SourceAgentArtifact(
+            artifact_id=f"artifact-{source_id}",
+            source_id=source_id,
+            submission_id=submission_id,
+            status="completed",
+            output_mode="artifact_and_derived",
+            session_domain=f"source-agent:{source_id}",
+            derived_evidence_ids=["derived-1"],
+            created_at="2026-03-28T00:00:00Z",
+            updated_at="2026-03-28T00:00:00Z",
+        )
+        return SourceAgentRunResult(artifact=artifact, derived_evidence=[])
 
 
 def _normalizer(source: str, raw_payload: dict, snapshot_ref: str) -> list[Evidence]:
@@ -94,6 +136,7 @@ def _build_client(tmp_path) -> tuple[TestClient, SourceRegistry]:
         "connectors": connectors,
         "source_registry": registry,
         "analysis_engine": StubAnalysisEngine(),
+        "source_agent_runner": StubSourceAgentRunner(),
         "cadence_runner": cadence_runner,
         "submission_store": engine.submission_store,
     }
@@ -158,3 +201,18 @@ def test_internal_run_source_returns_structured_conflict_for_disabled_source(tmp
         "reason": "source_disabled",
         "source_id": "disabled_pull",
     }
+
+
+def test_internal_source_agent_routes_return_runner_payloads(tmp_path):
+    client, _ = _build_client(tmp_path)
+
+    status_response = client.get("/internal/source-agents/enabled_pull/status")
+    preview_response = client.get("/internal/source-agents/enabled_pull/preview")
+    run_response = client.post("/internal/source-agents/run/enabled_pull", json={})
+
+    assert status_response.status_code == 200
+    assert status_response.json()["agent_session_domain"] == "source-agent:enabled_pull"
+    assert preview_response.status_code == 200
+    assert preview_response.json()["prompt"] == "preview"
+    assert run_response.status_code == 200
+    assert run_response.json()["artifact"]["artifact_id"] == "artifact-enabled_pull"

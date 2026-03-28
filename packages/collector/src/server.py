@@ -56,6 +56,9 @@ from .config import (
     LLM_HUMAN_ROUTING_REVIEW_THRESHOLD,
     LLM_HUMAN_ROUTING_SESSION_DOMAIN,
     LLM_REVIEW_CONFIDENCE_THRESHOLD,
+    LLM_SOURCE_AGENT_ENABLED,
+    LLM_SOURCE_AGENT_EXECUTION_MODE,
+    LLM_SOURCE_AGENT_MAX_INPUT_CHARS,
     LLM_SESSION_DOMAIN,
     LLM_SESSION_MAX_IDLE_MINUTES,
     LLM_SESSION_MAX_TURNS,
@@ -69,7 +72,8 @@ from .config import (
     SOURCE_RUN_WORKER_CONCURRENCY,
 )
 from .connectors import build_connector_registry
-from .ingest import IngestionEngine, SubmissionStore
+from .ingest.engine import IngestionEngine
+from .ingest.store import SubmissionStore
 from .ingest.human_input_router import HumanInputRouter
 from .normalizer import normalize
 from .resolver.entity_resolver import EntityResolver
@@ -77,6 +81,12 @@ from .scheduler.cadence_runner import CadenceRunner
 from .sources.defaults import build_default_sources
 from .sources.registry import SourceRegistry
 from .sources.validity import SourceValidityEngine
+from .source_agents import (
+    SourceAgentArtifactStore,
+    SourceAgentContextBuilder,
+    SourceAgentRegistry,
+)
+from .source_agents.runner import SourceAgentRunner
 from .store.entity_store import EntityStore
 from .store.evidence_sink import EvidenceSink
 from .store.raw_snapshot_store import RawSnapshotStore
@@ -109,6 +119,9 @@ async def lifespan(app: FastAPI):
     )
     analysis_store = AnalysisStore(
         path=os.path.join(DATA_DIR, "analysis.json")
+    )
+    source_agent_artifact_store = SourceAgentArtifactStore(
+        path=os.path.join(DATA_DIR, "source_agent_artifacts.json")
     )
     submission_store = SubmissionStore(
         path=os.path.join(DATA_DIR, "submissions.json")
@@ -203,6 +216,22 @@ async def lifespan(app: FastAPI):
         review_threshold=LLM_HUMAN_ROUTING_REVIEW_THRESHOLD,
         max_input_chars=LLM_HUMAN_ROUTING_MAX_INPUT_CHARS,
     )
+    source_agent_registry = SourceAgentRegistry(source_registry)
+    source_agent_context_builder = SourceAgentContextBuilder(
+        source_agent_registry,
+        max_input_chars=LLM_SOURCE_AGENT_MAX_INPUT_CHARS,
+    )
+    source_agent_runner = SourceAgentRunner(
+        source_registry=source_registry,
+        agent_registry=source_agent_registry,
+        context_builder=source_agent_context_builder,
+        artifact_store=source_agent_artifact_store,
+        session_pool=session_pool,
+        submission_store=submission_store,
+        evidence_sink=evidence_sink,
+        enabled=LLM_SOURCE_AGENT_ENABLED,
+        execution_mode=LLM_SOURCE_AGENT_EXECUTION_MODE,
+    )
     analysis_engine = AnalysisEngine(
         evidence_sink=evidence_sink,
         signal_builder=signal_builder,
@@ -227,6 +256,7 @@ async def lifespan(app: FastAPI):
         connectors=connectors,
         analysis_engine=analysis_engine,
         human_input_router=human_input_router,
+        source_agent_runner=source_agent_runner,
         source_run_worker_concurrency=SOURCE_RUN_WORKER_CONCURRENCY,
     )
     ingestion_engine_instance = ingestion_engine
@@ -249,6 +279,11 @@ async def lifespan(app: FastAPI):
         LLM_HUMAN_ROUTING_EXECUTION_MODE,
         LLM_HUMAN_ROUTING_SESSION_DOMAIN,
     )
+    logger.info(
+        "Collector source agents %s (mode=%s)",
+        "enabled" if LLM_SOURCE_AGENT_ENABLED else "disabled",
+        LLM_SOURCE_AGENT_EXECUTION_MODE,
+    )
 
     # Initialize scheduler with entity resolver and analysis engine
     cadence_runner = CadenceRunner(
@@ -269,6 +304,8 @@ async def lifespan(app: FastAPI):
         "cadence_runner": cadence_runner,
         "evidence_sink": evidence_sink,
         "analysis_store": analysis_store,
+        "source_agent_runner": source_agent_runner,
+        "source_agent_artifact_store": source_agent_artifact_store,
         "analysis_engine": analysis_engine,
         "submission_store": submission_store,
         "ingestion_engine": ingestion_engine,

@@ -1,12 +1,6 @@
-"""Ingestion engine exports."""
+"""Ingestion package exports."""
 
-from .engine import IngestionEngine
 from .models import SubmissionRecord, SubmissionStatus
 from .store import SubmissionStore
 
-__all__ = [
-    "IngestionEngine",
-    "SubmissionRecord",
-    "SubmissionStatus",
-    "SubmissionStore",
-]
+__all__ = ["SubmissionRecord", "SubmissionStatus", "SubmissionStore"]

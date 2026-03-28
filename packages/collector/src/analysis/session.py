@@ -151,6 +151,8 @@ class CliSession:
         execution_mode: str,
     ) -> RawExecutionResult:
         turn_index = self.state.turn_count + 1
+        request_artifact_path = self._artifact_path(turn_index, "request")
+        response_artifact_path = self._artifact_path(turn_index, "response")
         self._write_artifact(
             turn_index,
             "request",
@@ -174,6 +176,10 @@ class CliSession:
                 payload=payload,
                 usage=ExecutionUsage(),
                 raw_text=json.dumps(payload),
+                session_dir=self.working_dir,
+                turn_index=turn_index,
+                request_artifact_path=request_artifact_path,
+                response_artifact_path=response_artifact_path,
             )
         elif self.provider == "codex":
             message_text, usage, thread_id, raw_text = await self._invoke_codex(
@@ -186,6 +192,10 @@ class CliSession:
                 payload=self._parse_json_payload(message_text),
                 usage=usage,
                 raw_text=raw_text,
+                session_dir=self.working_dir,
+                turn_index=turn_index,
+                request_artifact_path=request_artifact_path,
+                response_artifact_path=response_artifact_path,
             )
         else:
             message_text, usage, session_id, raw_text = await self._invoke_generic(
@@ -198,6 +208,10 @@ class CliSession:
                 payload=self._parse_json_payload(message_text),
                 usage=usage,
                 raw_text=raw_text,
+                session_dir=self.working_dir,
+                turn_index=turn_index,
+                request_artifact_path=request_artifact_path,
+                response_artifact_path=response_artifact_path,
             )
 
         self.state.turn_count += 1
@@ -479,6 +493,13 @@ class CliSession:
         with open(file_path, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
+
+    def _artifact_path(self, turn_index: int, kind: str) -> str:
+        artifacts_dir = os.path.join(self.working_dir, "artifacts")
+        return os.path.join(
+            artifacts_dir,
+            f"turn-{turn_index:04d}-{kind}.json",
+        )
 
     def _parse_json_payload(self, raw_text: str) -> object:
         cleaned = raw_text.strip()
