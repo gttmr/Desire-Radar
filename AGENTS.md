@@ -6,12 +6,14 @@ This repository builds an evidence pipeline for early desire detection and inves
 ## Read This First
 - [README.md](README.md): runtime setup, operator workflow, API surface.
 - [ARCHITECTURE.md](ARCHITECTURE.md): service boundaries, abstractions, extension rules.
+- [RUNBOOK.md](RUNBOOK.md): WSL-first local runtime, rebuild, smoke, and troubleshooting procedures.
 - `packages/mcp-orchestrator/src/agents/*.md`: analysis-agent prompts used by the orchestrator.
 
 Do not duplicate architecture or product rationale in this file. Keep this file focused on how Codex should work in the repo.
 
 ## Working Rules
 - Preserve raw evidence. Do not let derived analysis overwrite source facts.
+- Work from WSL, not PowerShell, unless a task explicitly requires the Windows host.
 - Respect service boundaries.
   - `collector`: ingestion, provenance, source registry, submissions, low-cost analysis.
   - `mcp-orchestrator`: debate, research loop, verdict, reports.
@@ -30,8 +32,8 @@ Do not duplicate architecture or product rationale in this file. Keep this file 
 
 ## Common Commands
 - Install JS workspaces: `npm install`
-- Run Discord bot: `npm run dev:bot`
-- Run orchestrator: `npm run dev:orchestrator`
+- Run Discord bot from WSL: `npm run dev:bot`
+- Run orchestrator from WSL: `npm run dev:orchestrator`
 - TypeScript build: `npm run build`
 - Collector tests:
   - `cd packages/collector && PYTHONPATH=. python3 -m pytest -s`
@@ -41,9 +43,16 @@ Do not duplicate architecture or product rationale in this file. Keep this file 
 - Provider smoke:
   - `npm --prefix packages/mcp-orchestrator run smoke:providers`
 
+## WSL Runtime Assumption
+- Prefer native WSL tools and paths.
+- Do not rely on Windows `node.exe`, PowerShell-specific commands, or Windows-only PATH propagation for normal development.
+- If a command works only through Windows binaries, treat that as an environment exception and document it in [RUNBOOK.md](RUNBOOK.md).
+- Docker workflows should be launched from WSL so `${HOME}`-based CLI auth mounts resolve to the Linux-side home directory.
+
 ## Documentation Expectations
 - Update [ARCHITECTURE.md](ARCHITECTURE.md) when changing service boundaries, abstractions, or extension points.
 - Update [README.md](README.md) when changing runtime setup, operator workflow, or public API expectations.
+- Update [RUNBOOK.md](RUNBOOK.md) when changing local startup steps, health checks, provider auth expectations, or known runtime failure modes.
 - Keep agent prompt intent documented in the prompt file itself when adding a new orchestrator agent.
 
 ## Testing Expectations

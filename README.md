@@ -8,6 +8,7 @@
 
 - [AGENTS.md](AGENTS.md): Codex CLI 작업 규칙과 저장소 작업 방식
 - [ARCHITECTURE.md](ARCHITECTURE.md): 서비스 경계, 핵심 추상화, CLI/provider 변동성 대응 원칙
+- [RUNBOOK.md](RUNBOOK.md): WSL 기준 로컬 런타임, 네이티브 실행, 재기동, health, smoke, 장애 대응 절차
 - `packages/mcp-orchestrator/src/agents/*.md`: 오케스트레이터 분석 에이전트 프롬프트
 
 ## 아키텍처
@@ -66,6 +67,11 @@ Discord human input / slash commands
 
 ## 빠른 시작
 
+기본 전제:
+- 모든 운영/개발 명령은 WSL/bash에서 실행한다.
+- Docker Compose도 WSL에서 실행한다.
+- provider CLI 인증은 WSL 홈 기준으로 준비한다.
+
 ### 1. 환경 변수 준비
 
 ```bash
@@ -87,6 +93,7 @@ cp .env.example .env
 기본 런타임 전제:
 - collector와 orchestrator는 CLI provider를 기본 경로로 사용한다.
 - Docker Compose를 쓰려면 호스트에서 `codex`, `claude`, `gemini` 중 필요한 CLI 로그인이 이미 되어 있어야 한다.
+- `${HOME}` 기준 Docker mount는 WSL 홈을 바라본다.
 - `OPENAI_API_KEY`는 OpenAI provider를 추가로 켤 때만 필요하다.
 - provider 장애 알림은 discord-bot이 `/health`를 polling해서 보내고, optional repair command는 orchestrator가 인증/로그인 계열 실패에 한해 수행한다.
 - Discord provider alert에는 현재 에러 요약, check 시각, repair 설정 여부, 마지막 repair 결과가 같이 포함된다.
@@ -113,6 +120,8 @@ docker compose up --build
 - `discord-bot` : `http://localhost:3000/health`
 - `collector` : `http://localhost:5002`
 - `mcp-orchestrator` : `http://localhost:5003`
+
+자세한 재기동/강제 recreate/troubleshooting은 [RUNBOOK.md](RUNBOOK.md)를 따른다.
 
 ## Human Input 운영 방식
 
@@ -169,6 +178,7 @@ collector는 이를 `human_input_inbox` source로 받고 내부 라우터가 적
 - `GET /evidence/bundles/{entity}`
 - `GET /sources/status`
 - `GET /sources/catalog`
+- `GET /runtime/status`
 - `GET /ingest/submissions`
 - `GET /ingest/submissions/{submission_id}`
 - `POST /ingest/human-input`
@@ -214,6 +224,7 @@ human input 라우팅도 별도 domain에서 CLI JSON 분류를 사용한다.
 - collector와 orchestrator는 둘 다 호스트의 CLI 인증 디렉터리와 npm global package mount를 사용한다.
 - Docker Compose 기준으로 `${HOME}/.codex`, `${HOME}/.claude`, `${HOME}/.gemini` 및 관련 package 경로가 유효해야 한다.
 - orchestrator는 기본적으로 CLI provider만으로 부팅되며, `OPENAI_API_KEY`가 있을 때만 OpenAI provider를 registry에 추가한다.
+- collector source run은 기본적으로 queue 기반 비동기 실행이다. 장시간 수집은 `submission_id`와 `/sources/status`, `/runtime/status`로 추적한다.
 
 벤치:
 

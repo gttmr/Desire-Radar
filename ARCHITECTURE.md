@@ -10,6 +10,14 @@ Agentic-World is not a generic trend dashboard. It is a system for:
 
 The strategic runtime is `collector + mcp-orchestrator + discord-bot`. `predictor-legacy` remains only for compatibility.
 
+## Runtime Topology
+The intended local operator environment is WSL + Docker Compose.
+
+Operational assumption:
+- provider CLI auth lives in the WSL home directory
+- Docker mounts that auth into `collector` and `mcp-orchestrator`
+- Discord bot is the human/control edge, not the place where source routing logic lives
+
 ## System Boundaries
 
 ### Collector
@@ -55,10 +63,11 @@ Shared types exist to keep contracts synchronized across services. Any API shape
 ## Primary Flows
 
 ### 1. Evidence Ingestion
-`human/pull/push/agent/derived input -> collector source registry -> submission -> snapshots -> normalized evidence -> candidates`
+`human/pull/push/agent/derived input -> collector source registry -> submission -> source-run queue or ingest queue -> snapshots -> normalized evidence -> candidates`
 
 Important property:
 - raw snapshots and provenance remain intact even when analysis layers add derived fields.
+- long-running source collection should not block request/health handling; source execution is queued and runtime state is observable separately
 
 ### 2. Collector Analysis
 `candidate shortlist -> analysis policy -> context packing -> CLI session execution -> analysis projection`
@@ -260,6 +269,11 @@ Provider CLIs change quickly. Commands, flags, output envelopes, auth prompts, a
 - The Discord bot should forward envelopes.
 - Collector should decide how free-form human input is routed and stored.
 
+## Document Map
+- [AGENTS.md](AGENTS.md): Codex workflow, WSL assumptions, contributor rules
+- [README.md](README.md): operator-facing runtime overview and environment setup
+- [RUNBOOK.md](RUNBOOK.md): rebuild, health checks, provider checks, live troubleshooting
+
 ### Optimize For Traceability
 - Given a report or verdict, it should be possible to trace:
   - the evidence used,
@@ -286,8 +300,3 @@ Provider CLIs change quickly. Commands, flags, output envelopes, auth prompts, a
 
 ### Changing Contracts
 - Update producer, consumer, shared types, and docs in the same change.
-
-## Document Map
-- [README.md](README.md): quickstart and runtime operations
-- [AGENTS.md](AGENTS.md): Codex CLI working instructions
-- `packages/mcp-orchestrator/src/agents/*.md`: analytical agent prompts
