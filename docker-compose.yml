@@ -30,6 +30,7 @@ services:
       - .env
     environment:
       LLM_CLI_EXEC_PATH: /usr/local/bin/codex
+      OPENAI_BASE_URL: ""
     ports:
       - "5002:5002"
     volumes:
@@ -52,6 +53,7 @@ services:
       - .env
     environment:
       COLLECTOR_BASE_URL: http://collector:5002
+      OPENAI_BASE_URL: ""
       # CLI providers are the default path; OpenAI stays optional
       DEFAULT_PROVIDERS: ${DEFAULT_PROVIDERS:-codex,claude,gemini}
       # CLI paths inside the container
@@ -64,7 +66,8 @@ services:
       - ./data/orchestrator:/app/data
       # --- Host CLI auth directories (read-only) ---
       - ${HOME}/.claude:/home/node/.claude:ro
-      - ${HOME}/.codex:/home/node/.codex:ro
+      # Codex needs a writable home dir for cache/session fallback paths.
+      - ${HOME}/.codex:/home/node/.codex
       - ${HOME}/.gemini:/home/node/.gemini:ro
       # --- Host CLI binaries ---
       # Claude: native binary

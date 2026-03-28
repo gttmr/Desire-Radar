@@ -57,6 +57,7 @@ export function loadProvidersConfig(
   const defaultProviders = requestedDefaults.filter((provider) => enabledSet.has(provider));
   return {
     ...parsed,
+    OPENAI_BASE_URL: parsed.OPENAI_BASE_URL.trim() || 'https://api.openai.com/v1',
     CODEX_TRANSPORT: normalizeTransportMode(parsed.CODEX_TRANSPORT),
     CLAUDE_TRANSPORT: normalizeTransportMode(parsed.CLAUDE_TRANSPORT),
     GEMINI_TRANSPORT: normalizeTransportMode(parsed.GEMINI_TRANSPORT),

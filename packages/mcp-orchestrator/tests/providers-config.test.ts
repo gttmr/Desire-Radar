@@ -27,4 +27,15 @@ describe('loadProvidersConfig', () => {
     expect(config.enabledProviders).toEqual(['claude']);
     expect(config.defaultProviders).toEqual(['claude']);
   });
+
+  it('normalizes blank OPENAI_BASE_URL back to the default API URL', () => {
+    const config = loadProvidersConfig(
+      {
+        OPENAI_BASE_URL: '',
+      },
+      'data',
+    );
+
+    expect(config.OPENAI_BASE_URL).toBe('https://api.openai.com/v1');
+  });
 });

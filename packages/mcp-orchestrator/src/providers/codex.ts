@@ -220,6 +220,17 @@ export class CodexProvider implements ProviderAdapter {
     cwd?: string,
   ): Promise<CommandOutput> {
     return new Promise((resolve, reject) => {
+      const childEnv: NodeJS.ProcessEnv = {
+        ...process.env,
+        // Ensure codex finds its auth config at $HOME/.codex
+        HOME: process.env.HOME ?? '/home/node',
+      };
+      // Codex CLI should use its own auth/config path, not OpenAI API env passthrough.
+      delete childEnv.OPENAI_BASE_URL;
+      if (!childEnv.OPENAI_API_KEY?.trim()) {
+        delete childEnv.OPENAI_API_KEY;
+      }
+
       const proc = execFile(
         this.execPath,
         args,
@@ -227,11 +238,7 @@ export class CodexProvider implements ProviderAdapter {
           cwd,
           timeout: timeoutOverride ?? this.timeoutMs,
           maxBuffer: 10 * 1024 * 1024,
-          env: {
-            ...process.env,
-            // Ensure codex finds its auth config at $HOME/.codex
-            HOME: process.env.HOME ?? '/home/node',
-          },
+          env: childEnv,
         },
         (err, stdout, stderr) => {
           if (err) {

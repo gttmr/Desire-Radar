@@ -71,6 +71,9 @@ warn line
         '',
       );
       expect(options.cwd).toBe('/tmp/codex-session');
+      expect(options.env?.HOME).toBeDefined();
+      expect(options.env?.OPENAI_BASE_URL).toBeUndefined();
+      expect(options.env?.OPENAI_API_KEY).toBeUndefined();
       expect(args).toEqual([
         'exec',
         '-m',

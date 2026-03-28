@@ -16,11 +16,15 @@ RUN cd packages/mcp-orchestrator && npm run build
 FROM node:22-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-
-RUN apt-get update && apt-get install -y --no-install-recommends bash && rm -rf /var/lib/apt/lists/*
-
-# Set HOME so mounted auth dirs (~/.claude, ~/.codex) are found
 ENV HOME=/home/node
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV SSL_CERT_DIR=/etc/ssl/certs
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bash ca-certificates \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # Ensure home subdirectories exist for volume mounts
 RUN mkdir -p /home/node/.claude \
