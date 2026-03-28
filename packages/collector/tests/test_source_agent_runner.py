@@ -49,6 +49,23 @@ class _SessionPool:
         ]
 
 
+class _FlakySessionPool(_SessionPool):
+    def __init__(self, payload: dict, *, error_message: str = "analysis CLI timed out after 120s"):
+        super().__init__(payload)
+        self.fail_first = True
+        self.error_message = error_message
+
+    async def execute_json(self, prompt: str, *, domain: str, execution_mode: str):
+        self.calls.append((prompt, domain, execution_mode))
+        if self.fail_first:
+            self.fail_first = False
+            raise RuntimeError(self.error_message)
+        return await super().execute_json(prompt, domain=domain, execution_mode=execution_mode)
+
+    def reset(self, domain: str):
+        self.calls.append(("__reset__", domain, ""))
+
+
 class _RedditConnector(BaseConnector):
     name = "reddit_mentions"
     cadence_seconds = 300
@@ -73,6 +90,29 @@ def _build_runner(tmp_path, payload: dict) -> tuple[SourceAgentRunner, EvidenceS
         context_builder=SourceAgentContextBuilder(SourceAgentRegistry(registry)),
         artifact_store=artifact_store,
         session_pool=_SessionPool(payload),
+        submission_store=submission_store,
+        evidence_sink=sink,
+        enabled=True,
+        execution_mode="resume",
+    )
+    return runner, sink, submission_store
+
+
+def _build_runner_with_session_pool(tmp_path, session_pool) -> tuple[SourceAgentRunner, EvidenceSink, SubmissionStore]:
+    connectors = {"reddit_mentions": _RedditConnector()}
+    registry = SourceRegistry(
+        str(tmp_path / "sources.json"),
+        build_default_sources(connectors),
+    )
+    artifact_store = SourceAgentArtifactStore(str(tmp_path / "source-agent-artifacts.json"))
+    submission_store = SubmissionStore(str(tmp_path / "submissions.json"))
+    sink = EvidenceSink()
+    runner = SourceAgentRunner(
+        source_registry=registry,
+        agent_registry=SourceAgentRegistry(registry),
+        context_builder=SourceAgentContextBuilder(SourceAgentRegistry(registry)),
+        artifact_store=artifact_store,
+        session_pool=session_pool,
         submission_store=submission_store,
         evidence_sink=sink,
         enabled=True,
@@ -127,6 +167,9 @@ def test_source_agent_runner_preview_exposes_prompt_and_metadata(tmp_path):
     assert preview["session_domain"] == "source-agent:reddit_mentions"
     assert preview["prompt_path"].endswith("reddit_mentions.md")
     assert "Cursor rollout chatter increases" in preview["prompt"]
+    assert "metadata:" not in preview["prompt"]
+    assert "signal_types:" in preview["prompt"]
+    assert "Do not inspect workspace files" in preview["prompt"]
 
 
 @pytest.mark.asyncio
@@ -159,6 +202,59 @@ async def test_source_agent_runner_creates_artifact_and_derived_evidence(tmp_pat
     assert derived.source == "reddit_mentions"
     assert derived.source_kind == "derived"
     assert derived.producer_ref == "source_agent:reddit_mentions"
+
+
+@pytest.mark.asyncio
+async def test_source_agent_runner_retries_with_compact_context_after_parse_failure(tmp_path):
+    session_pool = _FlakySessionPool(
+        {
+            "summary": "Compact retry succeeded.",
+            "confidence": 0.67,
+            "warnings": [],
+            "theme_tags": ["workflow"],
+            "entity_hints": ["Cursor"],
+            "derived_evidence": [],
+        },
+        error_message="analysis CLI returned invalid JSON: {",
+    )
+    runner, sink, submission_store = _build_runner_with_session_pool(tmp_path, session_pool)
+    submission = _submission("reddit_mentions")
+    submission_store.create(submission)
+    sink.append(_evidence())
+
+    result = await runner.run_latest("reddit_mentions")
+
+    assert result.artifact.status == "completed"
+    assert result.artifact.execution_notes
+    assert session_pool.calls[0][2] == "resume"
+    assert ("__reset__", "source-agent:reddit_mentions", "") in session_pool.calls
+    assert session_pool.calls[-1][2] == "fresh"
+    assert session_pool.calls[0][0] != session_pool.calls[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_source_agent_runner_does_not_retry_timeout_failures(tmp_path):
+    session_pool = _FlakySessionPool(
+        {
+            "summary": "Should not be used.",
+            "confidence": 0.1,
+            "warnings": [],
+            "theme_tags": [],
+            "entity_hints": [],
+            "derived_evidence": [],
+        },
+        error_message="analysis CLI timed out after 120s",
+    )
+    runner, sink, submission_store = _build_runner_with_session_pool(tmp_path, session_pool)
+    submission = _submission("reddit_mentions")
+    submission_store.create(submission)
+    sink.append(_evidence())
+
+    result = await runner.run_latest("reddit_mentions")
+
+    assert result.artifact.status == "failed"
+    assert "timed out" in (result.artifact.error_message or "")
+    assert ("__reset__", "source-agent:reddit_mentions", "") not in session_pool.calls
 
 
 def test_source_agent_runner_status_surfaces_latest_artifact(tmp_path):

@@ -937,7 +937,8 @@ class IngestionEngine:
 
         try:
             for index, payload in enumerate(payloads, start=1):
-                saved = self.snapshot_store.save_record(
+                saved = await asyncio.to_thread(
+                    self.snapshot_store.save_record,
                     source=source_id,
                     payload=payload.data,
                     request_params=payload.request_params,
@@ -1154,7 +1155,8 @@ class IngestionEngine:
             resolve_success = 0
             resolve_miss = 0
             for index, payload in enumerate(record.evidence_payloads, start=1):
-                saved = self.snapshot_store.save_record(
+                saved = await asyncio.to_thread(
+                    self.snapshot_store.save_record,
                     source=record.source_id,
                     payload=payload,
                     request_params={},
@@ -1319,7 +1321,8 @@ class IngestionEngine:
         snapshot_ids: list[str] = []
         evidence_ids: list[str] = []
         try:
-            saved = self.snapshot_store.save_record(
+            saved = await asyncio.to_thread(
+                self.snapshot_store.save_record,
                 source=record.source_id,
                 payload=envelope.model_dump(),
                 request_params={},

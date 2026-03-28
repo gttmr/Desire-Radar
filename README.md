@@ -50,8 +50,10 @@ Discord human input / slash commands
 
 ### Collector
 - 공개 API, 사람 입력, agent push, pull connector를 모두 공통 ingestion pipeline으로 처리한다.
+- `reddit_mentions`는 비공식 `.json` 스크래핑이 아니라 Reddit OAuth Data API를 기준 경로로 사용한다. `REDDIT_CLIENT_ID`와 `REDDIT_REFRESH_TOKEN` 또는 `REDDIT_USERNAME`/`REDDIT_PASSWORD`가 없으면 source는 warning과 함께 skip된다.
 - source registry가 각 source의 `kind`, `ingestion_mode`, `configured_tier`, `effective_tier`, validity 상태를 관리한다.
 - source별 `agent.md`를 통해 source submission 단위 요약과 파생 evidence를 만들 수 있다.
+- source-agent는 collector responsiveness를 해치지 않도록 analysis batch와 분리된 timeout을 사용한다. 기본값은 `LLM_SOURCE_AGENT_TIMEOUT_SECONDS=30`이다.
 - candidate 분석은 기본적으로 `batch` 모드로 돌아가며, 상위 후보를 묶어 CLI 기반 LLM 호출을 수행한다.
 - collector candidate는 raw title token 목록이 아니라 canonical entity cluster를 기본 단위로 하고, 가능하면 `event_summary`, `theme_tags`, `graph_summary`, `supporting_terms`를 함께 노출한다.
 - `POST /ingest/human-input`는 free-form 입력을 받아 collector 내부에서 해석 결과 객체를 만든다.

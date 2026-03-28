@@ -24,6 +24,12 @@ _GENERIC_CANDIDATE_TERMS = {
     "good", "bad", "best", "worst", "story", "stories", "news", "leak",
     "leaks", "rumor", "rumors", "issue", "issues", "problem", "problems",
 }
+_PHRASE_NOISE_TERMS = _GENERIC_CANDIDATE_TERMS | {
+    "set", "stock", "stocks", "tumble", "tumbles", "fall", "falls", "jump",
+    "jumps", "surge", "surges", "decline", "declines", "diluting", "price",
+    "prices", "gasoline", "market", "markets", "push", "pushes", "boost",
+    "boosts", "launch", "launches",
+}
 _ACRONYM_OR_DIGIT_PATTERN = re.compile(r"^(?:[A-Z]{2,}[A-Z0-9]*|[A-Za-z]+[0-9]+[A-Za-z0-9]*)$")
 _NON_WORD_PATTERN = re.compile(r"[^a-z0-9]+")
 
@@ -248,7 +254,7 @@ class SignalCandidateBuilder:
                 if raw_term.lower() != canonical.lower():
                     aliases_by_entity[canonical].add(raw_term)
                 continue
-            if self._is_meaningful_fallback_term(raw_term):
+            if self._should_consider_unresolved_term(raw_term):
                 unresolved_terms.append(raw_term)
 
         if resolved_entities:
@@ -273,6 +279,7 @@ class SignalCandidateBuilder:
             return entries
 
         fallback_terms = self._dedupe_terms(unresolved_terms)
+        fallback_terms = self._normalize_fallback_terms(fallback_terms)
         if not fallback_terms:
             return []
         primary = fallback_terms[0]
@@ -305,10 +312,93 @@ class SignalCandidateBuilder:
         if lowered in _GENERIC_CANDIDATE_TERMS or len(lowered) < 3:
             return False
         if " " in normalized:
+            tokens = [token.lower() for token in normalized.split() if token]
+            if len(tokens) > 4:
+                return False
+            noise_count = sum(1 for token in tokens if token in _PHRASE_NOISE_TERMS)
+            if noise_count >= max(1, len(tokens) // 2):
+                return False
+            if tokens[0] in _PHRASE_NOISE_TERMS or tokens[-1] in _PHRASE_NOISE_TERMS:
+                return False
             return True
         if any("\uac00" <= char <= "\ud7a3" for char in normalized):
             return True
+        if normalized[:1].isupper() and normalized[1:].islower() and len(normalized) >= 4:
+            return True
         return bool(_ACRONYM_OR_DIGIT_PATTERN.match(normalized))
+
+    def _should_consider_unresolved_term(self, raw_text: str) -> bool:
+        normalized = raw_text.strip()
+        if not normalized or len(normalized) < 3:
+            return False
+        lowered = normalized.lower()
+        if " " not in normalized and lowered in _GENERIC_CANDIDATE_TERMS:
+            return False
+        return True
+
+    def _normalize_fallback_terms(self, values: list[str]) -> list[str]:
+        expanded: list[str] = []
+        for value in values:
+            expanded.append(value)
+            expanded.extend(self._phrase_component_terms(value))
+        meaningful = [
+            value for value in self._dedupe_terms(expanded)
+            if self._is_meaningful_fallback_term(value)
+        ]
+        return sorted(
+            meaningful,
+            key=lambda value: (
+                self._fallback_term_score(value),
+                -len(value.split()),
+                -len(value),
+            ),
+            reverse=True,
+        )
+
+    def _phrase_component_terms(self, value: str) -> list[str]:
+        if " " not in value:
+            return []
+        parts = [part.strip() for part in value.split() if part.strip()]
+        candidates: list[str] = []
+        for part in parts:
+            lowered = part.lower()
+            if lowered in _PHRASE_NOISE_TERMS:
+                continue
+            if len(part) < 3 and not _ACRONYM_OR_DIGIT_PATTERN.match(part):
+                continue
+            if any("\uac00" <= char <= "\ud7a3" for char in part):
+                candidates.append(part)
+                continue
+            if _ACRONYM_OR_DIGIT_PATTERN.match(part) or part[:1].isupper():
+                candidates.append(part)
+        return self._dedupe_terms(candidates)
+
+    def _fallback_term_score(self, value: str) -> int:
+        tokens = [token for token in value.split() if token]
+        lowered = [token.lower() for token in tokens]
+        if len(tokens) == 1:
+            if any("\uac00" <= char <= "\ud7a3" for char in value):
+                return 120
+            if _ACRONYM_OR_DIGIT_PATTERN.match(value):
+                return 110
+            if value[:1].isupper():
+                return 90
+            return 40
+
+        strong_count = sum(
+            1
+            for token in tokens
+            if any("\uac00" <= char <= "\ud7a3" for char in token)
+            or _ACRONYM_OR_DIGIT_PATTERN.match(token)
+            or any(char.isupper() for char in token[1:])
+        )
+        noise_count = sum(1 for token in lowered if token in _PHRASE_NOISE_TERMS)
+        score = 70 + (strong_count * 12) - (noise_count * 18) - ((len(tokens) - 2) * 6)
+        if lowered[0] in _PHRASE_NOISE_TERMS:
+            score -= 20
+        if lowered[-1] in _PHRASE_NOISE_TERMS:
+            score -= 28
+        return score
 
     def _dedupe_terms(self, values: list[str]) -> list[str]:
         ordered: list[str] = []

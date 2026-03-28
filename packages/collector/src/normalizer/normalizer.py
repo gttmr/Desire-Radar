@@ -36,9 +36,13 @@ _GENERIC_TITLE_WORDS = {
     "product", "promoting", "prompts", "rate", "released", "report",
     "reports", "require", "review", "rise", "rises", "royalty", "run",
     "says", "school", "scientific", "seat", "season", "service",
-    "shocking", "signals", "solar", "speed", "start", "story", "study",
-    "subscription", "suddenly", "tell", "testing", "theme", "ticket",
-    "tracking", "verify", "video", "violates", "watchlist", "week", "year",
+    "set", "shocking", "signals", "since", "solar", "speed", "start",
+    "started", "stocks", "story", "study", "subscription", "suddenly",
+    "take", "takes", "tax", "tell", "testing", "theme", "ticket",
+    "tracking", "tumble", "two", "unveils", "verify", "video",
+    "violates", "watchlist", "week", "worst", "year", "bites",
+    "breakthrough", "compression", "diluting", "export", "gasoline",
+    "memory", "pink", "proof", "quarter", "residency", "salt",
 }
 
 _TITLE_TOKEN_RE = re.compile(r"[A-Za-z0-9가-힣]+(?:'[A-Za-z]+)?")
@@ -46,7 +50,7 @@ _TITLE_TOKEN_RE = re.compile(r"[A-Za-z0-9가-힣]+(?:'[A-Za-z]+)?")
 
 def _extract_title_keywords(title: str) -> list[str]:
     """Extract entity-shaped candidates from a noisy title string."""
-    words = _TITLE_TOKEN_RE.findall(title)
+    words = list(_TITLE_TOKEN_RE.finditer(title))
     candidates: list[str] = []
 
     def add_candidate(value: str) -> None:
@@ -78,31 +82,44 @@ def _extract_title_keywords(title: str) -> list[str]:
             and (is_strong_entity_token(word) or is_simple_titlecase_token(word))
         )
 
+    def has_only_whitespace_between(previous_end: int, next_start: int) -> bool:
+        return not title[previous_end:next_start].strip()
+
     index = 0
     while index < len(words):
-        token = words[index]
+        token = words[index].group()
         if not is_entityish(token):
+            index += 1
+            continue
+
+        if is_strong_entity_token(token):
+            add_candidate(token)
             index += 1
             continue
 
         phrase = [token]
         lookahead = index + 1
+        previous_end = words[index].end()
         while lookahead < len(words):
-            next_token = words[lookahead]
+            next_token = words[lookahead].group()
+            if not is_simple_titlecase_token(next_token):
+                break
             if not is_entityish(next_token):
                 break
+            if not has_only_whitespace_between(previous_end, words[lookahead].start()):
+                break
             phrase.append(next_token)
+            previous_end = words[lookahead].end()
             lookahead += 1
 
         if len(phrase) >= 2:
-            add_candidate(" ".join(phrase[:4]))
-            for part in phrase:
-                if is_strong_entity_token(part):
-                    add_candidate(part)
-        else:
-            add_candidate(token)
+            add_candidate(" ".join(phrase[:3]))
+            index = lookahead
+            continue
 
-        index = lookahead
+        add_candidate(token)
+
+        index += 1
 
     return candidates
 

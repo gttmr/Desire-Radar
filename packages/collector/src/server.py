@@ -61,6 +61,7 @@ from .config import (
     LLM_SOURCE_AGENT_ENABLED,
     LLM_SOURCE_AGENT_EXECUTION_MODE,
     LLM_SOURCE_AGENT_MAX_INPUT_CHARS,
+    LLM_SOURCE_AGENT_TIMEOUT_SECONDS,
     LLM_SESSION_DOMAIN,
     LLM_SESSION_MAX_IDLE_MINUTES,
     LLM_SESSION_MAX_TURNS,
@@ -223,12 +224,34 @@ async def lifespan(app: FastAPI):
         source_agent_registry,
         max_input_chars=LLM_SOURCE_AGENT_MAX_INPUT_CHARS,
     )
+    source_agent_session_pool = SessionPool(
+        exec_path=LLM_CLI_EXEC_PATH,
+        provider=LLM_CLI_PROVIDER,
+        initial_args=LLM_CLI_INITIAL_ARGS,
+        resume_args=LLM_CLI_RESUME_ARGS,
+        model=LLM_DEFAULT_MODEL,
+        model_flag=LLM_CLI_MODEL_FLAG,
+        timeout_seconds=LLM_SOURCE_AGENT_TIMEOUT_SECONDS,
+        memory_char_budget=LLM_SESSION_MEMORY_CHAR_BUDGET,
+        memory_entry_count=LLM_SESSION_MEMORY_ENTRY_COUNT,
+        memory_entry_char_budget=LLM_SESSION_MEMORY_ENTRY_CHAR_BUDGET,
+        max_idle_minutes=LLM_SESSION_MAX_IDLE_MINUTES,
+        max_turns=LLM_SESSION_MAX_TURNS,
+        session_workdir_root=LLM_SESSION_WORKDIR_ROOT,
+        max_uncached_input_tokens=LLM_SESSION_MAX_UNCACHED_INPUT_TOKENS,
+        parse_error_snippet_chars=LLM_PARSE_ERROR_SNIPPET_CHARS,
+        use_stdin=LLM_CLI_USE_STDIN,
+        base_args=LLM_CLI_ARGS,
+        prompt_mode=LLM_CLI_PROMPT_MODE,
+        prompt_flag=LLM_CLI_PROMPT_FLAG,
+        continue_flag=LLM_CLI_CONTINUE_FLAG,
+    )
     source_agent_runner = SourceAgentRunner(
         source_registry=source_registry,
         agent_registry=source_agent_registry,
         context_builder=source_agent_context_builder,
         artifact_store=source_agent_artifact_store,
-        session_pool=session_pool,
+        session_pool=source_agent_session_pool,
         submission_store=submission_store,
         evidence_sink=evidence_sink,
         enabled=LLM_SOURCE_AGENT_ENABLED,
@@ -282,9 +305,10 @@ async def lifespan(app: FastAPI):
         LLM_HUMAN_ROUTING_SESSION_DOMAIN,
     )
     logger.info(
-        "Collector source agents %s (mode=%s)",
+        "Collector source agents %s (mode=%s, timeout=%ss)",
         "enabled" if LLM_SOURCE_AGENT_ENABLED else "disabled",
         LLM_SOURCE_AGENT_EXECUTION_MODE,
+        LLM_SOURCE_AGENT_TIMEOUT_SECONDS,
     )
 
     # Initialize scheduler with entity resolver and analysis engine

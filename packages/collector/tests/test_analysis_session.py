@@ -1,7 +1,8 @@
 import json
+import os
 
 from src.analysis.models import PackedContext
-from src.analysis.session import CliSession
+from src.analysis.session import CliSession, SessionPool
 
 
 def _session() -> CliSession:
@@ -128,3 +129,30 @@ def test_session_extracts_generic_json_payload_from_codex_jsonl():
     assert isinstance(parsed, dict)
     assert parsed["route"] == "human_analyst_note"
     assert usage.uncached_input_tokens == 50
+
+
+def test_session_pool_normalizes_relative_workdir_root_to_absolute(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    pool = SessionPool(
+        exec_path="mock",
+        provider="codex",
+        initial_args="exec --json",
+        resume_args="exec resume --json",
+        model="gpt-5.4-mini",
+        model_flag="-m",
+        timeout_seconds=5,
+        memory_char_budget=1000,
+        memory_entry_count=3,
+        memory_entry_char_budget=160,
+        max_idle_minutes=20,
+        max_turns=5,
+        max_uncached_input_tokens=20000,
+        parse_error_snippet_chars=200,
+        use_stdin=True,
+        session_workdir_root="data/llm-session-workdirs",
+    )
+
+    session = pool._new_session("source-agent:reddit_mentions")
+
+    assert os.path.isabs(session.working_dir)
+    assert session.working_dir.startswith(str(tmp_path))

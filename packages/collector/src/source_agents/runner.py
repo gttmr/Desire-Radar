@@ -111,13 +111,19 @@ class SourceAgentRunner:
             return None
 
         try:
-            preview = self.context_builder.build(submission.source_id, submission, evidences)
-            result = await self.session_pool.execute_json(
-                preview.prompt,
-                domain=preview.session_domain,
-                execution_mode=self.execution_mode,
+            preview = self.context_builder.build(
+                submission.source_id,
+                submission,
+                evidences,
+            )
+            result, execution_notes = await self._execute_with_fallback(
+                preview=preview,
+                submission=submission,
+                evidences=evidences,
             )
             decision = SourceAgentDecision.model_validate(result.payload or {})
+            if execution_notes:
+                decision.warnings = [*decision.warnings, *execution_notes]
             derived_evidence = self._build_derived_evidence(
                 submission=submission,
                 source_tier=source.effective_tier,
@@ -144,6 +150,7 @@ class SourceAgentRunner:
                 entity_hints=decision.entity_hints,
                 relationship_hints=decision.relationship_hints,
                 derived_evidence_ids=[item.evidence_id for item in derived_evidence],
+                execution_notes=execution_notes,
                 raw_text=result.raw_text,
                 usage=result.usage,
                 created_at=_now_iso(),
@@ -166,6 +173,7 @@ class SourceAgentRunner:
                 session_domain=source.agent_session_domain or f"source-agent:{submission.source_id}",
                 summary=None,
                 confidence=None,
+                execution_notes=[],
                 error_message=str(exc),
                 created_at=_now_iso(),
                 updated_at=_now_iso(),
@@ -178,6 +186,50 @@ class SourceAgentRunner:
                 error_message=str(exc),
             )
             return SourceAgentRunResult(artifact=artifact, derived_evidence=[])
+
+    async def _execute_with_fallback(
+        self,
+        *,
+        preview: Any,
+        submission: SubmissionRecord,
+        evidences: list[Evidence],
+    ) -> tuple[Any, list[str]]:
+        notes: list[str] = []
+        try:
+            result = await self.session_pool.execute_json(
+                preview.prompt,
+                domain=preview.session_domain,
+                execution_mode=self.execution_mode,
+            )
+            return result, notes
+        except Exception as exc:
+            if not self._should_retry_with_compact_context(exc):
+                raise RuntimeError(
+                    "source-agent execution failed; "
+                    f"initial={self._short_error(exc)}"
+                ) from exc
+            compact_preview = self.context_builder.build(
+                submission.source_id,
+                submission,
+                evidences,
+                compact=True,
+            )
+            notes.append("source-agent retried with compact context")
+            notes.append(f"initial source-agent execution failed: {self._short_error(exc)}")
+            self.session_pool.reset(preview.session_domain)
+            try:
+                result = await self.session_pool.execute_json(
+                    compact_preview.prompt,
+                    domain=compact_preview.session_domain,
+                    execution_mode="fresh",
+                )
+                return result, notes
+            except Exception as compact_exc:
+                raise RuntimeError(
+                    "source-agent execution failed; "
+                    f"initial={self._short_error(exc)}; "
+                    f"compact_retry={self._short_error(compact_exc)}"
+                ) from compact_exc
 
     def _resolve_source_input(
         self,
@@ -213,6 +265,16 @@ class SourceAgentRunner:
                 metadata={"synthetic_preview": True},
             )
         return submission, evidences
+
+    def _should_retry_with_compact_context(self, exc: Exception) -> bool:
+        message = self._short_error(exc).lower()
+        retry_markers = (
+            "invalid json",
+            "did not include agent_message",
+            "returned unreadable response",
+            "parse_failed",
+        )
+        return any(marker in message for marker in retry_markers)
 
     def _build_derived_evidence(
         self,
@@ -281,6 +343,12 @@ class SourceAgentRunner:
                 )
             )
         return results
+
+    def _short_error(self, exc: Exception) -> str:
+        message = str(exc).strip()
+        if len(message) <= 240:
+            return message
+        return message[:237].rstrip() + "..."
 
     def _fallback_entities(self, evidences: list[Evidence]) -> list[str]:
         entities: list[str] = []

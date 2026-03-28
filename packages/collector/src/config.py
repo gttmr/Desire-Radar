@@ -42,6 +42,16 @@ REDDIT_USER_AGENT: str = _get(
     "REDDIT_USER_AGENT",
     "agentic-collector/0.1 (research bot; contact@example.com)",
 )
+REDDIT_CLIENT_ID: str = _get("REDDIT_CLIENT_ID")
+REDDIT_CLIENT_SECRET: str = _get("REDDIT_CLIENT_SECRET")
+REDDIT_USERNAME: str = _get("REDDIT_USERNAME")
+REDDIT_PASSWORD: str = _get("REDDIT_PASSWORD")
+REDDIT_REFRESH_TOKEN: str = _get("REDDIT_REFRESH_TOKEN")
+REDDIT_REQUEST_LIMIT: int = _get_int("REDDIT_REQUEST_LIMIT", 25)
+REDDIT_SUBREDDITS: str = _get(
+    "REDDIT_SUBREDDITS",
+    "technology,gadgets,gaming,apps,business",
+)
 
 # Optional API keys
 NAVER_CLIENT_ID: str = _get("NAVER_CLIENT_ID")
@@ -135,6 +145,10 @@ LLM_SOURCE_AGENT_ENABLED: bool = _get_bool(
 LLM_SOURCE_AGENT_EXECUTION_MODE: str = _get(
     "LLM_SOURCE_AGENT_EXECUTION_MODE",
     "resume",
+)
+LLM_SOURCE_AGENT_TIMEOUT_SECONDS: int = _get_int(
+    "LLM_SOURCE_AGENT_TIMEOUT_SECONDS",
+    min(LLM_TIMEOUT_SECONDS, 30),
 )
 LLM_SOURCE_AGENT_MAX_INPUT_CHARS: int = _get_int(
     "LLM_SOURCE_AGENT_MAX_INPUT_CHARS",

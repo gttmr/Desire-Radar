@@ -46,6 +46,42 @@ EDITABLE_ENV_SETTINGS: tuple[EditableEnvSetting, ...] = (
         description="User-Agent string sent by the Reddit connector.",
     ),
     EditableEnvSetting(
+        key="REDDIT_CLIENT_ID",
+        label="Reddit Client ID",
+        description="OAuth client id for the Reddit Data API script app.",
+    ),
+    EditableEnvSetting(
+        key="REDDIT_CLIENT_SECRET",
+        label="Reddit Client Secret",
+        description="OAuth client secret for the Reddit Data API script app.",
+    ),
+    EditableEnvSetting(
+        key="REDDIT_USERNAME",
+        label="Reddit Username",
+        description="Reddit account username used by the collector script app.",
+    ),
+    EditableEnvSetting(
+        key="REDDIT_PASSWORD",
+        label="Reddit Password",
+        description="Reddit account password used when refresh_token is not configured.",
+    ),
+    EditableEnvSetting(
+        key="REDDIT_REFRESH_TOKEN",
+        label="Reddit Refresh Token",
+        description="Preferred OAuth refresh token for the Reddit connector.",
+    ),
+    EditableEnvSetting(
+        key="REDDIT_SUBREDDITS",
+        label="Reddit Subreddits",
+        description="Comma-separated subreddit list fetched by the Reddit connector.",
+    ),
+    EditableEnvSetting(
+        key="REDDIT_REQUEST_LIMIT",
+        label="Reddit Request Limit",
+        description="Number of posts fetched per subreddit request.",
+        input_type="integer",
+    ),
+    EditableEnvSetting(
         key="SOURCE_RUN_WORKER_CONCURRENCY",
         label="Source Worker Concurrency",
         description="Number of workers processing queued source runs.",

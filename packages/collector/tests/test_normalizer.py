@@ -84,6 +84,42 @@ class TestRedditNormalizer:
         assert "FBI" in ev.entity_candidates
         assert "Kash Patel" in ev.entity_candidates
 
+    def test_normalize_reddit_avoids_headline_fragment_phrases(self):
+        raw = {
+            "title": "Microsoft Set for Worst Quarter Since 2008 as AI Takes Two Bites",
+            "subreddit": "technology",
+            "score": 270,
+            "upvote_ratio": 0.82,
+            "permalink": "/r/technology/test_microsoft/",
+        }
+        results = normalize("reddit_mentions", raw, "snap_006")
+
+        assert len(results) == 1
+        ev = results[0]
+        assert "Microsoft" in ev.entity_candidates
+        assert "AI" in ev.entity_candidates
+        assert all("Microsoft Set" not in candidate for candidate in ev.entity_candidates)
+        assert all("Quarter" not in candidate for candidate in ev.entity_candidates)
+
+    def test_normalize_reddit_breaks_phrases_on_punctuation_and_generic_trailers(self):
+        raw = {
+            "title": "Micron, SanDisk Stocks Tumble After Google Unveils AI Memory Compression Breakthrough",
+            "subreddit": "technology",
+            "score": 310,
+            "upvote_ratio": 0.89,
+            "permalink": "/r/technology/test_micron/",
+        }
+        results = normalize("reddit_mentions", raw, "snap_007")
+
+        assert len(results) == 1
+        ev = results[0]
+        assert "Micron" in ev.entity_candidates
+        assert "SanDisk" in ev.entity_candidates
+        assert "Google" in ev.entity_candidates
+        assert "AI" in ev.entity_candidates
+        assert all("Stocks" not in candidate for candidate in ev.entity_candidates)
+        assert all("Tumble" not in candidate for candidate in ev.entity_candidates)
+
 
 class TestManualObservationNormalizer:
     def test_normalize_manual_observation(self):

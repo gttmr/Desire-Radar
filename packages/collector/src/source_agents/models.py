@@ -58,6 +58,7 @@ class SourceAgentArtifact(BaseModel):
     entity_hints: list[str] = Field(default_factory=list)
     relationship_hints: list[EvidenceRelationshipHint] = Field(default_factory=list)
     derived_evidence_ids: list[str] = Field(default_factory=list)
+    execution_notes: list[str] = Field(default_factory=list)
     raw_text: str = ""
     error_message: str | None = None
     usage: ExecutionUsage = Field(default_factory=ExecutionUsage)

@@ -151,6 +151,37 @@ class TestSignalCandidateBuilder:
         assert [candidate.entity for candidate in candidates] == ["Microsoft"]
         assert "AV1" in candidates[0].supporting_terms
 
+    def test_fallback_prefers_entity_like_terms_over_noisy_phrase(self):
+        builder = SignalCandidateBuilder()
+        evidence = [
+            _make_evidence(
+                ["Micron SanDisk Stocks Tumble"],
+                evidence_id="ev_phrase",
+                title_or_label="Micron SanDisk Stocks Tumble After Weak Guidance",
+            )
+        ]
+
+        candidates = builder.build_candidates(evidence)
+
+        assert len(candidates) == 1
+        assert candidates[0].entity in {"Micron", "SanDisk"}
+        assert "Micron SanDisk Stocks Tumble" not in candidates[0].supporting_terms
+
+    def test_fallback_drops_phrase_when_only_noise_suffix_exists(self):
+        builder = SignalCandidateBuilder()
+        evidence = [
+            _make_evidence(
+                ["Microsoft Set"],
+                evidence_id="ev_noise_phrase",
+                title_or_label="Microsoft Set to Announce Additional Changes",
+            )
+        ]
+
+        candidates = builder.build_candidates(evidence)
+
+        assert len(candidates) == 1
+        assert candidates[0].entity == "Microsoft"
+
     def test_candidate_includes_event_and_graph_facets(self):
         builder = SignalCandidateBuilder()
         evidence = [

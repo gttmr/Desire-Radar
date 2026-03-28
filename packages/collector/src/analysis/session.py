@@ -72,7 +72,7 @@ class CliSession:
         self.prompt_mode = prompt_mode
         self.prompt_flag = prompt_flag
         self.continue_flag = continue_flag
-        self.working_dir = working_dir or "/tmp"
+        self.working_dir = os.path.abspath(working_dir or "/tmp")
         os.makedirs(self.working_dir, exist_ok=True)
         logical_session_id = uuid4().hex
         self.state = SessionState(
