@@ -159,11 +159,12 @@ function loadJsonFile<T>(policyDir: string, fileName: string, schema: z.ZodSchem
 
 export function loadConfig(): Config {
   const policyDir = resolvePolicyDir();
+  const runtime = loadRuntimeConfig(process.env);
 
   return {
-    runtime: loadRuntimeConfig(process.env),
+    runtime,
     collector: loadCollectorConfig(process.env),
-    providers: loadProvidersConfig(process.env),
+    providers: loadProvidersConfig(process.env, runtime.DATA_DIR),
     providerHealth: loadProviderHealthConfig(process.env),
     policies: {
       policyDir,

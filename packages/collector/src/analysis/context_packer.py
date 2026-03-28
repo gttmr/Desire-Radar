@@ -6,7 +6,13 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
-from .models import AnalysisProjection, PackedContext
+from .models import (
+    AnalysisBundle,
+    AnalysisGraphEdge,
+    AnalysisGraphNode,
+    AnalysisProjection,
+    PackedContext,
+)
 
 _SINGLE_RESPONSE_INSTRUCTIONS = (
     "Return JSON only with keys: summary, confidence, desire_types, "
@@ -73,7 +79,8 @@ class ContextPacker:
         projection: AnalysisProjection | None = None,
     ) -> PackedContext:
         selected = self._select_evidence(evidences)
-        prompt = self._render_single_prompt(candidate, selected, projection)
+        bundle = self._build_bundle(candidate, selected)
+        prompt = self._render_single_prompt(candidate, selected, projection, bundle)
         prompt = self._trim_to_budget(prompt, self.char_budget)
         omitted_fields = self._omitted_fields()
         entity = getattr(candidate, "entity")
@@ -81,6 +88,7 @@ class ContextPacker:
             entity=entity,
             entities=[entity],
             prompt=prompt,
+            bundle=bundle,
             evidence_ids=[ev.evidence_id for ev in selected],
             sources=list(dict.fromkeys(ev.source for ev in selected)),
             char_count=len(prompt),
@@ -102,6 +110,7 @@ class ContextPacker:
 
         for index, (candidate, evidences, projection) in enumerate(items, start=1):
             selected = self._select_evidence(evidences)
+            bundle = self._build_bundle(candidate, selected)
             entity = getattr(candidate, "entity")
             entities.append(entity)
             evidence_ids.extend(ev.evidence_id for ev in selected)
@@ -111,6 +120,7 @@ class ContextPacker:
                     candidate,
                     selected,
                     projection,
+                    bundle,
                     include_previous=self.batch_include_previous_analysis,
                     index=index,
                 )
@@ -122,6 +132,13 @@ class ContextPacker:
             entity=entities[0] if entities else None,
             entities=entities,
             prompt=prompt,
+            bundle=AnalysisBundle(
+                entity=entities[0] if entities else None,
+                entities=entities,
+                summary=f"Batch bundle for {len(entities)} candidates",
+                evidence_ids=evidence_ids,
+                sources=list(dict.fromkeys(sources)),
+            ),
             evidence_ids=evidence_ids,
             sources=list(dict.fromkeys(sources)),
             char_count=len(prompt),
@@ -168,11 +185,13 @@ class ContextPacker:
         candidate: Any,
         evidences: list[Any],
         projection: AnalysisProjection | None,
+        bundle: AnalysisBundle,
     ) -> str:
         block = self._render_candidate_block(
             candidate,
             evidences,
             projection,
+            bundle,
             include_previous=self.include_previous_analysis,
             index=None,
         )
@@ -183,6 +202,7 @@ class ContextPacker:
         candidate: Any,
         evidences: list[Any],
         projection: AnalysisProjection | None,
+        bundle: AnalysisBundle,
         *,
         include_previous: bool,
         index: int | None,
@@ -203,10 +223,72 @@ class ContextPacker:
         lines.append("Sources: " + ", ".join(getattr(candidate, "sources", [])))
         if include_previous and projection and projection.summary:
             lines.append("Previous: " + projection.summary.strip())
+        if bundle.summary:
+            lines.append("Graph: " + bundle.summary)
         lines.append("Evidence:")
         for ev in evidences:
             lines.append("- " + self._render_evidence_line(ev))
         return "\n".join(lines)
+
+    def _build_bundle(self, candidate: Any, evidences: list[Any]) -> AnalysisBundle:
+        entity = getattr(candidate, "entity")
+        nodes: dict[str, AnalysisGraphNode] = {}
+        edges: dict[str, AnalysisGraphEdge] = {}
+        summary_parts: list[str] = []
+
+        def ensure_node(node_id: str, label: str, kind: str, weight: float | None = None) -> None:
+            if node_id not in nodes:
+                nodes[node_id] = AnalysisGraphNode(
+                    node_id=node_id,
+                    label=label,
+                    kind=kind,
+                    weight=weight,
+                )
+
+        def ensure_edge(
+            from_node: str,
+            to_node: str,
+            kind: str,
+            evidence_id: str,
+            weight: float | None = 1.0,
+        ) -> None:
+            key = f"{from_node}|{kind}|{to_node}"
+            if key not in edges:
+                edges[key] = AnalysisGraphEdge(
+                    from_node=from_node,
+                    to_node=to_node,
+                    kind=kind,
+                    weight=weight,
+                    evidence_ids=[evidence_id],
+                )
+                return
+            if evidence_id not in edges[key].evidence_ids:
+                edges[key].evidence_ids.append(evidence_id)
+            if weight is not None:
+                edges[key].weight = (edges[key].weight or 0.0) + weight
+
+        entity_node_id = f"entity:{entity}"
+        ensure_node(entity_node_id, entity, "entity", float(len(evidences)))
+
+        for ev in evidences:
+            source_node_id = f"source:{ev.source}"
+            signal_node_id = f"signal:{getattr(ev, 'signal_type', 'signal')}"
+            ensure_node(source_node_id, ev.source, "source")
+            ensure_node(signal_node_id, getattr(ev, "signal_type", "signal"), "signal")
+            ensure_edge(source_node_id, entity_node_id, "observed_entity", ev.evidence_id)
+            ensure_edge(entity_node_id, signal_node_id, "expresses_signal", ev.evidence_id)
+            summary_parts.append(f"{ev.source}->{getattr(ev, 'signal_type', 'signal')}")
+
+        summary = " | ".join(list(dict.fromkeys(summary_parts))[:5])
+        return AnalysisBundle(
+            entity=entity,
+            entities=[entity],
+            summary=summary,
+            evidence_ids=[ev.evidence_id for ev in evidences],
+            sources=list(dict.fromkeys(ev.source for ev in evidences)),
+            graph_nodes=list(nodes.values()),
+            graph_edges=list(edges.values()),
+        )
 
     def _render_evidence_line(self, ev: Any) -> str:
         title = getattr(ev, "title_or_label", "").strip()

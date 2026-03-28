@@ -156,6 +156,7 @@ curl http://127.0.0.1:5003/health
 - provider 항목은 `available`만 보지 말고 아래 필드를 같이 본다.
   - `auth_status`
   - `execute_status`
+  - `transport_status`
   - `ready_for_execution`
   - `failure_kind`
   - `error_summary`
@@ -274,6 +275,14 @@ curl http://127.0.0.1:5003/health
 - `claude`: `claude auth status`
 - `gemini`: 별도 status 명령이 불안정하면 headless prompt probe 기준
 - 실제 readiness 판단은 auth probe가 아니라 execute probe까지 통과했는지로 본다.
+- external injection transport를 쓰는 경우에는 provider stdout이 아니라 session directory의 `inbox/`, `outbox/`, `artifacts/`를 같이 본다.
+
+session artifact 위치 예시:
+
+```bash
+find data/provider-sessions -maxdepth 5 -type d | sed -n '1,40p'
+find data/llm-session-workdirs -maxdepth 5 -type d | sed -n '1,40p'
+```
 
 ## Collector Test Mode
 로컬 Discord 테스트에서 collector pull source 때문에 noisy startup이 문제면, pull source를 잠시 꺼도 된다.

@@ -5,6 +5,7 @@ import type {
   ProviderAdapter,
   ProviderExecutionRequest,
   ProviderHealthProbe,
+  ProviderTransportMode,
   ProviderResult,
 } from './base.js';
 import {
@@ -12,6 +13,9 @@ import {
   buildFailedHealthProbe,
   buildProviderHealthProbe,
 } from './errors.js';
+type GeminiProviderOptions = {
+  defaultTransportMode?: ProviderTransportMode;
+};
 
 export function classifyGeminiError(message: string): string {
   if (/MODEL_CAPACITY_EXHAUSTED|RESOURCE_EXHAUSTED|status 429|Too Many Requests/i.test(message)) {
@@ -63,23 +67,33 @@ export function extractGeminiPromptResult(stdout: string): string {
 
 export class GeminiProvider implements ProviderAdapter {
   readonly name = 'gemini';
+  readonly defaultTransportMode: ProviderTransportMode;
 
   constructor(
     private readonly execPath: string = 'gemini',
     private readonly timeoutMs: number = 120_000,
-  ) {}
+    options: GeminiProviderOptions = {},
+  ) {
+    this.defaultTransportMode = options.defaultTransportMode ?? 'cli_exec';
+  }
 
   async execute(request: ProviderExecutionRequest): Promise<ProviderResult> {
-    const sid = request.sessionId ?? randomUUID();
+    const sid = request.logicalSessionId ?? request.sessionId ?? randomUUID();
     const start = Date.now();
     const model = request.model;
 
     try {
       const args = ['-o', 'json', '-p', request.prompt];
+      if ((request.turnCount ?? 0) > 0) {
+        args.unshift('latest');
+        args.unshift('--resume');
+      }
       if (model) {
         args.push('--model', model);
       }
-      const text = extractGeminiPromptResult(await this.run(args, request.timeoutMs));
+      const text = extractGeminiPromptResult(
+        await this.run(args, request.timeoutMs, request.workingDirectory),
+      );
       return { text, sessionId: sid, durationMs: Date.now() - start, model, status: 'completed' };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -120,12 +134,13 @@ export class GeminiProvider implements ProviderAdapter {
     }
   }
 
-  private run(args: string[], timeoutOverride?: number): Promise<string> {
+  private run(args: string[], timeoutOverride?: number, cwd?: string): Promise<string> {
     return new Promise((resolve, reject) => {
       execFile(
         this.execPath,
         args,
         {
+          cwd,
           timeout: timeoutOverride ?? this.timeoutMs,
           maxBuffer: 10 * 1024 * 1024,
           env: buildGeminiEnv(this.execPath),

@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { AgentTurn, AgentResponse, EvidenceBundle } from '@agentic/shared-types';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { SessionStore } from '../sessions/session-store.js';
@@ -10,8 +12,10 @@ import type {
   ModelProfile,
   ProviderFailureKind,
   ProviderHealthProbe,
+  ProviderTransportMode,
 } from '../providers/base.js';
 import { ExecutionPolicyResolver } from '../policy/execution.js';
+import { ExternalInboxTransport } from '../providers/external-inbox.js';
 
 export interface ExecuteAgentParams {
   runId: string;
@@ -89,13 +93,20 @@ function tryParseResponse(text: string): AgentResponse {
 }
 
 export class AgentExecutor {
+  private readonly externalInjectionPollIntervalMs: number;
+
   constructor(
     private readonly registry: ProviderRegistry,
     private readonly sessionStore: SessionStore,
     private readonly promptComposer: PromptComposer,
     private readonly runStore: RunStore,
     private readonly policyResolver: ExecutionPolicyResolver,
-  ) {}
+    options: {
+      externalInjectionPollIntervalMs?: number;
+    } = {},
+  ) {
+    this.externalInjectionPollIntervalMs = options.externalInjectionPollIntervalMs ?? 1_000;
+  }
 
   async executeAgent(params: ExecuteAgentParams): Promise<AgentTurn[]> {
     const turns: AgentTurn[] = [];
@@ -125,36 +136,13 @@ export class AgentExecutor {
         continue;
       }
 
-      const readiness = await this.probeProviderReadiness(adapter);
-      if (!(readiness.ready_for_execution ?? readiness.available)) {
-        turns.push(
-          this.createDegradedTurn({
-            params,
-            providerName,
-            message:
-              readiness.error_summary ??
-              readiness.error ??
-              `${providerName} is not ready for execution`,
-            kind:
-              readiness.failure_kind ??
-              (readiness.execute_status !== 'healthy' && readiness.execute_status !== 'unprobed'
-                ? readiness.execute_status
-                : readiness.auth_status !== 'healthy' && readiness.auth_status !== 'unprobed'
-                  ? readiness.auth_status
-                  : 'unknown'),
-            recoverable: readiness.recoverable,
-            model,
-            modelProfile,
-          }),
-        );
-        continue;
-      }
-
+      const defaultTransportMode = adapter.defaultTransportMode ?? 'cli_exec';
       let session = this.sessionStore.getSession(params.agentName, providerName, {
         phase: params.phase,
         modelProfile,
         runScope: params.runScope ?? params.runId,
         model,
+        transportMode: defaultTransportMode,
       });
       if (!session) {
         session = this.sessionStore.createSession(params.agentName, providerName, {
@@ -162,7 +150,74 @@ export class AgentExecutor {
           modelProfile,
           runScope: params.runScope ?? params.runId,
           model,
+          transportMode: defaultTransportMode,
         });
+      }
+
+      const transportMode = this.resolveTransportMode(defaultTransportMode, session.turn_count);
+      const transportTarget =
+        transportMode === 'external_injection'
+          ? (session.transport_target ?? session.session_dir ?? null)
+          : session.transport_target ?? null;
+
+      const readiness = await this.probeProviderReadiness(adapter);
+      const transportReadiness =
+        transportMode === 'external_injection'
+          ? await new ExternalInboxTransport({
+              provider: providerName,
+              pollIntervalMs: this.externalInjectionPollIntervalMs,
+            }).probe(transportTarget)
+          : undefined;
+      const readyForExecution =
+        transportMode === 'external_injection'
+          ? transportReadiness?.ready_for_execution ?? transportReadiness?.available ?? false
+          : readiness.ready_for_execution ?? readiness.available;
+      if (!(readiness.ready_for_execution ?? readiness.available)) {
+        if (transportMode === 'external_injection' && readyForExecution) {
+          // external injection path deliberately bypasses local CLI readiness
+        } else if (transportMode !== 'external_injection') {
+          turns.push(
+            this.createDegradedTurn({
+              params,
+              providerName,
+              message:
+                readiness.error_summary ??
+                readiness.error ??
+                `${providerName} is not ready for execution`,
+              kind:
+                readiness.failure_kind ??
+                (readiness.execute_status !== 'healthy' && readiness.execute_status !== 'unprobed'
+                  ? readiness.execute_status
+                  : readiness.auth_status !== 'healthy' && readiness.auth_status !== 'unprobed'
+                    ? readiness.auth_status
+                    : 'unknown'),
+              recoverable: readiness.recoverable,
+              model,
+              modelProfile,
+            }),
+          );
+          continue;
+        }
+      }
+      if (transportMode === 'external_injection' && !readyForExecution) {
+        turns.push(
+          this.createDegradedTurn({
+            params,
+            providerName,
+            message:
+              transportReadiness?.error_summary ??
+              transportReadiness?.error ??
+              `${providerName} external injection transport is not ready`,
+            kind:
+              transportReadiness?.failure_kind ??
+              transportReadiness?.transport_status ??
+              'unknown',
+            recoverable: transportReadiness?.recoverable,
+            model,
+            modelProfile,
+          }),
+        );
+        continue;
       }
 
       const prompt = await this.promptComposer.compose({
@@ -182,15 +237,42 @@ export class AgentExecutor {
         verdictSummary: params.verdictSummary,
       });
 
-      const result = await adapter.execute({
+      this.writeSessionArtifact(session.session_dir, session.turn_count + 1, 'request', {
+        provider: providerName,
+        agent_name: params.agentName,
+        phase: params.phase,
+        model_profile: modelProfile,
+        model,
+        transport_mode: transportMode,
+        transport_target: transportTarget,
+        logical_session_id: session.session_id,
+        provider_session_id: session.provider_session_id ?? null,
         prompt,
-        sessionId: session.session_id,
+        created_at: new Date().toISOString(),
+      });
+
+      const request = {
+        prompt,
+        sessionId: session.provider_session_id ?? undefined,
+        logicalSessionId: session.session_id,
+        workingDirectory: session.session_dir,
+        turnCount: session.turn_count,
+        transportMode,
+        transportTarget,
         model,
         modelProfile,
         phase: params.phase,
         agentName: params.agentName,
         responseFormat: resolvedPolicy.responseFormat,
-      });
+      } as const;
+
+      const result =
+        transportMode === 'external_injection'
+          ? await new ExternalInboxTransport({
+              provider: providerName,
+              pollIntervalMs: this.externalInjectionPollIntervalMs,
+            }).execute(request)
+          : await adapter.execute(request);
 
       const response =
         result.status === 'degraded'
@@ -214,7 +296,26 @@ export class AgentExecutor {
       });
 
       this.runStore.saveTurn(turn);
-      this.sessionStore.updateSession(session.session_id, turn);
+      this.writeSessionArtifact(session.session_dir, session.turn_count + 1, 'response', {
+        provider: providerName,
+        agent_name: params.agentName,
+        phase: params.phase,
+        transport_mode: transportMode,
+        transport_target: transportTarget,
+        logical_session_id: session.session_id,
+        provider_session_id: result.sessionId,
+        status: result.status,
+        degraded_kind: result.degraded_kind ?? null,
+        degraded_message: result.degraded_message ?? null,
+        recoverable: result.recoverable ?? null,
+        text: result.text,
+        created_at: new Date().toISOString(),
+      });
+      this.sessionStore.updateSession(session.session_id, turn, {
+        providerSessionId: result.sessionId,
+        transportMode,
+        transportTarget,
+      });
       turns.push(turn);
     }
 
@@ -235,9 +336,38 @@ export class AgentExecutor {
       status: available ? 'healthy' : 'unknown',
       auth_status: available ? 'healthy' : 'unknown',
       execute_status: available ? 'healthy' : 'unknown',
+      transport_status: 'unprobed',
       ready_for_execution: available,
       recoverable: false,
     };
+  }
+
+  private resolveTransportMode(
+    defaultMode: ProviderTransportMode,
+    turnCount: number,
+  ): ProviderTransportMode {
+    if (defaultMode === 'cli_exec' && turnCount > 0) {
+      return 'cli_resume';
+    }
+    return defaultMode;
+  }
+
+  private writeSessionArtifact(
+    sessionDir: string | undefined,
+    turnIndex: number,
+    kind: 'request' | 'response',
+    payload: Record<string, unknown>,
+  ): void {
+    if (!sessionDir) {
+      return;
+    }
+    const artifactsDir = join(sessionDir, 'artifacts');
+    mkdirSync(artifactsDir, { recursive: true });
+    const filePath = join(
+      artifactsDir,
+      `turn-${String(turnIndex).padStart(4, '0')}-${kind}.json`,
+    );
+    writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf-8');
   }
 
   private createDegradedTurn(params: {

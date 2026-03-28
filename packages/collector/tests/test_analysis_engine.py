@@ -38,6 +38,7 @@ def _mock_session_pool() -> SessionPool:
         memory_entry_char_budget=160,
         max_idle_minutes=20,
         max_turns=5,
+        session_workdir_root="/tmp/collector-analysis-test-sessions",
         max_uncached_input_tokens=20000,
         parse_error_snippet_chars=200,
         use_stdin=True,

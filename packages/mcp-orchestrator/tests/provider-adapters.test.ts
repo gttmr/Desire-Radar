@@ -64,20 +64,20 @@ warn line
   });
 
   it('uses the current codex exec JSON flow instead of deprecated --quiet', async () => {
-    mockExecFile((_file, args, _options, callback) => {
+    mockExecFile((_file, args, options, callback) => {
       callback(
         null,
         '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
         '',
       );
+      expect(options.cwd).toBe('/tmp/codex-session');
       expect(args).toEqual([
         'exec',
         '-m',
         'gpt-5.4-mini',
         '--skip-git-repo-check',
-        '--ephemeral',
         '-C',
-        '/tmp',
+        '/tmp/codex-session',
         '-s',
         'read-only',
         '--json',
@@ -93,10 +93,46 @@ warn line
       modelProfile: 'cheap',
       responseFormat: 'text',
       model: 'gpt-5.4-mini',
+      workingDirectory: '/tmp/codex-session',
     });
 
     expect(result.text).toBe('OK');
     expect(result.sessionId).toBe('thread-1');
+    expect(result.status).toBe('completed');
+  });
+
+  it('resumes codex sessions with the provider session id on later turns', async () => {
+    mockExecFile((_file, args, options, callback) => {
+      expect(options.cwd).toBe('/tmp/codex-session');
+      expect(args).toEqual([
+        'exec',
+        'resume',
+        '--skip-git-repo-check',
+        '--json',
+        'thread-123',
+        'Reply with exactly OK',
+      ]);
+      callback(
+        null,
+        '{"type":"thread.started","thread_id":"thread-123"}\n{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
+        '',
+      );
+    });
+
+    const provider = new CodexProvider('codex', 30_000);
+    const result = await provider.execute({
+      prompt: 'Reply with exactly OK',
+      phase: 'debate',
+      agentName: 'search_intent',
+      modelProfile: 'cheap',
+      responseFormat: 'text',
+      sessionId: 'thread-123',
+      turnCount: 1,
+      workingDirectory: '/tmp/codex-session',
+    });
+
+    expect(result.text).toBe('OK');
+    expect(result.sessionId).toBe('thread-123');
     expect(result.status).toBe('completed');
   });
 
@@ -259,7 +295,8 @@ warn line
   });
 
   it('uses claude stream-json output and extracts assistant text', async () => {
-    mockExecFile((_file, args, _options, callback) => {
+    mockExecFile((_file, args, options, callback) => {
+      expect(options.cwd).toBe('/tmp/claude-session');
       expect(args).toEqual([
         '-p',
         'Reply with exactly OK',
@@ -267,7 +304,7 @@ warn line
         'stream-json',
         '--verbose',
         '--resume',
-        'session-123',
+        'provider-session-123',
       ]);
       callback(
         null,
@@ -287,10 +324,50 @@ warn line
       agentName: 'search_intent',
       modelProfile: 'cheap',
       responseFormat: 'text',
-      sessionId: 'session-123',
+      logicalSessionId: '11111111-1111-4111-8111-111111111111',
+      sessionId: 'provider-session-123',
+      turnCount: 1,
+      workingDirectory: '/tmp/claude-session',
     });
 
     expect(result.text).toBe('OK');
+    expect(result.status).toBe('completed');
+  });
+
+  it('starts claude sessions with a stable logical session id and workdir', async () => {
+    mockExecFile((_file, args, options, callback) => {
+      expect(options.cwd).toBe('/tmp/claude-session');
+      expect(args).toEqual([
+        '-p',
+        'Reply with exactly OK',
+        '--output-format',
+        'stream-json',
+        '--verbose',
+        '--session-id',
+        '11111111-1111-4111-8111-111111111111',
+      ]);
+      callback(
+        null,
+        [
+          '{"type":"assistant","message":{"content":[{"type":"text","text":"OK"}]}}',
+          '{"type":"result","subtype":"success","is_error":false,"result":""}',
+        ].join('\n'),
+        '',
+      );
+    });
+
+    const provider = new ClaudeProvider('claude', 30_000);
+    const result = await provider.execute({
+      prompt: 'Reply with exactly OK',
+      phase: 'debate',
+      agentName: 'search_intent',
+      modelProfile: 'cheap',
+      logicalSessionId: '11111111-1111-4111-8111-111111111111',
+      workingDirectory: '/tmp/claude-session',
+    });
+
+    expect(result.text).toBe('OK');
+    expect(result.sessionId).toBe('11111111-1111-4111-8111-111111111111');
     expect(result.status).toBe('completed');
   });
 
@@ -423,7 +500,8 @@ warn line
   });
 
   it('uses gemini JSON output for execution', async () => {
-    mockExecFile((_file, args, _options, callback) => {
+    mockExecFile((_file, args, options, callback) => {
+      expect(options.cwd).toBe('/tmp/gemini-session');
       expect(args).toEqual(['-o', 'json', '-p', 'Reply with exactly OK']);
       callback(null, '{"response":"OK"}', '');
     });
@@ -435,6 +513,36 @@ warn line
       agentName: 'search_intent',
       modelProfile: 'cheap',
       responseFormat: 'text',
+      workingDirectory: '/tmp/gemini-session',
+    });
+
+    expect(result.text).toBe('OK');
+    expect(result.status).toBe('completed');
+  });
+
+  it('resumes gemini sessions from the provider workdir on later turns', async () => {
+    mockExecFile((_file, args, options, callback) => {
+      expect(options.cwd).toBe('/tmp/gemini-session');
+      expect(args).toEqual([
+        '--resume',
+        'latest',
+        '-o',
+        'json',
+        '-p',
+        'Reply with exactly OK',
+      ]);
+      callback(null, '{"response":"OK"}', '');
+    });
+
+    const provider = new GeminiProvider('gemini', 30_000);
+    const result = await provider.execute({
+      prompt: 'Reply with exactly OK',
+      phase: 'debate',
+      agentName: 'search_intent',
+      modelProfile: 'cheap',
+      responseFormat: 'text',
+      turnCount: 1,
+      workingDirectory: '/tmp/gemini-session',
     });
 
     expect(result.text).toBe('OK');

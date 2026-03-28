@@ -399,7 +399,7 @@ async def test_enqueue_source_run_reports_runtime_state_while_running(tmp_path):
     assert runtime["sources"]["blocking_pull"]["run_state"] == "idle"
     assert runtime["sources"]["blocking_pull"]["last_outcome"] == "completed"
 
-
+@pytest.mark.asyncio
 async def test_request_human_analyst_note_creates_pending_human_submission(tmp_path):
     engine, registry, _ = _build_engine(tmp_path)
 

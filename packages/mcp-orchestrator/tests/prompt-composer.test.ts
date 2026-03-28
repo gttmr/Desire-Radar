@@ -65,6 +65,20 @@ describe('PromptComposer', () => {
       cross_source_summary: 'Significant uptick in search volume',
       recommended_agents: ['search_intent'],
       quality_flags: [],
+      graph: {
+        summary: 'google_trends -> search_volume',
+        nodes: [
+          { node_id: 'entity:TestEntity', label: 'TestEntity', kind: 'entity' },
+          { node_id: 'source:google_trends', label: 'google_trends', kind: 'source' },
+        ],
+        edges: [
+          {
+            from: 'source:google_trends',
+            to: 'entity:TestEntity',
+            kind: 'observed_entity',
+          },
+        ],
+      },
     };
 
     const prompt = await composer.compose({
@@ -74,6 +88,8 @@ describe('PromptComposer', () => {
     });
 
     expect(prompt).toContain('Evidence Summary');
+    expect(prompt).toContain('Evidence Graph');
+    expect(prompt).toContain('google_trends -> search_volume');
     expect(prompt).toContain('ev-001');
     expect(prompt).toContain('TestEntity');
   });

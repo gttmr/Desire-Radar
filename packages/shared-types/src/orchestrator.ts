@@ -14,6 +14,7 @@ export type ProviderFailureKind =
   | 'unknown';
 export type ProviderExecutionState = 'completed' | 'degraded';
 export type ProviderHealthStatus = 'healthy' | 'unprobed' | ProviderFailureKind;
+export type ProviderTransportMode = 'cli_exec' | 'cli_resume' | 'external_injection';
 export type HighLevelRunStatus =
   | 'pending'
   | 'running'
@@ -125,6 +126,8 @@ export type ProviderExecutionRequest = {
   logicalSessionId?: string;
   workingDirectory?: string;
   turnCount?: number;
+  transportMode?: ProviderTransportMode;
+  transportTarget?: string;
   model?: string;
   modelProfile: ModelProfile;
   phase: ExecutionPhase;
@@ -299,6 +302,8 @@ export type ProviderSession = {
   session_id: string;
   provider_session_id?: string | null;
   session_dir?: string;
+  transport_mode?: ProviderTransportMode;
+  transport_target?: string | null;
   agent_name: string;
   provider: string;
   phase?: ExecutionPhase;
@@ -317,6 +322,7 @@ export type ProviderHealth = {
   status?: ProviderHealthStatus;
   auth_status?: ProviderHealthStatus;
   execute_status?: ProviderHealthStatus;
+  transport_status?: ProviderHealthStatus;
   ready_for_execution?: boolean;
   failure_kind?: ProviderFailureKind;
   last_checked_at: string;

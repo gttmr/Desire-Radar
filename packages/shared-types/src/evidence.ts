@@ -13,6 +13,46 @@ export type CollectorAnalysisStatus =
   | 'needs_review'
   | 'skipped';
 
+export type EvidenceEventFrame = {
+  event_type: string;
+  summary?: string | null;
+  subjects?: string[];
+  objects?: string[];
+  happened_at?: string | null;
+};
+
+export type EvidenceRelationshipHint = {
+  from: string;
+  to: string;
+  kind: string;
+  confidence?: number | null;
+  rationale?: string | null;
+  evidence_id?: string | null;
+};
+
+export type BundleGraphNodeKind = 'entity' | 'source' | 'signal' | 'event' | 'theme';
+
+export type BundleGraphNode = {
+  node_id: string;
+  label: string;
+  kind: BundleGraphNodeKind;
+  weight?: number | null;
+};
+
+export type BundleGraphEdge = {
+  from: string;
+  to: string;
+  kind: string;
+  weight?: number | null;
+  evidence_ids?: string[];
+};
+
+export type BundleGraph = {
+  summary: string;
+  nodes: BundleGraphNode[];
+  edges: BundleGraphEdge[];
+};
+
 /** Raw snapshot from a source connector */
 export type RawSnapshot = {
   snapshot_id: string;
@@ -47,6 +87,8 @@ export type Evidence = {
   trust_score: number;
   tos_risk: TosRisk;
   freshness_ttl: number; // seconds
+  event_frame?: EvidenceEventFrame | null;
+  relationship_hints?: EvidenceRelationshipHint[];
 };
 
 /** Canonical entity */
@@ -67,6 +109,7 @@ export type EvidenceBundle = {
   cross_source_summary: string;
   recommended_agents: string[];
   quality_flags: string[];
+  graph?: BundleGraph | null;
 };
 
 /** Signal candidate produced by the collector */

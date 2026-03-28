@@ -257,6 +257,7 @@ def build_default_session_pool(mode: str) -> SessionPool:
         memory_entry_char_budget=LLM_SESSION_MEMORY_ENTRY_CHAR_BUDGET,
         max_idle_minutes=LLM_SESSION_MAX_IDLE_MINUTES,
         max_turns=LLM_SESSION_MAX_TURNS,
+        session_workdir_root=os.path.join("data", "llm-session-workdirs"),
         max_uncached_input_tokens=LLM_SESSION_MAX_UNCACHED_INPUT_TOKENS,
         parse_error_snippet_chars=LLM_PARSE_ERROR_SNIPPET_CHARS,
         use_stdin=LLM_CLI_USE_STDIN,

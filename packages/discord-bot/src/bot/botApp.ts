@@ -261,7 +261,11 @@ export class BotApp {
         }
 
         try {
-          const config = await this.reports.addTicker(interaction.guildId, interaction.channelId, ticker);
+          const config = await this.reports.addTicker(
+            interaction.guildId,
+            this.resolveDefaultReportChannelId(interaction.guildId),
+            ticker,
+          );
           if (config.enabled && config.tickers.length > 0) {
             this.scheduler.setSchedule(interaction.guildId, this.runScheduledReport.bind(this));
           }
@@ -278,7 +282,11 @@ export class BotApp {
       case 'watchlist-remove': {
         try {
           const ticker = normalizeTicker(interaction.options.getString('ticker', true));
-          const config = await this.reports.removeTicker(interaction.guildId, interaction.channelId, ticker);
+          const config = await this.reports.removeTicker(
+            interaction.guildId,
+            this.resolveDefaultReportChannelId(interaction.guildId),
+            ticker,
+          );
           if (config.enabled && config.tickers.length > 0) {
             this.scheduler.setSchedule(interaction.guildId, this.runScheduledReport.bind(this));
           } else {
@@ -298,7 +306,10 @@ export class BotApp {
       }
       case 'watchlist-list': {
         try {
-          const config = await this.reports.ensureGuild(interaction.guildId, interaction.channelId);
+          const config = await this.reports.ensureGuild(
+            interaction.guildId,
+            this.resolveDefaultReportChannelId(interaction.guildId),
+          );
           await interaction.reply({
             content: [
               `리포트 채널: <#${config.reportChannelId}>`,
@@ -319,7 +330,12 @@ export class BotApp {
         const detail: ReportDetailLevel = interaction.commandName === 'report-summary' ? 'summary' : 'full';
         await interaction.deferReply({ ephemeral: true });
         try {
-          const dispatch = await this.runReport(interaction.guildId, interaction.channelId, 'manual', detail);
+          const dispatch = await this.runReport(
+            interaction.guildId,
+            this.resolveDefaultReportChannelId(interaction.guildId),
+            'manual',
+            detail,
+          );
           await interaction.editReply({
             content: [
               `${detail === 'summary' ? '요약' : '전체'} 리포트 전송 완료: <#${dispatch.channelId}>`,
@@ -335,7 +351,10 @@ export class BotApp {
       }
       case 'report-status': {
         try {
-          const config = await this.reports.ensureGuild(interaction.guildId, interaction.channelId);
+          const config = await this.reports.ensureGuild(
+            interaction.guildId,
+            this.resolveDefaultReportChannelId(interaction.guildId),
+          );
           const last = config.lastReport
             ? `${config.lastReport.status} / ${config.lastReport.mode} / ${config.lastReport.ranAt}${config.lastReport.error ? ` / ${config.lastReport.error}` : ''}`
             : '실행 이력 없음';
@@ -664,6 +683,9 @@ export class BotApp {
   }
 
   private resolveProviderAlertChannelIds(): string[] {
+    if (env.DISCORD_STATUS_CHANNEL_IDS.size > 0) {
+      return [...env.DISCORD_STATUS_CHANNEL_IDS];
+    }
     if (env.DISCORD_PROVIDER_ALERT_CHANNEL_IDS.size > 0) {
       return [...env.DISCORD_PROVIDER_ALERT_CHANNEL_IDS];
     }
@@ -671,6 +693,13 @@ export class BotApp {
       return [env.DEFAULT_TEXT_CHANNEL_ID];
     }
     return [];
+  }
+
+  private resolveDefaultReportChannelId(guildId: string): string {
+    if (env.DISCORD_DAILY_REPORT_CHANNEL_ID) {
+      return env.DISCORD_DAILY_REPORT_CHANNEL_ID;
+    }
+    return this.resolveTextChannelId(guildId);
   }
 
   private resolveTextChannelId(guildId: string): string {
@@ -689,7 +718,7 @@ export class BotApp {
   private async initializeReportSchedules(): Promise<void> {
     for (const guild of this.client.guilds.cache.values()) {
       try {
-        const defaultChannelId = env.DEFAULT_TEXT_CHANNEL_ID ?? this.resolveTextChannelId(guild.id);
+        const defaultChannelId = this.resolveDefaultReportChannelId(guild.id);
         const config = await this.reports.ensureGuild(guild.id, defaultChannelId);
         if (config.enabled && config.tickers.length > 0) {
           this.scheduler.setSchedule(guild.id, this.runScheduledReport.bind(this));
@@ -701,7 +730,7 @@ export class BotApp {
   }
 
   private async runScheduledReport(guildId: string): Promise<void> {
-    const fallbackChannelId = env.DEFAULT_TEXT_CHANNEL_ID ?? this.resolveTextChannelId(guildId);
+    const fallbackChannelId = this.resolveDefaultReportChannelId(guildId);
     await this.runReport(guildId, fallbackChannelId, 'scheduled', 'summary');
   }
 

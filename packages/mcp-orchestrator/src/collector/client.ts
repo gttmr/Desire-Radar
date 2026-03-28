@@ -1,4 +1,10 @@
-import type { Evidence, EvidenceBundle } from '@agentic/shared-types';
+import type {
+  BundleGraph,
+  BundleGraphEdge,
+  BundleGraphNode,
+  Evidence,
+  EvidenceBundle,
+} from '@agentic/shared-types';
 
 export type CollectorCandidate = {
   entity: string;
@@ -114,6 +120,7 @@ export class CollectorClient {
       entity,
       max_evidence: maxEvidence,
     });
+    const graph = buildBundleGraph(response.entity, response.evidence);
     return {
       bundle_id: `collector-${entity}-${Date.now()}`,
       entity: response.entity,
@@ -122,6 +129,7 @@ export class CollectorClient {
       cross_source_summary: this.buildCrossSourceSummary(response),
       recommended_agents: ['search_intent', 'ranking_momentum', 'scarcity', 'synthesis'],
       quality_flags: [],
+      graph,
     };
   }
 
@@ -330,4 +338,112 @@ export class CollectorClient {
       clearTimeout(timer);
     }
   }
+}
+
+function buildBundleGraph(entity: string, evidence: Evidence[]): BundleGraph {
+  const nodes = new Map<string, BundleGraphNode>();
+  const edges = new Map<string, BundleGraphEdge>();
+  const summaryParts = new Set<string>();
+
+  const ensureNode = (node: BundleGraphNode): void => {
+    if (!nodes.has(node.node_id)) {
+      nodes.set(node.node_id, node);
+    }
+  };
+
+  const upsertEdge = (edge: BundleGraphEdge): void => {
+    const key = `${edge.from}|${edge.kind}|${edge.to}`;
+    const existing = edges.get(key);
+    if (!existing) {
+      edges.set(key, {
+        ...edge,
+        evidence_ids: [...(edge.evidence_ids ?? [])],
+      });
+      return;
+    }
+    existing.weight = (existing.weight ?? 0) + (edge.weight ?? 0);
+    existing.evidence_ids = dedupeStrings([
+      ...(existing.evidence_ids ?? []),
+      ...(edge.evidence_ids ?? []),
+    ]);
+  };
+
+  const entityNodeId = `entity:${entity}`;
+  ensureNode({ node_id: entityNodeId, label: entity, kind: 'entity', weight: evidence.length });
+
+  for (const item of evidence) {
+    const sourceNodeId = `source:${item.source}`;
+    const signalLabel = item.signal_type || 'signal';
+    const signalNodeId = `signal:${signalLabel}`;
+
+    ensureNode({ node_id: sourceNodeId, label: item.source, kind: 'source' });
+    ensureNode({ node_id: signalNodeId, label: signalLabel, kind: 'signal' });
+    upsertEdge({
+      from: entityNodeId,
+      to: signalNodeId,
+      kind: 'expresses_signal',
+      weight: 1,
+      evidence_ids: [item.evidence_id],
+    });
+    upsertEdge({
+      from: sourceNodeId,
+      to: entityNodeId,
+      kind: 'observed_entity',
+      weight: 1,
+      evidence_ids: [item.evidence_id],
+    });
+
+    if (item.event_frame?.summary) {
+      const eventNodeId = `event:${item.evidence_id}`;
+      ensureNode({
+        node_id: eventNodeId,
+        label: item.event_frame.summary,
+        kind: 'event',
+      });
+      upsertEdge({
+        from: eventNodeId,
+        to: entityNodeId,
+        kind: item.event_frame.event_type || 'event_for',
+        weight: 1,
+        evidence_ids: [item.evidence_id],
+      });
+      summaryParts.add(item.event_frame.summary);
+    }
+
+    for (const hint of item.relationship_hints ?? []) {
+      const fromNodeId = `entity:${hint.from}`;
+      const toNodeId = `entity:${hint.to}`;
+      ensureNode({ node_id: fromNodeId, label: hint.from, kind: 'entity' });
+      ensureNode({ node_id: toNodeId, label: hint.to, kind: 'entity' });
+      upsertEdge({
+        from: fromNodeId,
+        to: toNodeId,
+        kind: hint.kind,
+        weight: hint.confidence ?? 1,
+        evidence_ids: [hint.evidence_id ?? item.evidence_id],
+      });
+      if (hint.rationale) {
+        summaryParts.add(hint.rationale);
+      }
+    }
+
+    if (!item.event_frame?.summary) {
+      summaryParts.add(`${item.source} -> ${signalLabel}`);
+    }
+  }
+
+  const summary =
+    summaryParts.size > 0
+      ? [...summaryParts].slice(0, 5).join(' | ')
+      : `${entity} graph built from ${evidence.length} evidence items`;
+
+  return {
+    summary,
+    nodes: [...nodes.values()],
+    edges: [...edges.values()],
+  };
+}
+
+function dedupeStrings(values: string[]): string[] {
+  return values.filter((value, index, items) => items.indexOf(value) === index);
 }

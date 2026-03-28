@@ -51,6 +51,7 @@ class CliSession:
         prompt_mode: str = "stdin",
         prompt_flag: str = "",
         continue_flag: str = "",
+        working_dir: str | None = None,
     ) -> None:
         self.domain = domain
         self.provider = provider
@@ -71,10 +72,16 @@ class CliSession:
         self.prompt_mode = prompt_mode
         self.prompt_flag = prompt_flag
         self.continue_flag = continue_flag
+        self.working_dir = working_dir or "/tmp"
+        os.makedirs(self.working_dir, exist_ok=True)
+        logical_session_id = uuid4().hex
         self.state = SessionState(
-            session_id=uuid4().hex,
+            session_id=logical_session_id,
+            logical_session_id=logical_session_id,
+            provider_session_id=None,
             domain=domain,
             model=model,
+            session_dir=self.working_dir,
             last_active_at=_now_iso(),
         )
         self._memory_entries: deque[str] = deque(maxlen=memory_entry_count)
@@ -86,6 +93,23 @@ class CliSession:
         execution_mode: str,
     ) -> ExecutionResult:
         prompt = self._compose_prompt(context) if execution_mode == "resume" else context.prompt
+        turn_index = self.state.turn_count + 1
+        self._write_artifact(
+            turn_index,
+            "request",
+            {
+                "logical_session_id": self.state.logical_session_id or self.state.session_id,
+                "provider_session_id": self.state.provider_session_id,
+                "transport_mode": self.state.transport_mode,
+                "domain": self.domain,
+                "provider": self.provider,
+                "execution_mode": execution_mode,
+                "response_mode": context.response_mode,
+                "bundle": context.bundle.model_dump(),
+                "prompt": prompt,
+                "created_at": _now_iso(),
+            },
+        )
         if not self.exec_path or self.exec_path == "mock":
             result = self._mock_result(context)
         elif self.provider == "codex":
@@ -100,7 +124,24 @@ class CliSession:
         self.state.total_input_tokens += result.usage.input_tokens
         self.state.total_cached_input_tokens += result.usage.cached_input_tokens
         self.state.total_uncached_input_tokens += result.usage.uncached_input_tokens
+        self.state.provider_session_id = result.session_id
         self.state.session_id = result.session_id
+        self._write_artifact(
+            turn_index,
+            "response",
+            {
+                "logical_session_id": self.state.logical_session_id or self.state.session_id,
+                "provider_session_id": result.session_id,
+                "domain": self.domain,
+                "provider": self.provider,
+                "execution_mode": execution_mode,
+                "status": "completed",
+                "responses": [response.model_dump() for response in result.responses],
+                "usage": result.usage.model_dump(),
+                "raw_text": result.raw_text,
+                "created_at": _now_iso(),
+            },
+        )
         return result
 
     async def execute_json(
@@ -109,6 +150,22 @@ class CliSession:
         *,
         execution_mode: str,
     ) -> RawExecutionResult:
+        turn_index = self.state.turn_count + 1
+        self._write_artifact(
+            turn_index,
+            "request",
+            {
+                "logical_session_id": self.state.logical_session_id or self.state.session_id,
+                "provider_session_id": self.state.provider_session_id,
+                "transport_mode": self.state.transport_mode,
+                "domain": self.domain,
+                "provider": self.provider,
+                "execution_mode": execution_mode,
+                "response_mode": "json",
+                "prompt": prompt,
+                "created_at": _now_iso(),
+            },
+        )
         if not self.exec_path or self.exec_path == "mock":
             payload = {"route": "needs_review", "confidence": 0.0, "reason": "mock_cli"}
             result = RawExecutionResult(
@@ -148,7 +205,24 @@ class CliSession:
         self.state.total_input_tokens += result.usage.input_tokens
         self.state.total_cached_input_tokens += result.usage.cached_input_tokens
         self.state.total_uncached_input_tokens += result.usage.uncached_input_tokens
+        self.state.provider_session_id = result.session_id
         self.state.session_id = result.session_id
+        self._write_artifact(
+            turn_index,
+            "response",
+            {
+                "logical_session_id": self.state.logical_session_id or self.state.session_id,
+                "provider_session_id": result.session_id,
+                "domain": self.domain,
+                "provider": self.provider,
+                "execution_mode": execution_mode,
+                "status": "completed",
+                "payload": result.payload,
+                "usage": result.usage.model_dump(),
+                "raw_text": result.raw_text,
+                "created_at": _now_iso(),
+            },
+        )
         return result
 
     def is_stale(self) -> bool:
@@ -200,13 +274,15 @@ class CliSession:
         else:
             args = self._sanitize_codex_args(
                 self.initial_args,
-                allow_ephemeral=execution_mode != "resume",
+                allow_ephemeral=False,
             )
+            if self.working_dir:
+                args.extend(["-C", self.working_dir])
 
         if self.model and self.model_flag:
             args.extend([self.model_flag, self.model])
         if use_resume:
-            args.append(self.state.session_id)
+            args.append(self.state.provider_session_id or self.state.session_id)
 
         stdin_data: bytes | None = None
         if self.use_stdin:
@@ -223,10 +299,17 @@ class CliSession:
         allow_ephemeral: bool,
     ) -> list[str]:
         sanitized: list[str] = []
+        skip_next = False
         for arg in raw_args:
+            if skip_next:
+                skip_next = False
+                continue
             if arg == "-":
                 continue
             if not allow_ephemeral and arg == "--ephemeral":
+                continue
+            if arg in {"-C", "--cd"}:
+                skip_next = True
                 continue
             sanitized.append(arg)
         return sanitized
@@ -265,6 +348,7 @@ class CliSession:
             stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=self.working_dir,
             env={**os.environ},
         )
         started = time.perf_counter()
@@ -316,6 +400,7 @@ class CliSession:
             stdin=asyncio.subprocess.PIPE if stdin_data is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=self.working_dir,
             env={**os.environ},
         )
         started = time.perf_counter()
@@ -378,6 +463,22 @@ class CliSession:
             raise RuntimeError(f"codex JSONL did not include agent_message: {snippet}")
 
         return message_text, usage, thread_id
+
+    def _write_artifact(
+        self,
+        turn_index: int,
+        kind: str,
+        payload: dict[str, object],
+    ) -> None:
+        artifacts_dir = os.path.join(self.working_dir, "artifacts")
+        os.makedirs(artifacts_dir, exist_ok=True)
+        file_path = os.path.join(
+            artifacts_dir,
+            f"turn-{turn_index:04d}-{kind}.json",
+        )
+        with open(file_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
 
     def _parse_json_payload(self, raw_text: str) -> object:
         cleaned = raw_text.strip()
@@ -499,6 +600,7 @@ class SessionPool:
         max_uncached_input_tokens: int,
         parse_error_snippet_chars: int,
         use_stdin: bool,
+        session_workdir_root: str = "data/llm-session-workdirs",
         *,
         base_args: str = "",
         prompt_mode: str = "stdin",
@@ -520,6 +622,7 @@ class SessionPool:
         self.max_uncached_input_tokens = max_uncached_input_tokens
         self.parse_error_snippet_chars = parse_error_snippet_chars
         self.use_stdin = use_stdin
+        self.session_workdir_root = session_workdir_root
         self.base_args = base_args
         self.prompt_mode = prompt_mode
         self.prompt_flag = prompt_flag
@@ -583,6 +686,12 @@ class SessionPool:
         return [session.state for session in self._sessions.values()]
 
     def _new_session(self, domain: str) -> CliSession:
+        working_dir = os.path.join(
+            self.session_workdir_root,
+            self.provider,
+            _sanitize_path_segment(domain),
+            uuid4().hex,
+        )
         return CliSession(
             domain=domain,
             provider=self.provider,
@@ -604,4 +713,11 @@ class SessionPool:
             prompt_mode=self.prompt_mode,
             prompt_flag=self.prompt_flag,
             continue_flag=self.continue_flag,
+            working_dir=working_dir,
         )
+
+
+def _sanitize_path_segment(value: str) -> str:
+    cleaned = "".join(char if char.isalnum() or char in {".", "_", "-"} else "-" for char in value.strip())
+    cleaned = cleaned.strip("-")
+    return cleaned or "default"

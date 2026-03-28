@@ -61,6 +61,9 @@ function buildDebateContext(input: PromptContextInput): string[] {
 
   if (input.evidenceBundle) {
     sections.push(`## Evidence Summary\n${summarizeEvidenceBundle(input.evidenceBundle, 8)}`);
+    if (input.evidenceBundle.graph) {
+      sections.push(`## Evidence Graph\n${summarizeBundleGraph(input.evidenceBundle.graph)}`);
+    }
   }
 
   if (input.sourceStatus && input.evidenceBundle) {
@@ -81,15 +84,15 @@ function buildDebateContext(input: PromptContextInput): string[] {
     }
   }
 
+  if (input.orchestratorQuestions?.length) {
+    sections.push(renderQuestions(input.orchestratorQuestions));
+  }
+
   if (input.otherAgentMessages?.length) {
     const messages = input.otherAgentMessages
       .map((message) => `- ${message.from}: ${message.content}`)
       .join('\n');
     sections.push(`## Messages From Other Agents\n${messages}`);
-  }
-
-  if (input.orchestratorQuestions?.length) {
-    sections.push(renderQuestions(input.orchestratorQuestions));
   }
 
   return sections;
@@ -100,6 +103,9 @@ function buildVerdictContext(input: PromptContextInput): string[] {
 
   if (input.evidenceBundle) {
     sections.push(`## Evidence Summary\n${summarizeEvidenceBundle(input.evidenceBundle, 6)}`);
+    if (input.evidenceBundle.graph) {
+      sections.push(`## Evidence Graph\n${summarizeBundleGraph(input.evidenceBundle.graph)}`);
+    }
   }
 
   if (input.debateTurns?.length) {
@@ -195,6 +201,32 @@ function summarizeEvidence(item: Evidence): string {
     .join(', ');
 
   return `${item.evidence_id} | ${item.source} | T${item.source_tier} | ${item.title_or_label}${metrics ? ` | ${metrics}` : ''}`;
+}
+
+function summarizeBundleGraph(graph: NonNullable<EvidenceBundle['graph']>): string {
+  const lines = [
+    `- summary: ${graph.summary}`,
+    `- nodes: ${graph.nodes.length}`,
+    `- edges: ${graph.edges.length}`,
+  ];
+
+  const nodeLines = graph.nodes
+    .slice(0, 6)
+    .map((node) => `- ${node.kind}: ${node.label}${node.weight != null ? ` (weight=${node.weight})` : ''}`);
+  const edgeLines = graph.edges
+    .slice(0, 6)
+    .map((edge) => `- ${edge.from} --${edge.kind}--> ${edge.to}`);
+
+  if (nodeLines.length > 0) {
+    lines.push('### Nodes');
+    lines.push(...nodeLines);
+  }
+  if (edgeLines.length > 0) {
+    lines.push('### Edges');
+    lines.push(...edgeLines);
+  }
+
+  return lines.join('\n');
 }
 
 function renderQuestions(questions: string[]): string {

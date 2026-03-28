@@ -29,6 +29,7 @@ Collector owns:
 - source provenance, source tier, and source validity state
 - submission tracking and human follow-up queues
 - normalized evidence and candidate construction
+- event and relationship preservation inside evidence bundles
 - low-cost, batch-first CLI analysis for candidate enrichment and human-input routing
 
 Collector does not own final investment judgment. It prepares evidence and structured candidate state for downstream analysis.
@@ -40,6 +41,7 @@ Orchestrator owns:
 - multi-phase reasoning over collector evidence
 - research request generation and submission polling
 - provider selection and model policy
+- provider session orchestration and transport dispatch
 - final verdict generation
 - report synthesis
 
@@ -72,13 +74,13 @@ Important property:
 - source status should expose partial-failure metadata instead of collapsing mixed outcomes into a binary success/failure view
 
 ### 2. Collector Analysis
-`candidate shortlist -> analysis policy -> context packing -> CLI session execution -> analysis projection`
+`candidate shortlist -> analysis policy -> context packing -> graph-aware bundle -> CLI session execution -> analysis projection`
 
 Important property:
 - collector uses cheap, batch-first analysis to improve triage and routing, not to replace final investment judgment.
 
 ### 3. Orchestrated Investment Run
-`candidate -> triage -> debate -> research-loop -> verdict -> report`
+`candidate -> bundle(graph included) -> triage -> debate -> research-loop -> verdict -> report`
 
 Important property:
 - the expensive model budget is reserved for the verdict phase or explicit premium checks.
@@ -143,6 +145,7 @@ Key idea:
 - `AnalysisPolicy`: decides what deserves model budget
 - `ContextPacker`: compresses evidence into stable task packets
 - `CliSession` and `SessionPool`: isolate long-lived CLI execution concerns
+- session directories are first-class artifacts, not disposable temp paths
 - `AnalysisEngine`: coordinates queueing, execution mode, and persistence
 
 This keeps cost control, prompt shape, and process management from collapsing into one file.
@@ -157,6 +160,7 @@ All provider-specific CLI/API behavior must be isolated behind the provider adap
 Key idea:
 - the rest of the orchestrator talks in terms of `phase`, `modelProfile`, `agentName`, and `responseFormat`
 - only adapters should know concrete flags, command names, and parsing quirks
+- transport choice is session-scoped; provider adapters keep provider-native CLI logic while external injection stays outside them
 
 This is the main defense against fast-changing CLI tools.
 
@@ -178,6 +182,17 @@ Session state is keyed by phase, agent, provider, profile, and run scope.
 
 Key idea:
 - cheap debate context must not contaminate premium verdict context
+- session identity and transport identity are separate from one-off prompt execution
+
+#### External Injection Transport
+`packages/mcp-orchestrator/src/providers/external-inbox.ts`
+
+This transport covers the case where the caller cannot reliably receive structured stdout from a provider CLI and must instead inject work into a long-lived external conversation bridge.
+
+Key idea:
+- request/response exchange happens through a session directory target
+- this gives a stable handoff point for future Discord-thread injection, file-based bridges, or provider-owned session daemons
+- direct CLI execution and external injection can share the same higher-level session model
 
 #### CandidateService, ResearchService, SubmissionPoller
 `packages/mcp-orchestrator/src/collector/`
@@ -231,6 +246,7 @@ Provider CLIs change quickly. Commands, flags, output envelopes, auth prompts, a
 ### Rule 2: Prefer Structured Output
 - Use JSON or JSONL modes whenever the CLI supports them.
 - Treat plain text parsing as a fallback, not the main contract.
+- If direct structured stdout is not dependable, write/read structured artifacts in the session directory instead of guessing from logs.
 
 ### Rule 3: Parse Semantically, Not Literally
 - Do not key system behavior off one exact rate-limit sentence.
@@ -251,6 +267,15 @@ Provider CLIs change quickly. Commands, flags, output envelopes, auth prompts, a
 ### Rule 5: Make Failure Surfaces Rich
 - Carry structured health state, error summaries, and repair metadata through the API.
 - Alerts and UIs should not need to reverse-engineer raw stderr.
+- Keep transport health separate from auth/execute health when an external injection bridge is involved.
+
+## Graph Position
+
+The system should not think in terms of isolated keywords only.
+
+- Collector evidence bundles should preserve an event/entity/source/signal graph snapshot.
+- The graph does not need to start as a graph database; a bundle-local graph artifact is enough.
+- Orchestrator prompts and verdicts should consume that graph summary so beneficiary mapping is grounded in relationships, not just raw evidence snippets.
 
 ### Rule 6: Test Adapter Boundaries
 - When a provider changes, add tests at the adapter boundary.

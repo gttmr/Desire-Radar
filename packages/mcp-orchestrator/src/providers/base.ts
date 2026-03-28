@@ -1,6 +1,7 @@
 export type ModelProfile = 'cheap' | 'balanced' | 'premium';
 export type ExecutionPhase = 'triage' | 'debate' | 'verdict' | 'report';
 export type ResponseFormat = 'json' | 'text';
+export type ProviderTransportMode = 'cli_exec' | 'cli_resume' | 'external_injection';
 export type ProviderFailureKind =
   | 'auth_failed'
   | 'binary_missing'
@@ -16,6 +17,11 @@ export type ProviderHealthStatus = 'healthy' | 'unprobed' | ProviderFailureKind;
 export type ProviderExecutionRequest = {
   prompt: string;
   sessionId?: string;
+  logicalSessionId?: string;
+  workingDirectory?: string;
+  turnCount?: number;
+  transportMode?: ProviderTransportMode;
+  transportTarget?: string | null;
   model?: string;
   modelProfile: ModelProfile;
   phase: ExecutionPhase;
@@ -30,6 +36,7 @@ export type ProviderHealthProbe = {
   status?: ProviderHealthStatus;
   auth_status?: ProviderHealthStatus;
   execute_status?: ProviderHealthStatus;
+  transport_status?: ProviderHealthStatus;
   ready_for_execution?: boolean;
   failure_kind?: ProviderFailureKind;
   error_summary?: string;
@@ -39,6 +46,7 @@ export type ProviderHealthProbe = {
 
 export interface ProviderAdapter {
   readonly name: string;
+  readonly defaultTransportMode?: ProviderTransportMode;
   execute(request: ProviderExecutionRequest): Promise<ProviderResult>;
   health(): Promise<boolean>;
   probeHealth?(): Promise<ProviderHealthProbe>;

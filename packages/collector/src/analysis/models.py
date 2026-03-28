@@ -17,6 +17,7 @@ AnalysisStatus = Literal[
 AnalysisExecutionMode = Literal["batch", "fresh", "resume"]
 PromptFormat = Literal["json", "markdown"]
 ResponseMode = Literal["single", "batch"]
+HistoryMode = Literal["synthetic_summary", "provider_history"]
 
 
 class PolicyDecision(BaseModel):
@@ -40,10 +41,36 @@ class AnalysisTask(BaseModel):
     enqueued_at: str
 
 
+class AnalysisGraphNode(BaseModel):
+    node_id: str
+    label: str
+    kind: Literal["entity", "source", "signal", "event"]
+    weight: float | None = None
+
+
+class AnalysisGraphEdge(BaseModel):
+    from_node: str
+    to_node: str
+    kind: str
+    weight: float | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
+class AnalysisBundle(BaseModel):
+    entity: str | None = None
+    entities: list[str] = Field(default_factory=list)
+    summary: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
+    sources: list[str] = Field(default_factory=list)
+    graph_nodes: list[AnalysisGraphNode] = Field(default_factory=list)
+    graph_edges: list[AnalysisGraphEdge] = Field(default_factory=list)
+
+
 class PackedContext(BaseModel):
     entity: str | None = None
     entities: list[str] = Field(default_factory=list)
     prompt: str
+    bundle: AnalysisBundle = Field(default_factory=AnalysisBundle)
     evidence_ids: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
     char_count: int
@@ -56,8 +83,13 @@ class PackedContext(BaseModel):
 
 class SessionState(BaseModel):
     session_id: str
+    logical_session_id: str | None = None
+    provider_session_id: str | None = None
     domain: str
     model: str | None = None
+    session_dir: str | None = None
+    transport_mode: str = "cli_exec"
+    history_mode: HistoryMode = "synthetic_summary"
     turn_count: int = 0
     last_active_at: str
     rolling_memory: str = ""

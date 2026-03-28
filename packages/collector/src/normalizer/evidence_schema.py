@@ -3,6 +3,23 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class EvidenceEventFrame(BaseModel):
+    event_type: str
+    summary: str | None = None
+    subjects: list[str] = Field(default_factory=list)
+    objects: list[str] = Field(default_factory=list)
+    happened_at: str | None = None
+
+
+class EvidenceRelationshipHint(BaseModel):
+    from_: str = Field(alias="from")
+    to: str
+    kind: str
+    confidence: float | None = None
+    rationale: str | None = None
+    evidence_id: str | None = None
+
+
 class Evidence(BaseModel):
     evidence_id: str
     source: str
@@ -24,3 +41,5 @@ class Evidence(BaseModel):
     trust_score: float = 1.0
     tos_risk: str = "none"
     freshness_ttl: int = 3600
+    event_frame: EvidenceEventFrame | None = None
+    relationship_hints: list[EvidenceRelationshipHint] = Field(default_factory=list)

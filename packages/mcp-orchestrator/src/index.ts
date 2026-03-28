@@ -51,16 +51,25 @@ async function main(): Promise<void> {
     );
   }
   registry.register(
-    new CodexProvider(config.providers.CODEX_PATH, config.providers.PROVIDER_TIMEOUT_MS),
+    new CodexProvider(config.providers.CODEX_PATH, config.providers.PROVIDER_TIMEOUT_MS, {
+      defaultTransportMode: config.providers.CODEX_TRANSPORT,
+    }),
   );
   registry.register(
-    new ClaudeProvider(config.providers.CLAUDE_PATH, config.providers.PROVIDER_TIMEOUT_MS),
+    new ClaudeProvider(config.providers.CLAUDE_PATH, config.providers.PROVIDER_TIMEOUT_MS, {
+      defaultTransportMode: config.providers.CLAUDE_TRANSPORT,
+    }),
   );
   registry.register(
-    new GeminiProvider(config.providers.GEMINI_PATH, config.providers.PROVIDER_TIMEOUT_MS),
+    new GeminiProvider(config.providers.GEMINI_PATH, config.providers.PROVIDER_TIMEOUT_MS, {
+      defaultTransportMode: config.providers.GEMINI_TRANSPORT,
+    }),
   );
 
-  const sessionStore = new SessionStore(config.runtime.DATA_DIR);
+  const sessionStore = new SessionStore(
+    config.runtime.DATA_DIR,
+    config.providers.providerSessionRootDir,
+  );
   const runStore = new RunStore(config.runtime.DATA_DIR);
   const contextStore = new RunContextStore();
   const promptLoader = new PromptLoader(resolveAgentsDir());
@@ -76,6 +85,9 @@ async function main(): Promise<void> {
     promptComposer,
     runStore,
     executionPolicy,
+    {
+      externalInjectionPollIntervalMs: config.providers.PROVIDER_EXTERNAL_POLL_INTERVAL_MS,
+    },
   );
 
   const collectorClient = new CollectorClient(

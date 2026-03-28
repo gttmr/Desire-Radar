@@ -4,6 +4,7 @@ import type {
   ProviderAdapter,
   ProviderExecutionRequest,
   ProviderHealthProbe,
+  ProviderTransportMode,
   ProviderResult,
 } from './base.js';
 import {
@@ -31,6 +32,10 @@ type CommandOutput = {
 };
 
 const CODEX_HEALTH_PROMPT = 'Reply with exactly OK';
+
+type CodexProviderOptions = {
+  defaultTransportMode?: ProviderTransportMode;
+};
 
 export function extractCodexExecResult(stdout: string): CodexExecResult {
   let messageText: string | undefined;
@@ -102,11 +107,15 @@ export function extractCodexExecResult(stdout: string): CodexExecResult {
 
 export class CodexProvider implements ProviderAdapter {
   readonly name = 'codex';
+  readonly defaultTransportMode: ProviderTransportMode;
 
   constructor(
     private readonly execPath: string = 'codex',
     private readonly timeoutMs: number = 120_000,
-  ) {}
+    options: CodexProviderOptions = {},
+  ) {
+    this.defaultTransportMode = options.defaultTransportMode ?? 'cli_exec';
+  }
 
   async execute(request: ProviderExecutionRequest): Promise<ProviderResult> {
     const sid = request.sessionId ?? randomUUID();
@@ -114,21 +123,12 @@ export class CodexProvider implements ProviderAdapter {
     const model = request.model;
 
     try {
-      const args = [
-        'exec',
-        '--skip-git-repo-check',
-        '--ephemeral',
-        '-C',
-        '/tmp',
-        '-s',
-        'read-only',
-        '--json',
-        request.prompt,
-      ];
-      if (model) {
-        args.splice(1, 0, '-m', model);
-      }
-      const output = await this.runDetailed(args, undefined, request.timeoutMs);
+      const output = await this.runDetailed(
+        this.buildExecuteArgs(request),
+        undefined,
+        request.timeoutMs,
+        request.workingDirectory,
+      );
       const parsed = extractCodexExecResult(output.stdout);
       return {
         text: parsed.messageText,
@@ -214,12 +214,14 @@ export class CodexProvider implements ProviderAdapter {
     args: string[],
     stdin?: string,
     timeoutOverride?: number,
+    cwd?: string,
   ): Promise<CommandOutput> {
     return new Promise((resolve, reject) => {
       const proc = execFile(
         this.execPath,
         args,
         {
+          cwd,
           timeout: timeoutOverride ?? this.timeoutMs,
           maxBuffer: 10 * 1024 * 1024,
           env: {
@@ -244,5 +246,40 @@ export class CodexProvider implements ProviderAdapter {
         proc.stdin.end();
       }
     });
+  }
+
+  private buildExecuteArgs(request: ProviderExecutionRequest): string[] {
+    const model = request.model;
+    const workingDirectory = request.workingDirectory || '/tmp';
+    const isResume = (request.turnCount ?? 0) > 0 && Boolean(request.sessionId);
+
+    if (isResume) {
+      const args = [
+        'exec',
+        'resume',
+        '--skip-git-repo-check',
+        '--json',
+      ];
+      if (model) {
+        args.splice(1, 0, '-m', model);
+      }
+      args.push(request.sessionId as string, request.prompt);
+      return args;
+    }
+
+    const args = [
+      'exec',
+      '--skip-git-repo-check',
+      '-C',
+      workingDirectory,
+      '-s',
+      'read-only',
+      '--json',
+      request.prompt,
+    ];
+    if (model) {
+      args.splice(1, 0, '-m', model);
+    }
+    return args;
   }
 }

@@ -4,6 +4,7 @@ import type {
   ProviderAdapter,
   ProviderExecutionRequest,
   ProviderHealthProbe,
+  ProviderTransportMode,
   ProviderResult,
 } from './base.js';
 import {
@@ -11,6 +12,9 @@ import {
   buildFailedHealthProbe,
   buildProviderHealthProbe,
 } from './errors.js';
+type ClaudeProviderOptions = {
+  defaultTransportMode?: ProviderTransportMode;
+};
 
 export function parseClaudeAuthStatus(stdout: string): ProviderHealthProbe {
   try {
@@ -101,27 +105,42 @@ export function extractClaudePrintResult(stdout: string): string {
 
 export class ClaudeProvider implements ProviderAdapter {
   readonly name = 'claude';
+  readonly defaultTransportMode: ProviderTransportMode;
 
   constructor(
     private readonly execPath: string = 'claude',
     private readonly timeoutMs: number = 120_000,
-  ) {}
+    options: ClaudeProviderOptions = {},
+  ) {
+    this.defaultTransportMode = options.defaultTransportMode ?? 'cli_exec';
+  }
 
   async execute(request: ProviderExecutionRequest): Promise<ProviderResult> {
-    const sid = request.sessionId ?? randomUUID();
+    const sid = request.logicalSessionId ?? request.sessionId ?? randomUUID();
     const start = Date.now();
     const model = request.model;
+    const resumeId = request.sessionId ?? request.logicalSessionId ?? sid;
 
     try {
       const args = ['-p', request.prompt, '--output-format', 'stream-json', '--verbose'];
       if (model) {
         args.push('--model', model);
       }
-      if (request.sessionId) {
-        args.push('--resume', request.sessionId);
+      if ((request.turnCount ?? 0) > 0) {
+        args.push('--resume', resumeId);
+      } else {
+        args.push('--session-id', sid);
       }
-      const text = extractClaudePrintResult(await this.run(args, request.timeoutMs));
-      return { text, sessionId: sid, durationMs: Date.now() - start, model, status: 'completed' };
+      const text = extractClaudePrintResult(
+        await this.run(args, request.timeoutMs, request.workingDirectory),
+      );
+      return {
+        text,
+        sessionId: resumeId,
+        durationMs: Date.now() - start,
+        model,
+        status: 'completed',
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[claude] execution failed: ${message}`);
@@ -171,12 +190,13 @@ export class ClaudeProvider implements ProviderAdapter {
     }
   }
 
-  private run(args: string[], timeoutOverride?: number): Promise<string> {
+  private run(args: string[], timeoutOverride?: number, cwd?: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const proc = execFile(
         this.execPath,
         args,
         {
+          cwd,
           timeout: timeoutOverride ?? this.timeoutMs,
           maxBuffer: 10 * 1024 * 1024,
           env: {

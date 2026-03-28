@@ -59,6 +59,7 @@ export class ProviderHealthMonitor {
           status: 'unprobed',
           auth_status: 'unprobed',
           execute_status: 'unprobed',
+          transport_status: 'unprobed',
           ready_for_execution: false,
           last_checked_at: new Date(0).toISOString(),
           error: 'provider health has not been probed yet',
@@ -122,6 +123,7 @@ export class ProviderHealthMonitor {
         status: result.status ?? (result.available ? 'healthy' : 'unknown'),
         auth_status: result.auth_status ?? (result.available ? 'healthy' : 'unprobed'),
         execute_status: result.execute_status ?? (result.available ? 'healthy' : 'unprobed'),
+        transport_status: result.transport_status ?? 'unprobed',
         ready_for_execution:
           result.ready_for_execution ?? result.available,
         failure_kind: result.failure_kind,
@@ -156,6 +158,7 @@ export class ProviderHealthMonitor {
             status: 'healthy',
             auth_status: 'healthy',
             execute_status: 'healthy',
+            transport_status: 'unprobed',
             ready_for_execution: true,
             recoverable: false,
           };
@@ -166,6 +169,7 @@ export class ProviderHealthMonitor {
         status: 'unknown',
         auth_status: 'unprobed',
         execute_status: 'unknown',
+        transport_status: 'unprobed',
         ready_for_execution: false,
         error: message,
         error_summary: message,

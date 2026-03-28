@@ -21,9 +21,9 @@ export function createApiServer(bot: BotApp) {
     const fallbackChannelId =
       typeof req.body?.channelId === 'string' && req.body.channelId.trim()
         ? req.body.channelId.trim()
-        : env.DEFAULT_TEXT_CHANNEL_ID;
+        : env.DISCORD_DAILY_REPORT_CHANNEL_ID ?? env.DEFAULT_TEXT_CHANNEL_ID;
     if (!fallbackChannelId) {
-      res.status(400).json({ ok: false, error: 'channelId or DEFAULT_TEXT_CHANNEL_ID is required' });
+      res.status(400).json({ ok: false, error: 'channelId or DISCORD_DAILY_REPORT_CHANNEL_ID or DEFAULT_TEXT_CHANNEL_ID is required' });
       return;
     }
 
