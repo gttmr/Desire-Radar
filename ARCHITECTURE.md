@@ -8,7 +8,7 @@ Agentic-World is not a generic trend dashboard. It is a system for:
 4. mapping that value to investable beneficiaries,
 5. producing a time-sensitive verdict with explicit risk.
 
-The strategic runtime is `collector + mcp-orchestrator + discord-bot`. `predictor-legacy` remains only for compatibility.
+The strategic runtime is `collector + mcp-orchestrator + discord-bot`.
 
 ## Runtime Topology
 The intended local operator environment is WSL + Docker Compose.

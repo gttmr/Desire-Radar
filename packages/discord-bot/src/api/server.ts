@@ -46,28 +46,5 @@ export function createApiServer(bot: BotApp) {
     }
   });
 
-  app.post('/api/jobs/run', async (req, res) => {
-    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-    if (!text) {
-      res.status(400).json({ ok: false, error: 'text is required' });
-      return;
-    }
-
-    const action = bot.orchestrator.createPending({
-      transcript: { text, durationMs: 0 },
-      userId: 'api-user',
-      guildId: 'api-guild',
-      channelId: env.DEFAULT_TEXT_CHANNEL_ID ?? 'unknown-channel'
-    });
-
-    const outcome = await bot.orchestrator.execute(action.id);
-    if (outcome.status !== 'executed') {
-      res.status(500).json({ ok: false, outcome: outcome.status });
-      return;
-    }
-
-    res.json({ ok: true, result: outcome.result });
-  });
-
   return app;
 }

@@ -1,10 +1,6 @@
 import type {
-  AgentSignal,
-  AgentTurn,
-  KnowledgeEntry,
   PredictorRequest,
   PredictorResponse,
-  SignalValue,
   EvidenceBundle,
   SignalCandidate,
 } from '@agentic/shared-types';
@@ -15,33 +11,6 @@ export type AnalysisBackend = 'orchestrator';
 
 export interface AnalysisGateway {
   generateReport(request: PredictorRequest): Promise<PredictorResponse>;
-  getAgentSignals(): Promise<AgentSignal[]>;
-  runAgents(agents?: string[]): Promise<AgentSignal[]>;
-  listKnowledge(): Promise<KnowledgeEntry[]>;
-  addKnowledge(content: string, tags?: string[]): Promise<KnowledgeEntry>;
-  removeKnowledge(id: string): Promise<void>;
-}
-
-/**
- * Map an AgentTurn from the orchestrator debate into the AgentSignal
- * format expected by the bot layer.
- */
-function turnToSignal(turn: AgentTurn): AgentSignal {
-  const confidence = turn.response?.confidence ?? 0;
-  let signal: SignalValue = 'neutral';
-  if (confidence >= 0.7) signal = 'bullish';
-  else if (confidence >= 0.4) signal = 'caution';
-  else if (confidence > 0) signal = 'bearish';
-
-  return {
-    agent: turn.agent_name,
-    signal,
-    horizon: '1w',
-    confidence,
-    summary: turn.response?.summary ?? '',
-    key_factors: turn.response?.claims?.map(c => c.claim) ?? [],
-    updated_at: turn.created_at ?? new Date().toISOString()
-  };
 }
 
 function getCandidateSources(candidate: Pick<SignalCandidate, 'sources' | 'primary_sources'>): string[] {
@@ -215,106 +184,6 @@ export class OrchestratorGatewayAdapter implements AnalysisGateway {
       sources: allSources,
       tickers: request.tickers
     } as PredictorResponse;
-  }
-
-  async getAgentSignals(): Promise<AgentSignal[]> {
-    try {
-      const health = await this._orchestrator.health();
-      const now = new Date().toISOString();
-
-      return health.providers.map(p => ({
-        agent: p.provider,
-        signal: (p.available ? 'neutral' : 'caution') as SignalValue,
-        horizon: '1d' as const,
-        confidence: p.available ? 1.0 : 0.0,
-        summary: p.available
-          ? `Provider ${p.provider} is available`
-          : `Provider ${p.provider} is unavailable${p.error ? `: ${p.error}` : ''}`,
-        key_factors: [
-          `available: ${p.available}`,
-          `last_checked: ${p.last_checked_at}`
-        ],
-        updated_at: p.last_checked_at ?? now
-      }));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return [{
-        agent: 'orchestrator-health',
-        signal: 'bearish',
-        horizon: '1d',
-        confidence: 0,
-        summary: `Failed to reach orchestrator: ${message}`,
-        key_factors: [],
-        updated_at: new Date().toISOString()
-      }];
-    }
-  }
-
-  async runAgents(agents?: string[]): Promise<AgentSignal[]> {
-    try {
-      // 1) Get evidence from collector
-      const { candidates } = await this._collector.getEmergingCandidates();
-
-      const entityList = candidates.map(c => c.entity);
-      const totalSourceCount = candidates.reduce((sum, c) => sum + c.source_count, 0);
-
-      const bundle: EvidenceBundle = {
-        bundle_id: `run-agents-${Date.now()}`,
-        entity: entityList.join(', '),
-        time_window: {
-          start: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-          end: new Date().toISOString()
-        },
-        evidence_items: [],
-        cross_source_summary: `${candidates.length} candidates, ${totalSourceCount} total source hits`,
-        recommended_agents: agents ?? [],
-        quality_flags: []
-      };
-
-      // 2) Submit evidence
-      const { run_id } = await this._orchestrator.submitEvidence({
-        topic: 'Agent run',
-        evidence_bundle: bundle
-      });
-
-      // 3) Run debate with optional agent plan
-      const debate = await this._orchestrator.runDebate({
-        run_id,
-        max_rounds: 3,
-        ...(agents?.length ? { plan: agents } : {})
-      });
-
-      // 4) Map turns to AgentSignal format
-      return debate.turns.map(turnToSignal);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return [{
-        agent: 'orchestrator-run',
-        signal: 'bearish',
-        horizon: '1d',
-        confidence: 0,
-        summary: `Agent run failed: ${message}`,
-        key_factors: [],
-        updated_at: new Date().toISOString()
-      }];
-    }
-  }
-
-  async listKnowledge(): Promise<KnowledgeEntry[]> {
-    return [];
-  }
-
-  async addKnowledge(content: string, tags: string[] = []): Promise<KnowledgeEntry> {
-    return {
-      id: `stub-${Date.now()}`,
-      content,
-      tags,
-      created_at: new Date().toISOString()
-    };
-  }
-
-  async removeKnowledge(_id: string): Promise<void> {
-    // No-op — orchestrator has no knowledge store equivalent
   }
 }
 

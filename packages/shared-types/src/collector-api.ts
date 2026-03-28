@@ -173,6 +173,14 @@ export type EvidenceBundleResponse = {
 export type SourcesStatusResponse = {
   sources: Record<string, SourceStatus>;
   analysis: CollectorAnalysisStatusSummary;
+  runtime?: {
+    source_run_queue_size: number;
+    source_run_worker_concurrency: number;
+    active_source_count: number;
+    scheduled_source_count?: number;
+    active_schedules?: number;
+    scheduler_enabled?: boolean;
+  };
   catalog?: CollectorSourceCatalogEntry[];
 };
 

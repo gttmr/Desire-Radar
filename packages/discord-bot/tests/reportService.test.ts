@@ -6,14 +6,8 @@ import { GuildConfigStore } from '../src/services/guildConfigStore.js';
 import { ReportService } from '../src/services/reportService.js';
 import type { PredictorRequest, PredictorResponse } from '../src/types/domain.js';
 
-class FakePredictorClient {
+class FakeAnalysisGateway {
   lastRequest?: PredictorRequest;
-
-  async getAgentSignals() { return []; }
-  async runAgents() { return []; }
-  async listKnowledge() { return []; }
-  async addKnowledge(content: string) { return { id: 'fake', content, tags: [], created_at: '' }; }
-  async removeKnowledge(_id: string) {}
 
   async generateReport(request: PredictorRequest): Promise<PredictorResponse> {
     this.lastRequest = request;
@@ -64,24 +58,24 @@ describe('ReportService', () => {
   it('requires at least one ticker before running the report', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'report-service-'));
     const store = new GuildConfigStore(path.join(root, 'config.json'));
-    const predictor = new FakePredictorClient();
-    const service = new ReportService(store, predictor, 'Asia/Seoul');
+    const gateway = new FakeAnalysisGateway();
+    const service = new ReportService(store, gateway, 'Asia/Seoul');
 
     await service.ensureGuild('g1', 'c1');
     await expect(service.generateForGuild('g1', 'c1', 'manual', 'summary')).rejects.toThrow('관심 종목이 없습니다');
   });
 
-  it('forwards guild and ticker data to the predictor', async () => {
+  it('forwards guild and ticker data to the report gateway', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'report-service-'));
     const store = new GuildConfigStore(path.join(root, 'config.json'));
-    const predictor = new FakePredictorClient();
-    const service = new ReportService(store, predictor, 'Asia/Seoul');
+    const gateway = new FakeAnalysisGateway();
+    const service = new ReportService(store, gateway, 'Asia/Seoul');
 
     await service.addTicker('g1', 'c1', '005930');
     const dispatch = await service.generateForGuild('g1', 'c1', 'manual', 'full');
 
     expect(dispatch.channelId).toBe('c1');
-    expect(predictor.lastRequest).toMatchObject({
+    expect(gateway.lastRequest).toMatchObject({
       guildId: 'g1',
       tickers: ['005930'],
       mode: 'manual',

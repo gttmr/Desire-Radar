@@ -1,19 +1,15 @@
 import { env } from './config.js';
 import { createApiServer } from './api/server.js';
 import { BotApp } from './bot/botApp.js';
-import { ActionOrchestrator } from './services/actionOrchestrator.js';
 import { createAnalysisGateway } from './services/analysisGateway.js';
 import { CollectorClient } from './services/collectorClient.js';
 import { GuildConfigStore } from './services/guildConfigStore.js';
-import { JobEngine } from './services/jobEngine.js';
 import { NotificationScheduler } from './services/notificationScheduler.js';
 import { OrchestratorClient } from './services/orchestratorClient.js';
 import { ProviderHealthMonitor } from './services/providerHealthMonitor.js';
 import { ReportService } from './services/reportService.js';
 
 async function bootstrap() {
-  const jobEngine = new JobEngine();
-  const orchestrator = new ActionOrchestrator(env.ACTION_TTL_SEC * 1000, jobEngine);
   const store = new GuildConfigStore(env.CONFIG_STORE_PATH);
 
   const collector = new CollectorClient(env.COLLECTOR_BASE_URL);
@@ -25,7 +21,7 @@ async function bootstrap() {
   const providerHealthMonitor = new ProviderHealthMonitor(mcpOrchestrator, {
     pollIntervalMs: env.PROVIDER_ALERT_POLL_INTERVAL_SEC * 1000,
   });
-  const bot = new BotApp(orchestrator, scheduler, reports, collector, providerHealthMonitor);
+  const bot = new BotApp(scheduler, reports, collector, mcpOrchestrator, providerHealthMonitor);
 
   await bot.start();
 

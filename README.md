@@ -2,7 +2,7 @@
 
 사람들의 욕망과 초기 행동 신호를 수집하고, 여러 에이전트의 토론을 통해 투자 가능한 해석으로 바꾸는 시스템이다.
 
-현재 기본 런타임은 `discord-bot`, `collector`, `mcp-orchestrator` 3개 서비스다. `packages/predictor-legacy/`는 리포지토리에 남아 있지만 기본 Docker Compose 런타임에는 포함하지 않는다.
+현재 기본 런타임은 `discord-bot`, `collector`, `mcp-orchestrator` 3개 서비스다.
 
 ## 문서 가이드
 
@@ -71,7 +71,7 @@ Discord human input / slash commands
 ### Discord Bot
 - 하나의 human input 채널만 본다.
 - 메시지 내용을 bot이 직접 분류하지 않고 raw envelope 그대로 collector에 전달한다.
-- `/human-queue`로 `pending_human` 요청을 조회할 수 있다.
+- slash command 표면은 `report`, `radar`, `run`, `queue`, `ops` 5개 namespace로 고정한다.
 
 ## 빠른 시작
 
@@ -313,10 +313,31 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 
 ## Discord 명령어
 
-| 명령어 | 설명 |
-|--------|------|
-| `/ping` | 봇 상태 확인 |
-| `/watchlist-add ticker:<코드>` | 관심 종목 추가 |
+### `/report`
+- `/report watchlist add ticker:<코드>`: 관심 종목 추가
+- `/report watchlist remove ticker:<코드>`: 관심 종목 제거
+- `/report watchlist list`: 관심 종목 목록 조회
+- `/report run [detail:summary|full]`: 일일 리포트를 실행하고 보고 채널로 전송
+- `/report status`: 리포트 설정과 최근 실행 상태 조회
+
+### `/radar`
+- `/radar sources`: collector source 상태 조회
+- `/radar candidates [limit]`: 떠오르는 후보 조회
+- `/radar collect [source]`: enabled pull source 전체 또는 특정 source 수집 실행
+
+### `/run`
+- `/run start entity:<이름>`: orchestrator run 시작
+- `/run status run_id:<id>`: run 상태 요약
+- `/run verdict run_id:<id>`: verdict와 beneficiary mapping 요약
+- `/run research run_id:<id>`: research loop 상태 요약
+- `/run requests run_id:<id>`: research request 목록 조회
+
+### `/queue`
+- `/queue human [limit]`: `pending_human` 요청 조회
+
+### `/ops`
+- `/ops health`: bot, collector, orchestrator 종합 상태 조회
+- `/ops providers`: provider별 auth/execute/readiness 상태 조회
 
 ## Smoke 해석 기준
 
@@ -328,18 +349,6 @@ npm exec tsc -b packages/shared-types/tsconfig.json
   - candidate가 생성되고 `POST /runs/from-candidate`가 verdict를 반환해야 한다
   - beneficiary mapping이 비어 있으면 실패로 본다
   - provider가 degraded 상태라면 verdict confidence가 cap되어야 한다
-| `/watchlist-remove ticker:<코드>` | 관심 종목 제거 |
-| `/watchlist-list` | 관심 종목 목록 |
-| `/report-summary` | 요약 리포트 생성 |
-| `/report-full` | 전체 리포트 생성 |
-| `/report-status` | 리포트 설정 및 최근 실행 상태 |
-| `/agent-status` | 에이전트 상태 조회 |
-| `/agent-run` | 에이전트 실행 |
-| `/radar-status` | source 상태 조회 |
-| `/radar-emerging` | 떠오르는 후보 조회 |
-| `/human-queue` | 대기 중인 사람 입력 요청 조회 |
-| `/voice-start [channel]` | 음성 수집 시작 |
-| `/voice-stop` | 음성 수집 중단 |
 
 ## 주요 환경 변수
 
@@ -348,7 +357,7 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 | `DISCORD_TOKEN` | discord-bot | Discord bot token |
 | `DISCORD_CLIENT_ID` | discord-bot | Discord app client id |
 | `DISCORD_HUMAN_INPUT_CHANNEL_IDS` | discord-bot | human input 단일 채널 allowlist |
-| `DISCORD_HUMAN_QUEUE_CHANNEL_IDS` | discord-bot | `/human-queue` 허용 채널 |
+| `DISCORD_HUMAN_QUEUE_CHANNEL_IDS` | discord-bot | `/queue human` 허용 채널 |
 | `DISCORD_DAILY_REPORT_CHANNEL_ID` | discord-bot | 매일 리포트 기본 채널 |
 | `DISCORD_STATUS_CHANNEL_IDS` | discord-bot | 서버 상태/운영 알림 채널 |
 | `DISCORD_PROVIDER_ALERT_CHANNEL_IDS` | discord-bot | provider 장애/복구 알림 채널 |
@@ -388,7 +397,6 @@ packages/
   discord-bot/        Discord 인터페이스
   collector/          ingestion + source registry + candidate analysis
   mcp-orchestrator/   phase-aware 투자 판단 파이프라인
-  predictor-legacy/   리포지토리에는 남아 있지만 기본 런타임에서는 미사용
 ```
 
 ## 라이선스

@@ -15,8 +15,6 @@
 - `mcp-orchestrator`
 - `discord-bot`
 
-`predictor-legacy`는 기본 테스트/운영 경로에서 제외한다.
-
 ## WSL Assumptions
 - 저장소 루트는 WSL에서 `/mnt/c/Users/ilmas/workspace/Agentic-World`로 접근한다.
 - Docker Compose는 WSL 셸에서 실행한다.
@@ -258,6 +256,38 @@ curl http://127.0.0.1:5002/runtime/status
 
 ## Discord Human Input Test
 현재 구조는 단일 human input 채널 기준이다.
+
+## Discord Slash Commands
+현재 운영 명령 표면은 5개 namespace로 고정한다.
+
+- `report`
+  - `watchlist add/remove/list`
+  - `run`
+  - `status`
+- `radar`
+  - `sources`
+  - `candidates`
+  - `collect`
+- `run`
+  - `start`
+  - `status`
+  - `verdict`
+  - `research`
+  - `requests`
+- `queue`
+  - `human`
+- `ops`
+  - `health`
+  - `providers`
+
+운영 smoke 예시:
+
+- Discord 채널에서 `/radar sources`
+- Discord 채널에서 `/radar candidates limit:10`
+- Discord 채널에서 `/radar collect`
+- Discord 채널에서 `/run start entity:Cursor`
+- Discord 채널에서 `/queue human limit:5`
+- Discord 채널에서 `/ops providers`
 
 필수 env:
 - `DISCORD_TOKEN`
