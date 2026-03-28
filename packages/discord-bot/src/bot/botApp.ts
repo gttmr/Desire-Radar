@@ -26,6 +26,10 @@ import { VoiceCaptureService } from '../services/voiceCaptureService.js';
 import { MockSttProvider, type SttProvider } from '../stt/provider.js';
 import type { ReportDetailLevel, ReportRunMode } from '../types/domain.js';
 import { commandJson } from './commands.js';
+import {
+  detectChannelRoutingWarnings,
+  resolveProviderAlertChannelIds,
+} from './channelRouting.js';
 
 function normalizeTicker(input: string): string {
   return input.trim().toUpperCase();
@@ -139,6 +143,7 @@ export class BotApp {
     });
 
     this.client.once(Events.ClientReady, async () => {
+      this.logChannelRoutingWarnings();
       await this.registerSlashCommands();
       await this.initializeReportSchedules();
       this.startProviderHealthMonitor();
@@ -683,16 +688,12 @@ export class BotApp {
   }
 
   private resolveProviderAlertChannelIds(): string[] {
-    if (env.DISCORD_STATUS_CHANNEL_IDS.size > 0) {
-      return [...env.DISCORD_STATUS_CHANNEL_IDS];
-    }
-    if (env.DISCORD_PROVIDER_ALERT_CHANNEL_IDS.size > 0) {
-      return [...env.DISCORD_PROVIDER_ALERT_CHANNEL_IDS];
-    }
-    if (env.DEFAULT_TEXT_CHANNEL_ID) {
-      return [env.DEFAULT_TEXT_CHANNEL_ID];
-    }
-    return [];
+    return resolveProviderAlertChannelIds({
+      providerAlertChannelIds: env.DISCORD_PROVIDER_ALERT_CHANNEL_IDS,
+      statusChannelIds: env.DISCORD_STATUS_CHANNEL_IDS,
+      defaultTextChannelId: env.DEFAULT_TEXT_CHANNEL_ID,
+      dailyReportChannelId: env.DISCORD_DAILY_REPORT_CHANNEL_ID,
+    });
   }
 
   private resolveDefaultReportChannelId(guildId: string): string {
@@ -750,6 +751,17 @@ export class BotApp {
       await this.reports.markRun(guildId, { status: 'error', mode, error: message });
       await this.sendToTextChannel(fallbackChannelId, `리포트 생성 실패: ${message}`);
       throw error;
+    }
+  }
+
+  private logChannelRoutingWarnings(): void {
+    for (const warning of detectChannelRoutingWarnings({
+      providerAlertChannelIds: env.DISCORD_PROVIDER_ALERT_CHANNEL_IDS,
+      statusChannelIds: env.DISCORD_STATUS_CHANNEL_IDS,
+      defaultTextChannelId: env.DEFAULT_TEXT_CHANNEL_ID,
+      dailyReportChannelId: env.DISCORD_DAILY_REPORT_CHANNEL_ID,
+    })) {
+      console.warn(`[channel-routing] ${warning}`);
     }
   }
 }
