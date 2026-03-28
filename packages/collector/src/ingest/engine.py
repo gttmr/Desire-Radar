@@ -425,6 +425,9 @@ class IngestionEngine:
                 "queued_runs": runtime["queued_runs"],
                 "active_runs": runtime["active_runs"],
                 "active_submission_ids": list(runtime["active_submission_ids"]),
+                "current_stage": runtime["current_stage"],
+                "current_stage_message": runtime["current_stage_message"],
+                "last_progress_at": runtime["last_progress_at"],
                 "last_trigger": runtime["last_trigger"],
                 "last_submission_id": runtime["last_submission_id"],
                 "last_started_at": runtime["last_started_at"],
@@ -432,10 +435,17 @@ class IngestionEngine:
                 "last_error": runtime["last_error"],
                 "last_failure_kind": runtime["last_failure_kind"],
                 "last_outcome": runtime["last_outcome"],
+                "payload_total": runtime["payload_total"],
+                "payloads_processed": runtime["payloads_processed"],
+                "snapshot_total": runtime["snapshot_total"],
+                "evidence_total": runtime["evidence_total"],
+                "resolve_success_total": runtime["resolve_success_total"],
+                "resolve_miss_total": runtime["resolve_miss_total"],
                 "partial_failure_count": runtime["partial_failure_count"],
                 "last_warning_kind": runtime["last_warning_kind"],
                 "last_warning_count": runtime["last_warning_count"],
                 "last_warning_message": runtime["last_warning_message"],
+                "last_warning_targets": list(runtime["last_warning_targets"]),
             }
             active_sources += 1 if runtime["active_runs"] > 0 else 0
             sources[source_id] = snapshot
@@ -485,11 +495,23 @@ class IngestionEngine:
         try:
             source = self.source_registry.require(running_record.source_id)
             if source.kind == "derived":
+                self._update_source_progress(
+                    running_record.source_id,
+                    running_record.submission_id,
+                    stage="building_derived_evidence",
+                    message="building evidence from existing graph state",
+                )
                 updated = await self._process_derived_submission(
                     running_record,
                     is_submission=False,
                 )
             else:
+                self._update_source_progress(
+                    running_record.source_id,
+                    running_record.submission_id,
+                    stage="fetching",
+                    message="waiting for connector fetch to complete",
+                )
                 connector = self.connectors.get(source.adapter_name)
                 if connector is None:
                     raise ValueError(
@@ -497,14 +519,32 @@ class IngestionEngine:
                     )
                 fetch_result = await connector.fetch()
                 payloads, warnings = self._normalize_fetch_result(fetch_result)
+                warning_dicts = [self._warning_to_dict(item) for item in warnings]
                 running = self.submission_store.update(
                     running_record.submission_id,
                     status="running",
                     payloads=[payload.data for payload in payloads],
                     metadata={
                         **running_record.metadata,
-                        "warnings": [self._warning_to_dict(item) for item in warnings],
+                        "warnings": warning_dicts,
                     },
+                )
+                self._update_source_progress(
+                    running_record.source_id,
+                    running_record.submission_id,
+                    stage="processing_payloads",
+                    message=f"fetched {len(payloads)} payloads from connector",
+                    payload_total=len(payloads),
+                    payloads_processed=0,
+                    snapshot_total=0,
+                    evidence_total=0,
+                    resolve_success_total=0,
+                    resolve_miss_total=0,
+                    partial_failure_count=len(warnings),
+                    last_warning_count=len(warnings),
+                    last_warning_kind=self._primary_warning_value(warning_dicts, "kind"),
+                    last_warning_message=self._primary_warning_value(warning_dicts, "message"),
+                    last_warning_targets=self._warning_targets(warning_dicts),
                 )
                 updated = await self._process_raw_payloads(
                     running,
@@ -522,6 +562,12 @@ class IngestionEngine:
                 status="failed",
                 error_message=str(exc),
                 processed_at=self._now(),
+            )
+            updated = self._update_source_progress(
+                running_record.source_id,
+                running_record.submission_id,
+                stage="failed",
+                message=str(exc),
             )
             self.source_registry.record_processing(
                 running_record.source_id,
@@ -557,6 +603,7 @@ class IngestionEngine:
             warning_kind=self._primary_warning_value(updated.metadata.get("warnings"), "kind"),
             warning_count=len(updated.metadata.get("warnings", [])),
             warning_message=self._primary_warning_value(updated.metadata.get("warnings"), "message"),
+            warning_targets=self._warning_targets(updated.metadata.get("warnings")),
         )
         return updated
 
@@ -566,6 +613,9 @@ class IngestionEngine:
             "queued_runs": 0,
             "active_runs": 0,
             "active_submission_ids": [],
+            "current_stage": None,
+            "current_stage_message": None,
+            "last_progress_at": None,
             "last_trigger": None,
             "last_submission_id": None,
             "last_started_at": None,
@@ -573,10 +623,17 @@ class IngestionEngine:
             "last_error": None,
             "last_failure_kind": None,
             "last_outcome": None,
+            "payload_total": 0,
+            "payloads_processed": 0,
+            "snapshot_total": 0,
+            "evidence_total": 0,
+            "resolve_success_total": 0,
+            "resolve_miss_total": 0,
             "partial_failure_count": 0,
             "last_warning_kind": None,
             "last_warning_count": 0,
             "last_warning_message": None,
+            "last_warning_targets": [],
         }
 
     def _runtime_for_source(self, source_id: str) -> dict[str, Any]:
@@ -591,6 +648,9 @@ class IngestionEngine:
         runtime["queued_runs"] += 1
         runtime["last_trigger"] = trigger
         runtime["last_submission_id"] = submission_id
+        runtime["current_stage"] = "queued"
+        runtime["current_stage_message"] = "waiting for a source worker"
+        runtime["last_progress_at"] = self._now()
         if runtime["active_runs"] <= 0:
             runtime["run_state"] = "queued"
 
@@ -606,8 +666,22 @@ class IngestionEngine:
         runtime["last_trigger"] = trigger
         runtime["last_submission_id"] = submission_id
         runtime["last_started_at"] = self._now()
+        runtime["last_progress_at"] = runtime["last_started_at"]
+        runtime["current_stage"] = "starting"
+        runtime["current_stage_message"] = "source worker claimed this run"
         runtime["last_error"] = None
         runtime["last_failure_kind"] = None
+        runtime["payload_total"] = 0
+        runtime["payloads_processed"] = 0
+        runtime["snapshot_total"] = 0
+        runtime["evidence_total"] = 0
+        runtime["resolve_success_total"] = 0
+        runtime["resolve_miss_total"] = 0
+        runtime["partial_failure_count"] = 0
+        runtime["last_warning_kind"] = None
+        runtime["last_warning_count"] = 0
+        runtime["last_warning_message"] = None
+        runtime["last_warning_targets"] = []
 
     def _mark_source_finished(
         self,
@@ -620,6 +694,7 @@ class IngestionEngine:
         warning_kind: str | None = None,
         warning_count: int = 0,
         warning_message: str | None = None,
+        warning_targets: list[str] | None = None,
     ) -> None:
         runtime = self._runtime_for_source(source_id)
         runtime["active_runs"] = max(0, int(runtime["active_runs"]) - 1)
@@ -629,13 +704,17 @@ class IngestionEngine:
             if item != submission_id
         ]
         runtime["last_finished_at"] = self._now()
+        runtime["last_progress_at"] = runtime["last_finished_at"]
         runtime["last_outcome"] = outcome
         runtime["last_error"] = error_message
         runtime["last_failure_kind"] = failure_kind
+        runtime["current_stage"] = outcome
+        runtime["current_stage_message"] = error_message or warning_message
         runtime["partial_failure_count"] = warning_count
         runtime["last_warning_kind"] = warning_kind
         runtime["last_warning_count"] = warning_count
         runtime["last_warning_message"] = warning_message
+        runtime["last_warning_targets"] = list(warning_targets or [])
         if runtime["active_runs"] > 0:
             runtime["run_state"] = "running"
         elif runtime["queued_runs"] > 0:
@@ -686,6 +765,85 @@ class IngestionEngine:
         value = first.get(field)
         return str(value) if value is not None else None
 
+    def _warning_targets(self, warnings: Any) -> list[str]:
+        if not isinstance(warnings, list):
+            return []
+        targets: list[str] = []
+        for item in warnings:
+            if not isinstance(item, dict):
+                continue
+            target = item.get("target")
+            if target is None:
+                continue
+            normalized = str(target).strip()
+            if normalized and normalized not in targets:
+                targets.append(normalized)
+        return targets[:5]
+
+    def _update_submission_progress(
+        self,
+        submission_id: str,
+        *,
+        stage: str,
+        message: str | None = None,
+        **counts: Any,
+    ) -> SubmissionRecord:
+        record = self.submission_store.get(submission_id)
+        if record is None:
+            raise KeyError(submission_id)
+        metadata = dict(record.metadata)
+        progress = dict(metadata.get("progress") or {})
+        progress["stage"] = stage
+        progress["updated_at"] = self._now()
+        if message is not None:
+            progress["message"] = message
+        for key, value in counts.items():
+            if value is not None:
+                progress[key] = value
+        metadata["progress"] = progress
+        return self.submission_store.update(submission_id, metadata=metadata)
+
+    def _update_source_progress(
+        self,
+        source_id: str,
+        submission_id: str,
+        *,
+        stage: str,
+        message: str | None = None,
+        **counts: Any,
+    ) -> SubmissionRecord:
+        runtime = self._runtime_for_source(source_id)
+        runtime["current_stage"] = stage
+        runtime["current_stage_message"] = message
+        runtime["last_progress_at"] = self._now()
+        for key in (
+            "payload_total",
+            "payloads_processed",
+            "snapshot_total",
+            "evidence_total",
+            "resolve_success_total",
+            "resolve_miss_total",
+            "partial_failure_count",
+            "last_warning_count",
+        ):
+            if key in counts and counts[key] is not None:
+                runtime[key] = counts[key]
+        if counts.get("last_warning_kind") is not None:
+            runtime["last_warning_kind"] = counts["last_warning_kind"]
+        if counts.get("last_warning_message") is not None:
+            runtime["last_warning_message"] = counts["last_warning_message"]
+        if counts.get("last_warning_targets") is not None:
+            runtime["last_warning_targets"] = list(counts["last_warning_targets"])
+        return self._update_submission_progress(
+            submission_id,
+            stage=stage,
+            message=message,
+            **counts,
+        )
+
+    def _should_record_payload_progress(self, index: int, total: int) -> bool:
+        return index == 1 or index == total or index % 5 == 0
+
     async def _process_raw_submission(
         self,
         record: SubmissionRecord,
@@ -722,6 +880,15 @@ class IngestionEngine:
         is_submission: bool,
     ) -> SubmissionRecord:
         self.submission_store.update(record.submission_id, status="running")
+        def progress_update(**kwargs: Any) -> SubmissionRecord:
+            if is_run:
+                return self._update_source_progress(
+                    source_id,
+                    record.submission_id,
+                    **kwargs,
+                )
+            return self._update_submission_progress(record.submission_id, **kwargs)
+
         source = self.source_registry.require(source_id)
         snapshot_ids: list[str] = []
         resolved_evidence_ids: list[str] = []
@@ -730,6 +897,21 @@ class IngestionEngine:
         resolve_success = 0
         resolve_miss = 0
         warning_items = warnings or []
+        progress_update(
+            stage="processing_payloads",
+            message=f"processing {len(payloads)} raw payloads",
+            payload_total=len(payloads),
+            payloads_processed=0,
+            snapshot_total=0,
+            evidence_total=0,
+            resolve_success_total=0,
+            resolve_miss_total=0,
+            partial_failure_count=len(warning_items),
+            last_warning_count=len(warning_items),
+            last_warning_targets=[item.target for item in warning_items if item.target][:5],
+            last_warning_kind=warning_items[0].kind if warning_items else None,
+            last_warning_message=warning_items[0].message if warning_items else None,
+        )
 
         try:
             for index, payload in enumerate(payloads, start=1):
@@ -764,8 +946,41 @@ class IngestionEngine:
                 resolve_miss += miss_count
                 all_evidences.extend(resolved_evidences)
                 resolved_evidence_ids.extend([item.evidence_id for item in resolved_evidences])
+                if self._should_record_payload_progress(index, len(payloads)):
+                    progress_update(
+                        stage="processing_payloads",
+                        message=f"processed payload {index}/{len(payloads)}",
+                        payload_total=len(payloads),
+                        payloads_processed=index,
+                        snapshot_total=len(snapshot_ids),
+                        evidence_total=len(resolved_evidence_ids),
+                        resolve_success_total=resolve_success,
+                        resolve_miss_total=resolve_miss,
+                        partial_failure_count=len(warning_items),
+                        last_warning_count=len(warning_items),
+                        last_warning_targets=[
+                            item.target for item in warning_items if item.target
+                        ][:5],
+                        last_warning_kind=warning_items[0].kind if warning_items else None,
+                        last_warning_message=warning_items[0].message if warning_items else None,
+                    )
                 await self._maybe_yield_processing(index)
 
+            progress_update(
+                stage="triggering_analysis",
+                message="writing evidence and triggering analysis",
+                payload_total=len(payloads),
+                payloads_processed=len(payloads),
+                snapshot_total=len(snapshot_ids),
+                evidence_total=len(resolved_evidence_ids),
+                resolve_success_total=resolve_success,
+                resolve_miss_total=resolve_miss,
+                partial_failure_count=len(warning_items),
+                last_warning_count=len(warning_items),
+                last_warning_targets=[item.target for item in warning_items if item.target][:5],
+                last_warning_kind=warning_items[0].kind if warning_items else None,
+                last_warning_message=warning_items[0].message if warning_items else None,
+            )
             self.evidence_sink.extend(all_evidences)
             await self._trigger_analysis(all_evidences)
             updated = self.submission_store.update(
@@ -778,6 +993,21 @@ class IngestionEngine:
                     **record.metadata,
                     "warnings": [self._warning_to_dict(item) for item in warning_items],
                 },
+            )
+            updated = progress_update(
+                stage="completed",
+                message="source processing completed",
+                payload_total=len(payloads),
+                payloads_processed=len(payloads),
+                snapshot_total=len(snapshot_ids),
+                evidence_total=len(resolved_evidence_ids),
+                resolve_success_total=resolve_success,
+                resolve_miss_total=resolve_miss,
+                partial_failure_count=len(warning_items),
+                last_warning_count=len(warning_items),
+                last_warning_targets=[item.target for item in warning_items if item.target][:5],
+                last_warning_kind=warning_items[0].kind if warning_items else None,
+                last_warning_message=warning_items[0].message if warning_items else None,
             )
             self.source_registry.record_processing(
                 source_id,
@@ -812,6 +1042,21 @@ class IngestionEngine:
                     "warnings": [self._warning_to_dict(item) for item in warning_items],
                 },
             )
+            updated = progress_update(
+                stage="failed",
+                message=str(exc),
+                payload_total=len(payloads),
+                payloads_processed=min(len(snapshot_ids), len(payloads)),
+                snapshot_total=len(snapshot_ids),
+                evidence_total=len(resolved_evidence_ids),
+                resolve_success_total=resolve_success,
+                resolve_miss_total=resolve_miss,
+                partial_failure_count=len(warning_items),
+                last_warning_count=len(warning_items),
+                last_warning_targets=[item.target for item in warning_items if item.target][:5],
+                last_warning_kind=warning_items[0].kind if warning_items else None,
+                last_warning_message=warning_items[0].message if warning_items else None,
+            )
             self.source_registry.record_processing(
                 source_id,
                 success=False,
@@ -837,6 +1082,17 @@ class IngestionEngine:
         is_submission: bool,
     ) -> SubmissionRecord:
         self.submission_store.update(record.submission_id, status="running")
+        self._update_submission_progress(
+            record.submission_id,
+            stage="validating_evidence",
+            message=f"processing {len(record.evidence_payloads)} evidence items",
+            payload_total=len(record.evidence_payloads),
+            payloads_processed=0,
+            snapshot_total=0,
+            evidence_total=0,
+            resolve_success_total=0,
+            resolve_miss_total=0,
+        )
         source = self.source_registry.require(record.source_id)
         snapshot_ids: list[str] = []
         evidence_ids: list[str] = []
@@ -880,10 +1136,33 @@ class IngestionEngine:
                 resolve_success += hit_count
                 resolve_miss += miss_count
                 evidences.extend(resolved_evidences)
+                if self._should_record_payload_progress(index, len(record.evidence_payloads)):
+                    self._update_submission_progress(
+                        record.submission_id,
+                        stage="validating_evidence",
+                        message=f"processed evidence item {index}/{len(record.evidence_payloads)}",
+                        payload_total=len(record.evidence_payloads),
+                        payloads_processed=index,
+                        snapshot_total=len(snapshot_ids),
+                        evidence_total=len(evidences),
+                        resolve_success_total=resolve_success,
+                        resolve_miss_total=resolve_miss,
+                    )
                 await self._maybe_yield_processing(index)
 
             self.evidence_sink.extend(evidences)
             evidence_ids.extend([item.evidence_id for item in evidences])
+            self._update_submission_progress(
+                record.submission_id,
+                stage="triggering_analysis",
+                message="writing evidence and triggering analysis",
+                payload_total=len(record.evidence_payloads),
+                payloads_processed=len(record.evidence_payloads),
+                snapshot_total=len(snapshot_ids),
+                evidence_total=len(evidence_ids),
+                resolve_success_total=resolve_success,
+                resolve_miss_total=resolve_miss,
+            )
             await self._trigger_analysis(evidences)
             updated = self.submission_store.update(
                 record.submission_id,
@@ -891,6 +1170,17 @@ class IngestionEngine:
                 snapshot_ids=snapshot_ids,
                 evidence_ids=evidence_ids,
                 processed_at=self._now(),
+            )
+            updated = self._update_submission_progress(
+                record.submission_id,
+                stage="completed",
+                message="evidence submission completed",
+                payload_total=len(record.evidence_payloads),
+                payloads_processed=len(record.evidence_payloads),
+                snapshot_total=len(snapshot_ids),
+                evidence_total=len(evidence_ids),
+                resolve_success_total=resolve_success,
+                resolve_miss_total=resolve_miss,
             )
             self._finalize_human_request(
                 request_submission_id=record.metadata.get("request_submission_id"),
@@ -921,6 +1211,17 @@ class IngestionEngine:
                 evidence_ids=evidence_ids,
                 processed_at=self._now(),
             )
+            updated = self._update_submission_progress(
+                record.submission_id,
+                stage="failed",
+                message=str(exc),
+                payload_total=len(record.evidence_payloads),
+                payloads_processed=len(snapshot_ids),
+                snapshot_total=len(snapshot_ids),
+                evidence_total=len(evidence_ids),
+                resolve_success_total=0,
+                resolve_miss_total=0,
+            )
             self.source_registry.record_processing(
                 record.source_id,
                 success=False,
@@ -936,6 +1237,15 @@ class IngestionEngine:
         envelope: HumanInputEnvelope,
     ) -> SubmissionRecord:
         self.submission_store.update(record.submission_id, status="running")
+        self._update_submission_progress(
+            record.submission_id,
+            stage="routing_human_input",
+            message="classifying free-form human input",
+            payload_total=1,
+            payloads_processed=0,
+            snapshot_total=0,
+            evidence_total=0,
+        )
         snapshot_ids: list[str] = []
         evidence_ids: list[str] = []
         try:
@@ -969,6 +1279,15 @@ class IngestionEngine:
                     processed_at=self._now(),
                     metadata=metadata,
                 )
+                updated = self._update_submission_progress(
+                    record.submission_id,
+                    stage="rejected",
+                    message="human input requires manual review",
+                    payload_total=1,
+                    payloads_processed=1,
+                    snapshot_total=len(snapshot_ids),
+                    evidence_total=0,
+                )
                 self.source_registry.record_processing(
                     record.source_id,
                     success=True,
@@ -977,6 +1296,14 @@ class IngestionEngine:
                 )
                 return updated
 
+            self._update_submission_progress(
+                record.submission_id,
+                stage="dispatching_human_input",
+                message=f"dispatching routed input to {decision.route}",
+                payload_total=1,
+                payloads_processed=1,
+                snapshot_total=len(snapshot_ids),
+            )
             routed = await self._dispatch_human_input(decision, envelope)
             evidence_ids = list(routed.evidence_ids)
             metadata.update(
@@ -992,6 +1319,15 @@ class IngestionEngine:
                 evidence_ids=evidence_ids,
                 processed_at=self._now(),
                 metadata=metadata,
+            )
+            updated = self._update_submission_progress(
+                record.submission_id,
+                stage="completed" if routed.status == "completed" else routed.status,
+                message=f"routed to {decision.route}",
+                payload_total=1,
+                payloads_processed=1,
+                snapshot_total=len(snapshot_ids),
+                evidence_total=len(evidence_ids),
             )
             self.source_registry.record_processing(
                 record.source_id,
@@ -1014,6 +1350,15 @@ class IngestionEngine:
                 evidence_ids=evidence_ids,
                 processed_at=self._now(),
             )
+            updated = self._update_submission_progress(
+                record.submission_id,
+                stage="failed",
+                message=str(exc),
+                payload_total=1,
+                payloads_processed=1 if snapshot_ids else 0,
+                snapshot_total=len(snapshot_ids),
+                evidence_total=len(evidence_ids),
+            )
             self.source_registry.record_processing(
                 record.source_id,
                 success=False,
@@ -1031,6 +1376,11 @@ class IngestionEngine:
     ) -> SubmissionRecord:
         source = self.source_registry.require(record.source_id)
         self.submission_store.update(record.submission_id, status="running")
+        self._update_submission_progress(
+            record.submission_id,
+            stage="building_derived_evidence",
+            message="deriving evidence from existing evidence graph",
+        )
         try:
             evidences = build_derived_evidence(
                 record.source_id,
@@ -1045,12 +1395,28 @@ class IngestionEngine:
                 evidences,
             )
             self.evidence_sink.extend(resolved_evidences)
+            self._update_submission_progress(
+                record.submission_id,
+                stage="triggering_analysis",
+                message="writing derived evidence and triggering analysis",
+                evidence_total=len(resolved_evidences),
+                resolve_success_total=hit_count,
+                resolve_miss_total=miss_count,
+            )
             await self._trigger_analysis(resolved_evidences)
             updated = self.submission_store.update(
                 record.submission_id,
                 status="completed",
                 evidence_ids=[item.evidence_id for item in resolved_evidences],
                 processed_at=self._now(),
+            )
+            updated = self._update_submission_progress(
+                record.submission_id,
+                stage="completed",
+                message="derived source completed",
+                evidence_total=len(resolved_evidences),
+                resolve_success_total=hit_count,
+                resolve_miss_total=miss_count,
             )
             self.source_registry.record_processing(
                 record.source_id,
@@ -1072,6 +1438,11 @@ class IngestionEngine:
                 status="failed",
                 error_message=str(exc),
                 processed_at=self._now(),
+            )
+            updated = self._update_submission_progress(
+                record.submission_id,
+                stage="failed",
+                message=str(exc),
             )
             self.source_registry.record_processing(
                 record.source_id,

@@ -224,16 +224,37 @@ curl http://127.0.0.1:5002/runtime/status
 보는 필드:
 - `submission.status`: `pending | running | completed | failed`
 - `run_state`: `idle | queued | running | failed`
+- `current_stage`
+- `current_stage_message`
+- `last_progress_at`
 - `active_submission_ids`
 - `last_started_at`
 - `last_finished_at`
 - `last_error`
 - `last_outcome`
 - `last_failure_kind`
+- `payload_total`
+- `payloads_processed`
+- `snapshot_total`
+- `evidence_total`
+- `resolve_success_total`
+- `resolve_miss_total`
 - `partial_failure_count`
 - `last_warning_kind`
 - `last_warning_count`
 - `last_warning_message`
+- `last_warning_targets`
+
+`GET /ingest/submissions/{submission_id}` 의 `metadata.progress`는 개별 submission의 정규 progress snapshot이다.
+- `stage`
+- `updated_at`
+- counters (`payload_total`, `payloads_processed`, `snapshot_total`, `evidence_total`, ...)
+
+느린 source를 볼 때 해석 기준:
+- `current_stage=fetching`: connector fetch가 아직 안 끝난 상태
+- `current_stage=processing_payloads`: fetch는 끝났고 snapshot/normalizer/resolve를 진행 중인 상태
+- `current_stage=triggering_analysis`: evidence 적재는 끝났고 analysis enqueue 직전/직후
+- `last_warning_targets`가 있으면 partial failure가 source 전체 실패가 아니라 특정 target/subreddit에 국한된 상태다
 
 ## Discord Human Input Test
 현재 구조는 단일 human input 채널 기준이다.

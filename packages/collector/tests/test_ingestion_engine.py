@@ -381,10 +381,14 @@ async def test_enqueue_source_run_reports_runtime_state_while_running(tmp_path):
         assert stored_while_running is not None
         assert stored_while_running.status == "running"
         assert source_runtime["run_state"] == "running"
+        assert source_runtime["current_stage"] == "fetching"
+        assert source_runtime["current_stage_message"] == "waiting for connector fetch to complete"
+        assert source_runtime["last_progress_at"] is not None
         assert source_runtime["active_runs"] == 1
         assert source_runtime["queued_runs"] == 0
         assert source_runtime["active_submission_ids"] == [record.submission_id]
         assert source_runtime["last_trigger"] == "scheduled"
+        assert stored_while_running.metadata["progress"]["stage"] == "fetching"
 
         connector.release.set()
         await engine._source_run_queue.join()  # type: ignore[attr-defined]
@@ -398,6 +402,7 @@ async def test_enqueue_source_run_reports_runtime_state_while_running(tmp_path):
     assert runtime["active_source_count"] == 0
     assert runtime["sources"]["blocking_pull"]["run_state"] == "idle"
     assert runtime["sources"]["blocking_pull"]["last_outcome"] == "completed"
+    assert runtime["sources"]["blocking_pull"]["current_stage"] == "completed"
 
 @pytest.mark.asyncio
 async def test_request_human_analyst_note_creates_pending_human_submission(tmp_path):
@@ -491,9 +496,46 @@ async def test_run_source_records_partial_failures_without_failing_submission(tm
     assert runtime["sources"]["partial_pull"]["last_outcome"] == "completed_with_warnings"
     assert runtime["sources"]["partial_pull"]["last_warning_kind"] == "http_403_blocked"
     assert runtime["sources"]["partial_pull"]["last_warning_count"] == 1
+    assert runtime["sources"]["partial_pull"]["last_warning_targets"] == ["gadgets"]
+    assert record.metadata["progress"]["last_warning_targets"] == ["gadgets"]
     status = registry.status()["partial_pull"]
     assert status["partial_failure_count"] == 1
     assert status["last_warning_kind"] == "http_403_blocked"
+
+
+@pytest.mark.asyncio
+async def test_run_source_exposes_progress_counts_after_completion(tmp_path):
+    connectors = {SlowProcessingConnector.name: SlowProcessingConnector()}
+    registry = SourceRegistry(
+        str(tmp_path / "sources.json"),
+        build_default_sources(connectors),
+    )
+    engine = IngestionEngine(
+        source_registry=registry,
+        submission_store=SubmissionStore(str(tmp_path / "submissions.json")),
+        snapshot_store=RawSnapshotStore(str(tmp_path / "snapshots")),
+        evidence_sink=EvidenceSink(),
+        entity_resolver=EntityResolver(EntityStore(str(tmp_path / "entities.json"))),
+        normalizer_fn=_normalizer,
+        connectors=connectors,
+        analysis_engine=StubAnalysisEngine(),
+    )
+
+    record = await engine.run_source("slow_processing_pull")
+
+    assert record.status == "completed"
+    assert record.metadata["progress"]["stage"] == "completed"
+    assert record.metadata["progress"]["payload_total"] == 8
+    assert record.metadata["progress"]["payloads_processed"] == 8
+    assert record.metadata["progress"]["snapshot_total"] == 8
+    assert record.metadata["progress"]["evidence_total"] == 8
+    runtime = engine.get_runtime_status()
+    source_runtime = runtime["sources"]["slow_processing_pull"]
+    assert source_runtime["current_stage"] == "completed"
+    assert source_runtime["payload_total"] == 8
+    assert source_runtime["payloads_processed"] == 8
+    assert source_runtime["snapshot_total"] == 8
+    assert source_runtime["evidence_total"] == 8
 
 
 @pytest.mark.asyncio
