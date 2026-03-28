@@ -35,6 +35,7 @@ class IngestionEngine:
         connectors: dict[str, BaseConnector],
         analysis_engine: AnalysisEngine | None = None,
         human_input_router: HumanInputRouter | None = None,
+        source_run_worker_concurrency: int = 2,
     ) -> None:
         self.source_registry = source_registry
         self.submission_store = submission_store
@@ -46,12 +47,22 @@ class IngestionEngine:
         self.analysis_engine = analysis_engine
         self.human_input_router = human_input_router
         self._queue: asyncio.Queue[str] = asyncio.Queue()
+        self._source_run_queue: asyncio.Queue[str] = asyncio.Queue()
         self._worker: asyncio.Task | None = None
+        self._source_workers: list[asyncio.Task] = []
         self._running = False
+        self._source_run_worker_concurrency = max(1, source_run_worker_concurrency)
+        self._source_runtime: dict[str, dict[str, Any]] = {}
+        for source in self.source_registry.list():
+            self._source_runtime[source.source_id] = self._new_source_runtime()
 
     async def start(self) -> None:
         self._running = True
         self._worker = asyncio.create_task(self._worker_loop())
+        self._source_workers = [
+            asyncio.create_task(self._source_worker_loop(index))
+            for index in range(self._source_run_worker_concurrency)
+        ]
 
     async def stop(self) -> None:
         self._running = False
@@ -61,6 +72,45 @@ class IngestionEngine:
                 await self._worker
             except asyncio.CancelledError:
                 pass
+        for worker in self._source_workers:
+            worker.cancel()
+        for worker in self._source_workers:
+            try:
+                await worker
+            except asyncio.CancelledError:
+                pass
+        self._source_workers = []
+
+    async def enqueue_source_run(
+        self,
+        source_id: str,
+        *,
+        producer_ref: str | None = None,
+        request_params: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> SubmissionRecord:
+        source = self.source_registry.require(source_id)
+        if not source.enabled:
+            raise ValueError(f"Source disabled: {source_id}")
+        if not source.runnable:
+            raise ValueError(f"Source is not runnable: {source_id}")
+
+        trigger = str((metadata or {}).get("trigger", "manual"))
+        record = SubmissionRecord(
+            submission_id=self._gen_id(),
+            source_id=source_id,
+            source_kind=source.kind,
+            ingestion_mode=source.ingestion_mode,
+            status="pending",
+            producer_ref=producer_ref or source.default_producer_ref,
+            received_at=self._now(),
+            request_params=request_params or {},
+            metadata={**(metadata or {}), "trigger": trigger},
+        )
+        self.submission_store.create(record)
+        self._mark_source_queued(source_id, record.submission_id, trigger=trigger)
+        await self._source_run_queue.put(record.submission_id)
+        return record
 
     async def enqueue_raw(
         self,
@@ -330,6 +380,8 @@ class IngestionEngine:
         if not source.runnable:
             raise ValueError(f"Source is not runnable: {source_id}")
 
+        trigger = str((metadata or {}).get("trigger", "manual"))
+
         if source.kind == "derived":
             record = SubmissionRecord(
                 submission_id=self._gen_id(),
@@ -340,39 +392,52 @@ class IngestionEngine:
                 producer_ref=producer_ref or source.default_producer_ref,
                 received_at=self._now(),
                 request_params=request_params or {},
-                metadata=metadata or {},
+                metadata={**(metadata or {}), "trigger": trigger},
             )
             self.submission_store.create(record)
-            return await self._process_derived_submission(record, is_submission=False)
-
-        connector = self.connectors.get(source.adapter_name)
-        if connector is None:
-            raise ValueError(f"Runnable source has no connector adapter: {source_id}")
-        payloads = await connector.fetch()
-        record = SubmissionRecord(
-            submission_id=self._gen_id(),
-            source_id=source_id,
-            source_kind=source.kind,
-            ingestion_mode="raw",
-            status="running",
-            producer_ref=producer_ref or source.default_producer_ref,
-            received_at=self._now(),
-            payloads=[payload.data for payload in payloads],
-            request_params=request_params or {},
-            metadata=metadata or {},
-        )
-        self.submission_store.create(record)
-        return await self._process_raw_payloads(
-            record,
-            source_id=source_id,
-            source_kind=source.kind,
-            payloads=payloads,
-            is_run=True,
-            is_submission=False,
-        )
+        else:
+            record = SubmissionRecord(
+                submission_id=self._gen_id(),
+                source_id=source_id,
+                source_kind=source.kind,
+                ingestion_mode="raw",
+                status="running",
+                producer_ref=producer_ref or source.default_producer_ref,
+                received_at=self._now(),
+                request_params=request_params or {},
+                metadata={**(metadata or {}), "trigger": trigger},
+            )
+            self.submission_store.create(record)
+        return await self._execute_source_run(record)
 
     async def get_submission(self, submission_id: str) -> SubmissionRecord | None:
         return self.submission_store.get(submission_id)
+
+    def get_runtime_status(self) -> dict[str, Any]:
+        sources = {}
+        active_sources = 0
+        for source_id in sorted(self._source_runtime):
+            runtime = self._source_runtime[source_id]
+            snapshot = {
+                "run_state": runtime["run_state"],
+                "queued_runs": runtime["queued_runs"],
+                "active_runs": runtime["active_runs"],
+                "active_submission_ids": list(runtime["active_submission_ids"]),
+                "last_trigger": runtime["last_trigger"],
+                "last_submission_id": runtime["last_submission_id"],
+                "last_started_at": runtime["last_started_at"],
+                "last_finished_at": runtime["last_finished_at"],
+                "last_error": runtime["last_error"],
+                "last_outcome": runtime["last_outcome"],
+            }
+            active_sources += 1 if runtime["active_runs"] > 0 else 0
+            sources[source_id] = snapshot
+        return {
+            "source_run_queue_size": self._source_run_queue.qsize(),
+            "source_run_worker_concurrency": self._source_run_worker_concurrency,
+            "active_source_count": active_sources,
+            "sources": sources,
+        }
 
     async def _worker_loop(self) -> None:
         while self._running:
@@ -389,6 +454,152 @@ class IngestionEngine:
                 logger.exception("Failed to process submission %s", submission_id)
             finally:
                 self._queue.task_done()
+
+    async def _source_worker_loop(self, _worker_index: int) -> None:
+        while self._running:
+            submission_id = await self._source_run_queue.get()
+            try:
+                record = self.submission_store.get(submission_id)
+                if record is None:
+                    continue
+                await self._execute_source_run(record)
+            except Exception:
+                logger.exception("Failed to execute source run %s", submission_id)
+            finally:
+                self._source_run_queue.task_done()
+
+    async def _execute_source_run(self, record: SubmissionRecord) -> SubmissionRecord:
+        trigger = str(record.metadata.get("trigger", "manual"))
+        self._mark_source_running(record.source_id, record.submission_id, trigger=trigger)
+        running_record = self.submission_store.update(
+            record.submission_id,
+            status="running",
+        )
+        try:
+            source = self.source_registry.require(running_record.source_id)
+            if source.kind == "derived":
+                updated = await self._process_derived_submission(
+                    running_record,
+                    is_submission=False,
+                )
+            else:
+                connector = self.connectors.get(source.adapter_name)
+                if connector is None:
+                    raise ValueError(
+                        f"Runnable source has no connector adapter: {running_record.source_id}"
+                    )
+                payloads = await connector.fetch()
+                running = self.submission_store.update(
+                    running_record.submission_id,
+                    status="running",
+                    payloads=[payload.data for payload in payloads],
+                )
+                updated = await self._process_raw_payloads(
+                    running,
+                    source_id=running_record.source_id,
+                    source_kind=running_record.source_kind,
+                    payloads=payloads,
+                    is_run=True,
+                    is_submission=False,
+                )
+        except Exception as exc:
+            updated = self.submission_store.update(
+                running_record.submission_id,
+                status="failed",
+                error_message=str(exc),
+                processed_at=self._now(),
+            )
+            self.source_registry.record_processing(
+                running_record.source_id,
+                success=False,
+                is_run=True,
+                is_submission=False,
+            )
+            self._mark_source_finished(
+                running_record.source_id,
+                running_record.submission_id,
+                outcome="failed",
+                error_message=str(exc),
+            )
+            return updated
+
+        self._mark_source_finished(
+            running_record.source_id,
+            running_record.submission_id,
+            outcome=updated.status,
+            error_message=updated.error_message,
+        )
+        return updated
+
+    def _new_source_runtime(self) -> dict[str, Any]:
+        return {
+            "run_state": "idle",
+            "queued_runs": 0,
+            "active_runs": 0,
+            "active_submission_ids": [],
+            "last_trigger": None,
+            "last_submission_id": None,
+            "last_started_at": None,
+            "last_finished_at": None,
+            "last_error": None,
+            "last_outcome": None,
+        }
+
+    def _runtime_for_source(self, source_id: str) -> dict[str, Any]:
+        runtime = self._source_runtime.get(source_id)
+        if runtime is None:
+            runtime = self._new_source_runtime()
+            self._source_runtime[source_id] = runtime
+        return runtime
+
+    def _mark_source_queued(self, source_id: str, submission_id: str, *, trigger: str) -> None:
+        runtime = self._runtime_for_source(source_id)
+        runtime["queued_runs"] += 1
+        runtime["last_trigger"] = trigger
+        runtime["last_submission_id"] = submission_id
+        if runtime["active_runs"] <= 0:
+            runtime["run_state"] = "queued"
+
+    def _mark_source_running(self, source_id: str, submission_id: str, *, trigger: str) -> None:
+        runtime = self._runtime_for_source(source_id)
+        runtime["queued_runs"] = max(0, int(runtime["queued_runs"]) - 1)
+        runtime["active_runs"] += 1
+        active_ids = list(runtime["active_submission_ids"])
+        if submission_id not in active_ids:
+            active_ids.append(submission_id)
+        runtime["active_submission_ids"] = active_ids
+        runtime["run_state"] = "running"
+        runtime["last_trigger"] = trigger
+        runtime["last_submission_id"] = submission_id
+        runtime["last_started_at"] = self._now()
+        runtime["last_error"] = None
+
+    def _mark_source_finished(
+        self,
+        source_id: str,
+        submission_id: str,
+        *,
+        outcome: str,
+        error_message: str | None,
+    ) -> None:
+        runtime = self._runtime_for_source(source_id)
+        runtime["active_runs"] = max(0, int(runtime["active_runs"]) - 1)
+        runtime["active_submission_ids"] = [
+            item
+            for item in runtime["active_submission_ids"]
+            if item != submission_id
+        ]
+        runtime["last_finished_at"] = self._now()
+        runtime["last_outcome"] = outcome
+        runtime["last_error"] = error_message
+        if runtime["active_runs"] > 0:
+            runtime["run_state"] = "running"
+        elif runtime["queued_runs"] > 0:
+            runtime["run_state"] = "queued"
+        elif outcome == "failed":
+            runtime["run_state"] = "failed"
+        else:
+            runtime["run_state"] = "idle"
 
     async def _process_raw_submission(
         self,

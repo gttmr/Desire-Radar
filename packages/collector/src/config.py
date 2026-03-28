@@ -34,6 +34,8 @@ COLLECTOR_HOST: str = _get("COLLECTOR_HOST", "0.0.0.0")
 
 # Storage
 DATA_DIR: str = _get("DATA_DIR", "data")
+SOURCE_RUN_WORKER_CONCURRENCY: int = _get_int("SOURCE_RUN_WORKER_CONCURRENCY", 2)
+SOURCE_BOOTSTRAP_ON_START: bool = _get_bool("SOURCE_BOOTSTRAP_ON_START", False)
 
 # Reddit
 REDDIT_USER_AGENT: str = _get(

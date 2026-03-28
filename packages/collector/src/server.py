@@ -64,6 +64,8 @@ from .config import (
     LLM_SESSION_MEMORY_ENTRY_COUNT,
     LLM_SESSION_MAX_UNCACHED_INPUT_TOKENS,
     LLM_TIMEOUT_SECONDS,
+    SOURCE_BOOTSTRAP_ON_START,
+    SOURCE_RUN_WORKER_CONCURRENCY,
 )
 from .connectors import build_connector_registry
 from .ingest import IngestionEngine, SubmissionStore
@@ -89,12 +91,13 @@ evidence_sink: EvidenceSink = EvidenceSink(freshness_ttl_days=7)
 cadence_runner: CadenceRunner | None = None
 _ttl_scheduler: AsyncIOScheduler | None = None
 analysis_engine: AnalysisEngine | None = None
+ingestion_engine_instance: IngestionEngine | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
-    global cadence_runner, _ttl_scheduler, analysis_engine
+    global cadence_runner, _ttl_scheduler, analysis_engine, ingestion_engine_instance
 
     # Initialize stores
     snapshot_store = RawSnapshotStore(
@@ -221,7 +224,9 @@ async def lifespan(app: FastAPI):
         connectors=connectors,
         analysis_engine=analysis_engine,
         human_input_router=human_input_router,
+        source_run_worker_concurrency=SOURCE_RUN_WORKER_CONCURRENCY,
     )
+    ingestion_engine_instance = ingestion_engine
 
     if LLM_ANALYSIS_ENABLED:
         logger.info(
@@ -247,6 +252,7 @@ async def lifespan(app: FastAPI):
         connectors=connectors,
         ingestion_engine=ingestion_engine,
         source_registry=source_registry,
+        bootstrap_on_start=SOURCE_BOOTSTRAP_ON_START,
     )
 
     # Shared dependencies for route handlers
@@ -293,6 +299,7 @@ async def lifespan(app: FastAPI):
     await analysis_engine.stop()
     if _ttl_scheduler is not None:
         _ttl_scheduler.shutdown(wait=False)
+    ingestion_engine_instance = None
     logger.info("Collector service stopped")
 
 
@@ -313,6 +320,15 @@ app.include_router(internal_routes.router)
 
 @app.get("/health")
 async def health() -> dict:
+    runtime = (
+        ingestion_engine_instance.get_runtime_status()
+        if ingestion_engine_instance is not None
+        else {
+            "source_run_queue_size": 0,
+            "active_source_count": 0,
+            "source_run_worker_concurrency": 0,
+        }
+    )
     return {
         "status": "ok",
         "service": "collector",
@@ -320,4 +336,7 @@ async def health() -> dict:
         "analysis_enabled": analysis_engine.enabled if analysis_engine is not None else False,
         "analysis_queue_size": analysis_engine.get_status("_")["queue_size"] if analysis_engine is not None else 0,
         "analysis_execution_mode": analysis_engine.execution_mode if analysis_engine is not None else "disabled",
+        "source_run_queue_size": runtime["source_run_queue_size"],
+        "active_source_count": runtime["active_source_count"],
+        "source_run_worker_concurrency": runtime["source_run_worker_concurrency"],
     }

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import asyncio
 
 import pytest
 
@@ -22,6 +23,28 @@ class DummyConnector(BaseConnector):
     source_tier = 2
 
     async def fetch(self) -> list[RawPayload]:
+        return [
+            RawPayload(
+                source=self.name,
+                data={"title": "Cursor demand rising", "entities": ["Cursor"]},
+                request_params={},
+                url_or_ref="",
+            )
+        ]
+
+
+class BlockingConnector(BaseConnector):
+    name = "blocking_pull"
+    cadence_seconds = 60
+    source_tier = 2
+
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def fetch(self) -> list[RawPayload]:
+        self.started.set()
+        await self.release.wait()
         return [
             RawPayload(
                 source=self.name,
@@ -256,6 +279,60 @@ async def test_run_source_uses_normalizer_key_instead_of_adapter_name(tmp_path):
 
     assert record.status == "completed"
     assert calls == ["manual_observation"]
+
+
+@pytest.mark.asyncio
+async def test_enqueue_source_run_reports_runtime_state_while_running(tmp_path):
+    connector = BlockingConnector()
+    connectors = {connector.name: connector}
+    registry = SourceRegistry(
+        str(tmp_path / "sources.json"),
+        build_default_sources(connectors),
+    )
+    engine = IngestionEngine(
+        source_registry=registry,
+        submission_store=SubmissionStore(str(tmp_path / "submissions.json")),
+        snapshot_store=RawSnapshotStore(str(tmp_path / "snapshots")),
+        evidence_sink=EvidenceSink(),
+        entity_resolver=EntityResolver(EntityStore(str(tmp_path / "entities.json"))),
+        normalizer_fn=_normalizer,
+        connectors=connectors,
+        analysis_engine=StubAnalysisEngine(),
+        source_run_worker_concurrency=1,
+    )
+    await engine.start()
+    try:
+        record = await engine.enqueue_source_run(
+            "blocking_pull",
+            metadata={"trigger": "scheduled"},
+        )
+        await connector.started.wait()
+
+        runtime = engine.get_runtime_status()
+        assert runtime["source_run_queue_size"] == 0
+        assert runtime["active_source_count"] == 1
+        source_runtime = runtime["sources"]["blocking_pull"]
+        stored_while_running = await engine.get_submission(record.submission_id)
+        assert stored_while_running is not None
+        assert stored_while_running.status == "running"
+        assert source_runtime["run_state"] == "running"
+        assert source_runtime["active_runs"] == 1
+        assert source_runtime["queued_runs"] == 0
+        assert source_runtime["active_submission_ids"] == [record.submission_id]
+        assert source_runtime["last_trigger"] == "scheduled"
+
+        connector.release.set()
+        await engine._source_run_queue.join()  # type: ignore[attr-defined]
+    finally:
+        await engine.stop()
+
+    stored = await engine.get_submission(record.submission_id)
+    assert stored is not None
+    assert stored.status == "completed"
+    runtime = engine.get_runtime_status()
+    assert runtime["active_source_count"] == 0
+    assert runtime["sources"]["blocking_pull"]["run_state"] == "idle"
+    assert runtime["sources"]["blocking_pull"]["last_outcome"] == "completed"
 
 
 @pytest.mark.asyncio

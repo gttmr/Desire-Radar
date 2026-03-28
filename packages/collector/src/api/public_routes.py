@@ -125,6 +125,7 @@ class ReviewRejectRequest(BaseModel):
 
 class CollectRunRequest(BaseModel):
     connector: str | None = None
+    async_mode: bool = True
 
 
 def _sanitize_submission(record: Any) -> dict:
@@ -140,30 +141,57 @@ async def collect_run(body: CollectRunRequest | None = None) -> dict:
     """Trigger collection for one or all pull connectors."""
     ingestion_engine = _deps["ingestion_engine"]
     connectors = _deps["connectors"]
+    async_mode = body.async_mode if body is not None else True
 
     if body and body.connector:
         if body.connector not in connectors and body.connector not in _deps["source_registry"].as_map():
             raise HTTPException(404, f"Unknown connector: {body.connector}")
-        submission = await ingestion_engine.run_source(body.connector)
+        if async_mode:
+            submission = await ingestion_engine.enqueue_source_run(
+                body.connector,
+                metadata={"trigger": "manual"},
+            )
+        else:
+            submission = await ingestion_engine.run_source(
+                body.connector,
+                metadata={"trigger": "manual"},
+            )
         return {
             "connector": body.connector,
             "evidence_count": len(submission.evidence_ids),
             "submission_id": submission.submission_id,
+            "status": submission.status,
+            "async_mode": async_mode,
         }
 
     total = 0
     results: dict[str, int] = {}
     submission_ids: dict[str, str] = {}
+    registry_map = _deps["source_registry"].as_map()
     for name in connectors:
-        submission = await ingestion_engine.run_source(name)
+        source = registry_map.get(name)
+        if source is None or not source.enabled:
+            continue
+        if async_mode:
+            submission = await ingestion_engine.enqueue_source_run(
+                name,
+                metadata={"trigger": "manual"},
+            )
+        else:
+            submission = await ingestion_engine.run_source(
+                name,
+                metadata={"trigger": "manual"},
+            )
         results[name] = len(submission.evidence_ids)
         submission_ids[name] = submission.submission_id
         total += len(submission.evidence_ids)
 
     return {
         "total_evidence_count": total,
+        "queued_count": len(submission_ids) if async_mode else 0,
         "per_connector": results,
         "submission_ids": submission_ids,
+        "async_mode": async_mode,
     }
 
 
@@ -195,11 +223,24 @@ async def get_sources_status() -> dict:
     """Get status of all configured sources."""
     analysis_engine = _deps.get("analysis_engine")
     registry = _deps["source_registry"]
+    ingestion_engine = _deps["ingestion_engine"]
+    cadence_runner = _deps["cadence_runner"]
+    runtime = ingestion_engine.get_runtime_status()
+    sources = registry.status()
+    for source_id, runtime_state in runtime["sources"].items():
+        if source_id in sources:
+            sources[source_id].update(runtime_state)
     return {
-        "sources": registry.status(),
+        "sources": sources,
         "analysis": {
             "enabled": analysis_engine.enabled if analysis_engine is not None else False,
             "queue_size": analysis_engine.get_status("_")["queue_size"] if analysis_engine is not None else 0,
+        },
+        "runtime": {
+            "source_run_queue_size": runtime["source_run_queue_size"],
+            "source_run_worker_concurrency": runtime["source_run_worker_concurrency"],
+            "active_source_count": runtime["active_source_count"],
+            **cadence_runner.runtime_status(),
         },
     }
 
@@ -212,6 +253,21 @@ async def get_sources_catalog() -> dict:
     return {
         "count": len(catalog),
         "sources": {item["source_id"]: item for item in catalog},
+    }
+
+
+@router.get("/runtime/status")
+async def get_runtime_status() -> dict:
+    ingestion_engine = _deps["ingestion_engine"]
+    cadence_runner = _deps["cadence_runner"]
+    analysis_engine = _deps.get("analysis_engine")
+    return {
+        "sources": ingestion_engine.get_runtime_status(),
+        "scheduler": cadence_runner.runtime_status(),
+        "analysis": {
+            "enabled": analysis_engine.enabled if analysis_engine is not None else False,
+            "queue_size": analysis_engine.get_status("_")["queue_size"] if analysis_engine is not None else 0,
+        },
     }
 
 

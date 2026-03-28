@@ -28,6 +28,7 @@ class RunSourceRequest(BaseModel):
     producer_ref: str | None = None
     request_params: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    wait_for_completion: bool = False
 
 
 class UpdateSourceTierRequest(BaseModel):
@@ -139,12 +140,22 @@ async def analysis_preview_batch() -> dict:
 @router.post("/sources/run/{source_id}")
 async def run_source(source_id: str, body: RunSourceRequest | None = None) -> dict:
     ingestion_engine = _deps["ingestion_engine"]
-    record = await ingestion_engine.run_source(
-        source_id,
-        producer_ref=body.producer_ref if body else None,
-        request_params=body.request_params if body else None,
-        metadata=body.metadata if body else None,
-    )
+    metadata = dict(body.metadata) if body else {}
+    metadata.setdefault("trigger", "manual")
+    if body and body.wait_for_completion:
+        record = await ingestion_engine.run_source(
+            source_id,
+            producer_ref=body.producer_ref if body else None,
+            request_params=body.request_params if body else None,
+            metadata=metadata,
+        )
+    else:
+        record = await ingestion_engine.enqueue_source_run(
+            source_id,
+            producer_ref=body.producer_ref if body else None,
+            request_params=body.request_params if body else None,
+            metadata=metadata,
+        )
     return record.model_dump(
         exclude={"payloads", "evidence_payloads", "request_params"},
     )
