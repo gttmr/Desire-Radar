@@ -2,16 +2,23 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import type {
+  ExecutionPhase,
+  InvestmentCoverageGap,
   InvestmentDecisionArtifact,
   InvestmentDecisionRecommendation,
   InvestmentDecisionRequest,
   InvestmentDecisionRunRecord,
+  ModelProfile,
 } from '@agentic/shared-types';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { SessionStore } from '../sessions/session-store.js';
-import type { ExecutionPolicyResolver } from '../policy/execution.js';
-import { InvestmentDecisionPromptBuilder } from './prompt-builder.js';
+import type { ExecutionPolicyResolver, ResolvedExecutionPolicy } from '../policy/execution.js';
+import {
+  InvestmentDecisionPromptBuilder,
+  type PreparedInvestmentDecisionBriefing,
+} from './prompt-builder.js';
 import type { ProviderHealthProbe } from '../providers/base.js';
+import type { ToolPolicy } from '../providers/base.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -87,7 +94,7 @@ function extractBalancedJson(text: string): string | null {
   return null;
 }
 
-function parseDecisionArtifactText(text: string): unknown {
+function parseJsonText(text: string): unknown {
   const trimmed = stripMarkdownFences(text);
   if (!trimmed) {
     throw new Error('Provider returned an empty response');
@@ -106,6 +113,7 @@ function parseDecisionArtifactText(text: string): unknown {
 async function writeProviderAttemptArtifact(args: {
   runDir: string;
   provider: string;
+  prefix: string;
   stage: 'initial' | 'repair';
   resultText: string;
   resultStatus: string;
@@ -115,10 +123,11 @@ async function writeProviderAttemptArtifact(args: {
   const attemptsDir = join(args.runDir, 'provider-attempts');
   await mkdir(attemptsDir, { recursive: true });
   await writeFile(
-    join(attemptsDir, `${args.provider}-${args.stage}.json`),
+    join(attemptsDir, `${args.prefix}-${args.provider}-${args.stage}.json`),
     JSON.stringify(
       {
         provider: args.provider,
+        prefix: args.prefix,
         stage: args.stage,
         status: args.resultStatus,
         degraded_message: args.degradedMessage ?? null,
@@ -151,6 +160,23 @@ function normalizeStringArray(value: unknown): string[] {
   return [...new Set(value.map((item) => String(item ?? '').trim()).filter(Boolean))];
 }
 
+function normalizeCoverageGaps(
+  value: unknown,
+  fallback: InvestmentCoverageGap[],
+): InvestmentCoverageGap[] {
+  const rawGaps = Array.isArray(value) ? value : fallback;
+  return rawGaps.map((gap) => {
+    const raw = typeof gap === 'object' && gap != null ? (gap as Record<string, unknown>) : {};
+    return {
+      label: String(raw.label ?? '').trim(),
+      reason: String(raw.reason ?? '').trim(),
+      linked_cluster_id:
+        raw.linked_cluster_id == null ? null : String(raw.linked_cluster_id),
+      linked_note_ids: normalizeStringArray(raw.linked_note_ids),
+    };
+  });
+}
+
 function normalizeArtifact(
   value: unknown,
   request: InvestmentDecisionRequest,
@@ -166,7 +192,6 @@ function normalizeArtifact(
   const topPicks = Array.isArray(parsed.top_picks) ? parsed.top_picks : [];
   const watchCandidates = Array.isArray(parsed.watch_candidates) ? parsed.watch_candidates : [];
   const rejectedCandidates = Array.isArray(parsed.rejected_candidates) ? parsed.rejected_candidates : [];
-  const coverageGaps = Array.isArray(parsed.coverage_gaps) ? parsed.coverage_gaps : request.coverage_gaps;
 
   const normalizeItem = (item: unknown) => {
     const raw = typeof item === 'object' && item != null ? (item as Record<string, unknown>) : {};
@@ -205,16 +230,7 @@ function normalizeArtifact(
     top_picks: topPicks.map(normalizeItem),
     watch_candidates: watchCandidates.map(normalizeItem),
     rejected_candidates: rejectedCandidates.map(normalizeItem),
-    coverage_gaps: coverageGaps.map((gap) => {
-      const raw = typeof gap === 'object' && gap != null ? (gap as Record<string, unknown>) : {};
-      return {
-        label: String(raw.label ?? '').trim(),
-        reason: String(raw.reason ?? '').trim(),
-        linked_cluster_id:
-          raw.linked_cluster_id == null ? null : String(raw.linked_cluster_id),
-        linked_note_ids: normalizeStringArray(raw.linked_note_ids),
-      };
-    }),
+    coverage_gaps: normalizeCoverageGaps(parsed.coverage_gaps, request.coverage_gaps),
     risks: normalizeStringArray(parsed.risks),
     degraded: options.degraded || Boolean(parsed.degraded) || normalizedStatus !== 'completed',
     degraded_reason:
@@ -280,6 +296,187 @@ async function probeReadiness(
   }
 }
 
+type DecisionRunnerStageConfig = {
+  enabled: boolean;
+  providers: string[];
+  modelProfile: ModelProfile;
+  toolPolicy: ToolPolicy;
+  timeoutMs: number;
+};
+
+type JsonAgentRunResult = {
+  parsed: unknown;
+  providerName: string;
+  degraded: boolean;
+  degradedReason?: string | null;
+};
+
+function mergeReasonParts(...parts: Array<string | null | undefined>): string | null {
+  const normalized = parts.map((part) => part?.trim()).filter(Boolean) as string[];
+  if (normalized.length === 0) {
+    return null;
+  }
+  return normalized.join(' | ');
+}
+
+function normalizePriority(value: unknown): 'high' | 'medium' | 'low' {
+  switch (value) {
+    case 'high':
+    case 'medium':
+    case 'low':
+      return value;
+    default:
+      return 'medium';
+  }
+}
+
+function normalizePreparedBriefing(
+  value: unknown,
+  request: InvestmentDecisionRequest,
+  fallback: PreparedInvestmentDecisionBriefing,
+): PreparedInvestmentDecisionBriefing {
+  const parsed = typeof value === 'object' && value != null ? (value as Record<string, unknown>) : {};
+  return {
+    executive_summary:
+      String(parsed.executive_summary ?? '').trim() || fallback.executive_summary,
+    market_context: String(parsed.market_context ?? '').trim() || fallback.market_context,
+    watchlist_focus: (() => {
+      const normalized = normalizeStringArray(parsed.watchlist_focus);
+      return normalized.length > 0 ? normalized : fallback.watchlist_focus;
+    })(),
+    resolved_equity_briefs: (() => {
+      const source = Array.isArray(parsed.resolved_equity_briefs)
+        ? parsed.resolved_equity_briefs
+        : fallback.resolved_equity_briefs;
+      return source.map((item, index) => {
+        const raw = typeof item === 'object' && item != null ? (item as Record<string, unknown>) : {};
+        const fallbackItem = fallback.resolved_equity_briefs[index];
+        return {
+          asset_key:
+            String(raw.asset_key ?? '').trim() ||
+            fallbackItem?.asset_key ||
+            request.resolved_equities[index]?.asset_key ||
+            `stock:${index}`,
+          ticker:
+            String(raw.ticker ?? '').trim() ||
+            fallbackItem?.ticker ||
+            request.resolved_equities[index]?.ticker ||
+            'unknown',
+          company_name:
+            String(raw.company_name ?? '').trim() ||
+            fallbackItem?.company_name ||
+            request.resolved_equities[index]?.company_name ||
+            'unknown',
+          priority: normalizePriority(raw.priority ?? fallbackItem?.priority),
+          why_in_scope:
+            String(raw.why_in_scope ?? '').trim() ||
+            fallbackItem?.why_in_scope ||
+            request.resolved_equities[index]?.why_in_scope ||
+            '',
+          key_signals: normalizeStringArray(raw.key_signals),
+          key_risks: normalizeStringArray(raw.key_risks),
+          linked_clusters: normalizeStringArray(raw.linked_clusters),
+          linked_notes: normalizeStringArray(raw.linked_notes),
+          watchlist_member:
+            typeof raw.watchlist_member === 'boolean'
+              ? raw.watchlist_member
+              : (fallbackItem?.watchlist_member ?? request.resolved_equities[index]?.watchlist_member ?? false),
+        };
+      });
+    })(),
+    cluster_briefs: (() => {
+      const source = Array.isArray(parsed.cluster_briefs)
+        ? parsed.cluster_briefs
+        : fallback.cluster_briefs;
+      return source.map((item, index) => {
+        const raw = typeof item === 'object' && item != null ? (item as Record<string, unknown>) : {};
+        const fallbackItem = fallback.cluster_briefs[index];
+        return {
+          cluster_id:
+            raw.cluster_id == null
+              ? (fallbackItem?.cluster_id ?? null)
+              : String(raw.cluster_id),
+          display_label:
+            String(raw.display_label ?? '').trim() ||
+            fallbackItem?.display_label ||
+            `cluster-${index + 1}`,
+          candidate_kind: 'entity_cluster' as const,
+          why_it_matters:
+            String(raw.why_it_matters ?? '').trim() ||
+            fallbackItem?.why_it_matters ||
+            '',
+          supporting_sources: normalizeStringArray(raw.supporting_sources),
+          theme_tags: normalizeStringArray(raw.theme_tags),
+          event_summary:
+            String(raw.event_summary ?? '').trim() || fallbackItem?.event_summary || '',
+          graph_summary:
+            String(raw.graph_summary ?? '').trim() || fallbackItem?.graph_summary || '',
+          linked_equities: normalizeStringArray(raw.linked_equities),
+          evidence_count: Math.max(0, Number(raw.evidence_count ?? fallbackItem?.evidence_count ?? 0)),
+        };
+      });
+    })(),
+    note_briefs: (() => {
+      const source = Array.isArray(parsed.note_briefs)
+        ? parsed.note_briefs
+        : fallback.note_briefs;
+      return source.map((item, index) => {
+        const raw = typeof item === 'object' && item != null ? (item as Record<string, unknown>) : {};
+        const fallbackItem = fallback.note_briefs[index];
+        return {
+          intake_id:
+            String(raw.intake_id ?? '').trim() ||
+            fallbackItem?.intake_id ||
+            `note-${index + 1}`,
+          asset_key:
+            raw.asset_key == null
+              ? (fallbackItem?.asset_key ?? null)
+              : String(raw.asset_key),
+          title: String(raw.title ?? '').trim() || fallbackItem?.title || '',
+          summary: String(raw.summary ?? '').trim() || fallbackItem?.summary || '',
+          why_it_might_matter:
+            String(raw.why_it_might_matter ?? '').trim() ||
+            fallbackItem?.why_it_might_matter ||
+            '',
+        };
+      });
+    })(),
+    source_health_flags: (() => {
+      const normalized = normalizeStringArray(parsed.source_health_flags);
+      return normalized.length > 0 ? normalized : fallback.source_health_flags;
+    })(),
+    coverage_gaps: normalizeCoverageGaps(parsed.coverage_gaps, fallback.coverage_gaps),
+  };
+}
+
+async function writePreparedArtifacts(args: {
+  runDir: string;
+  briefing: PreparedInvestmentDecisionBriefing;
+  markdown: string;
+  source: 'llm_preprocess' | 'fallback_disabled' | 'fallback_error';
+  warning?: string | null;
+}): Promise<void> {
+  await writeFile(
+    join(args.runDir, 'prepared_request.json'),
+    JSON.stringify(args.briefing, null, 2),
+    'utf8',
+  );
+  await writeFile(join(args.runDir, 'prepared_request.md'), args.markdown, 'utf8');
+  await writeFile(
+    join(args.runDir, 'prepared_request.meta.json'),
+    JSON.stringify(
+      {
+        source: args.source,
+        warning: args.warning ?? null,
+        generated_at: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+}
+
 export interface InvestmentDecisionRunner {
   run(args: {
     run: InvestmentDecisionRunRecord;
@@ -294,7 +491,20 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
     private readonly sessionStore: SessionStore,
     private readonly policyResolver: ExecutionPolicyResolver,
     private readonly promptBuilder: InvestmentDecisionPromptBuilder,
-    private readonly timeoutMs: number,
+    private readonly overallTimeoutMs: number,
+    private readonly preprocessConfig: DecisionRunnerStageConfig = {
+      enabled: true,
+      providers: [],
+      modelProfile: 'cheap',
+      toolPolicy: 'none',
+      timeoutMs: 120_000,
+    },
+    private readonly finalConfig: Omit<DecisionRunnerStageConfig, 'enabled'> = {
+      providers: [],
+      modelProfile: 'premium',
+      toolPolicy: 'default',
+      timeoutMs: 420_000,
+    },
   ) {}
 
   async run(args: {
@@ -302,8 +512,137 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
     request: InvestmentDecisionRequest;
     requestMarkdown: string;
   }): Promise<InvestmentDecisionArtifact> {
-    const resolvedPolicy = this.policyResolver.resolve('investment_decision', 'investment_decision');
+    const runDir = dirname(args.run.request_path);
+    const fallbackBriefing = this.promptBuilder.buildPreparedBriefingFallback(args.request);
+    let preparedBriefing = fallbackBriefing;
+    let preprocessWarning: string | null = null;
+    let preparedSource: 'llm_preprocess' | 'fallback_disabled' | 'fallback_error' = 'llm_preprocess';
+
+    if (this.preprocessConfig.enabled) {
+    const preparedResult = await this.runStructuredJsonAgent({
+      run: args.run,
+      request: args.request,
+      agentName: 'investment_decision_prepare',
+      artifactPrefix: 'prepare',
+      toolPolicy: this.preprocessConfig.toolPolicy,
+      timeoutMs: this.preprocessConfig.timeoutMs,
+        providersOverride: this.preprocessConfig.providers,
+        modelProfileOverride: this.preprocessConfig.modelProfile,
+        buildPrompt: async ({ provider, model, modelProfile }) =>
+          this.promptBuilder.buildPreparation({
+            request: args.request,
+            requestMarkdown: args.requestMarkdown,
+            provider,
+            model,
+            modelProfile,
+            toolPolicy: this.preprocessConfig.toolPolicy,
+          }),
+      });
+
+      if ('error' in preparedResult) {
+        preparedSource = 'fallback_error';
+        preprocessWarning =
+          `Preprocessing failed; deterministic fallback briefing used. ${preparedResult.error}`;
+      } else {
+        preparedBriefing = normalizePreparedBriefing(
+          preparedResult.parsed,
+          args.request,
+          fallbackBriefing,
+        );
+        if (preparedResult.degraded || preparedResult.degradedReason) {
+          preprocessWarning =
+            preparedResult.degradedReason ??
+            `Preprocessing completed in degraded mode via ${preparedResult.providerName}.`;
+        }
+      }
+    } else {
+      preparedSource = 'fallback_disabled';
+      preprocessWarning = null;
+    }
+
+    await writePreparedArtifacts({
+      runDir,
+      briefing: preparedBriefing,
+      markdown: this.promptBuilder.renderPreparedBriefingMarkdown(preparedBriefing),
+      source: preparedSource,
+      warning: preprocessWarning,
+    });
+
+    const finalResult = await this.runStructuredJsonAgent({
+      run: args.run,
+      request: args.request,
+      agentName: 'investment_decision',
+      artifactPrefix: 'decision',
+      toolPolicy: this.finalConfig.toolPolicy,
+      timeoutMs: this.finalConfig.timeoutMs,
+      providersOverride: this.finalConfig.providers,
+      modelProfileOverride: this.finalConfig.modelProfile,
+      buildPrompt: async ({ provider, model, modelProfile }) =>
+        this.promptBuilder.buildDecision({
+          request: args.request,
+          preparedBriefing,
+          provider,
+          model,
+          modelProfile,
+          toolPolicy: this.finalConfig.toolPolicy,
+        }),
+    });
+
+    if ('error' in finalResult) {
+      const failureReason = mergeReasonParts(preprocessWarning, finalResult.error) ?? 'provider_exec failed';
+      return buildFailureArtifact(
+        args.request,
+        'No provider completed the investment decision run.',
+        failureReason,
+      );
+    }
+
+    return normalizeArtifact(finalResult.parsed, args.request, {
+      degraded: finalResult.degraded || Boolean(preprocessWarning),
+      degradedReason: mergeReasonParts(preprocessWarning, finalResult.degradedReason),
+    });
+  }
+
+  private resolvePolicy(
+    agentName: string,
+    fallbackPhase: ExecutionPhase,
+    overrides: {
+      providers?: string[];
+      modelProfile?: ModelProfile;
+    },
+  ): ResolvedExecutionPolicy {
+    const resolved = this.policyResolver.resolve(agentName, fallbackPhase);
+    return {
+      ...resolved,
+      providers:
+        overrides.providers && overrides.providers.length > 0
+          ? [...new Set(overrides.providers)]
+          : resolved.providers,
+      modelProfile: overrides.modelProfile ?? resolved.modelProfile,
+    };
+  }
+
+  private async runStructuredJsonAgent(args: {
+    run: InvestmentDecisionRunRecord;
+    request: InvestmentDecisionRequest;
+    agentName: string;
+    artifactPrefix: string;
+    toolPolicy: ToolPolicy;
+    timeoutMs: number;
+    providersOverride?: string[];
+    modelProfileOverride?: ModelProfile;
+    buildPrompt: (args: {
+      provider: string;
+      model?: string;
+      modelProfile: ModelProfile;
+    }) => Promise<string>;
+  }): Promise<JsonAgentRunResult | { error: string }> {
+    const resolvedPolicy = this.resolvePolicy(args.agentName, 'investment_decision', {
+      providers: args.providersOverride,
+      modelProfile: args.modelProfileOverride,
+    });
     const providerErrors: string[] = [];
+    const runDir = dirname(args.run.request_path);
 
     for (const providerName of resolvedPolicy.providers) {
       const adapter = this.registry.get(providerName);
@@ -323,7 +662,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
       const modelProfile = resolvedPolicy.modelProfile;
       const model = this.policyResolver.resolveModel(providerName, modelProfile);
       const transportMode = adapter.defaultTransportMode ?? 'cli_exec';
-      let session = this.sessionStore.getSession('investment_decision', providerName, {
+      let session = this.sessionStore.getSession(args.agentName, providerName, {
         phase: 'investment_decision',
         modelProfile,
         runScope: args.run.run_id,
@@ -331,7 +670,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
         transportMode,
       });
       if (!session) {
-        session = this.sessionStore.createSession('investment_decision', providerName, {
+        session = this.sessionStore.createSession(args.agentName, providerName, {
           phase: 'investment_decision',
           modelProfile,
           runScope: args.run.run_id,
@@ -341,14 +680,11 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
       }
 
       try {
-        const prompt = await this.promptBuilder.build({
-          request: args.request,
-          requestMarkdown: args.requestMarkdown,
+        const prompt = await args.buildPrompt({
           provider: providerName,
           model,
           modelProfile,
         });
-        const runDir = dirname(args.run.request_path);
         const result = await adapter.execute({
           prompt,
           sessionId: session.provider_session_id ?? undefined,
@@ -359,10 +695,11 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
           transportTarget: session.transport_target ?? null,
           model,
           modelProfile,
+          toolPolicy: args.toolPolicy,
           phase: 'investment_decision',
-          agentName: 'investment_decision',
+          agentName: args.agentName,
           responseFormat: 'json',
-          timeoutMs: this.timeoutMs,
+          timeoutMs: Math.min(args.timeoutMs, this.overallTimeoutMs),
         });
         this.sessionStore.updateSessionActivity(session.session_id, {
           providerSessionId: result.sessionId,
@@ -372,10 +709,11 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
 
         let parsed: unknown;
         try {
-          parsed = parseDecisionArtifactText(result.text);
+          parsed = parseJsonText(result.text);
           await writeProviderAttemptArtifact({
             runDir,
             provider: providerName,
+            prefix: args.artifactPrefix,
             stage: 'initial',
             resultText: result.text,
             resultStatus: result.status,
@@ -386,6 +724,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
           await writeProviderAttemptArtifact({
             runDir,
             provider: providerName,
+            prefix: args.artifactPrefix,
             stage: 'initial',
             resultText: result.text,
             resultStatus: result.status,
@@ -403,37 +742,44 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
             transportTarget: session.transport_target ?? null,
             model,
             modelProfile,
+            toolPolicy: args.toolPolicy,
             phase: 'investment_decision',
-            agentName: 'investment_decision',
+            agentName: args.agentName,
             responseFormat: 'json',
-            timeoutMs: this.timeoutMs,
+            timeoutMs: Math.min(args.timeoutMs, this.overallTimeoutMs),
           });
           this.sessionStore.updateSessionActivity(session.session_id, {
             providerSessionId: retryResult.sessionId,
             transportMode,
             transportTarget: session.transport_target ?? null,
           });
-          parsed = parseDecisionArtifactText(retryResult.text);
+          parsed = parseJsonText(retryResult.text);
           await writeProviderAttemptArtifact({
             runDir,
             provider: providerName,
+            prefix: args.artifactPrefix,
             stage: 'repair',
             resultText: retryResult.text,
             resultStatus: retryResult.status,
             degradedMessage: retryResult.degraded_message ?? null,
           });
-          return normalizeArtifact(parsed, args.request, {
+          return {
+            parsed,
+            providerName,
             degraded: true,
             degradedReason:
               result.degraded_message ??
               retryResult.degraded_message ??
-              `provider response required JSON repair retry: ${parseMessage}`,
-          });
+              `${args.agentName} required JSON repair retry: ${parseMessage}`,
+          };
         }
-        return normalizeArtifact(parsed, args.request, {
+
+        return {
+          parsed,
+          providerName,
           degraded: result.status === 'degraded',
           degradedReason: result.degraded_message ?? null,
-        });
+        };
       } catch (error) {
         providerErrors.push(
           `${providerName}: ${error instanceof Error ? error.message : String(error)}`,
@@ -441,11 +787,9 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
       }
     }
 
-    return buildFailureArtifact(
-      args.request,
-      'No provider completed the investment decision run.',
-      providerErrors.join(' | ') || 'provider_exec failed',
-    );
+    return {
+      error: providerErrors.join(' | ') || `${args.agentName} failed`,
+    };
   }
 }
 

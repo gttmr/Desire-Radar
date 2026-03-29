@@ -236,6 +236,7 @@ curl 'http://127.0.0.1:5003/investment/decisions/runs/<run_id>/report?detail=sum
 의미:
 - run은 항상 artifact-first다. `request.json`과 `request.md`가 먼저 생성된다.
 - `INVESTMENT_DECISION_RUNNER=provider_exec`면 orchestrator가 직접 provider를 호출한다.
+- `provider_exec`에서 전처리 단계가 켜져 있으면 `prepared_request.json`, `prepared_request.md`, `prepared_request.meta.json`이 먼저 생성된다.
 - `provider_exec` 경로는 provider raw output과 parse error를 `provider-attempts/`에 남긴다.
 - `INVESTMENT_DECISION_RUNNER=external_artifact`면 외부 판단 주체가 `response.json`을 쓸 때까지 polling 한다.
 - 결정 결과와 Discord 리포트는 모두 `response.json`을 기준으로 생성된다.
@@ -247,6 +248,9 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
   request.json
   request.md
   status.json
+  prepared_request.json
+  prepared_request.md
+  prepared_request.meta.json
   provider-attempts/
   response.json
   response.md
@@ -263,10 +267,14 @@ data/investment-module/equity-map.json
 - 파일이 없거나 비어 있으면 orchestrator startup 시 starter map이 자동으로 채워진다.
 - starter map은 exact/curated public-equity alias만 포함한다.
 - `OpenAI`, `Claude`, `Bitcoin`처럼 직접 상장사로 고정하기 어려운 항목은 기본 starter set에 넣지 않는다.
-- `investment_decision` phase는 현재 `gemini`를 기본 provider로 쓴다. Docker 런타임에서 Codex CLI는 이 phase의 긴 판단 prompt를 받을 때 tool/workspace inspection으로 들어가 지연될 수 있기 때문이다.
-- `codex` investment decision 실행 경로는 유지하되, 현재는 fallback/debug 용도로만 본다. 큰 prompt는 stdin으로 넘겨 argv 길이 문제는 줄였지만, agentic tool behavior 자체는 별도 이슈다.
+- 권장 기본값은 `INVESTMENT_DECISION_PREPROCESS_MODEL_PROFILE=cheap`, `INVESTMENT_DECISION_FINAL_MODEL_PROFILE=premium`이다.
+- provider 우선순위는 `INVESTMENT_DECISION_PREPROCESS_PROVIDERS`, `INVESTMENT_DECISION_FINAL_PROVIDERS`로 따로 바꿀 수 있다.
+- `codex`를 최종 판단에 쓰고, 전처리에는 `codex` cheap 또는 `gemini` cheap을 두는 구성이 가능하다.
+- `codex + cheap`은 현재 model profile 기준으로 `gpt-5.4-mini`를 뜻한다.
 - Gemini health probe는 `gemini-2.5-flash`를 명시적으로 사용한다. provider readiness가 실제 decision phase 모델과 동떨어진 default model 때문에 흔들리면 안 된다.
-- full request artifact는 run dir의 `request.json`에 남기고, provider prompt에는 compact projection만 넣는다.
+- 전처리 단계는 기본적으로 `INVESTMENT_DECISION_PREPROCESS_TOOL_POLICY=none`을 권장한다.
+- 최종 판단 단계는 `INVESTMENT_DECISION_FINAL_TOOL_POLICY`로 분리해서 조정할 수 있다.
+- full request artifact는 run dir의 `request.json`에 남기고, 최종 판단 prompt에는 `prepared_request.*`와 compact exact scope만 넣는다.
 - stale `running` investment decision run은 timeout budget을 넘기면 다음 조회 시 자동으로 `failed`로 정리된다.
 
 equity-map 조회/교체:

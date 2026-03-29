@@ -76,6 +76,43 @@ function makeRunRecord(root: string, runId: string) {
   };
 }
 
+function makePromptBuilderStub() {
+  return {
+    async buildPreparation() {
+      return 'prepare-prompt';
+    },
+    async buildDecision() {
+      return 'decision-prompt';
+    },
+    buildPreparedBriefingFallback(request: ReturnType<typeof makeRequest>) {
+      return {
+        executive_summary: `fallback briefing for ${request.run_id}`,
+        market_context: 'fallback market context',
+        watchlist_focus: request.watchlist,
+        resolved_equity_briefs: request.resolved_equities.map((item) => ({
+          asset_key: item.asset_key,
+          ticker: item.ticker,
+          company_name: item.company_name,
+          priority: 'high' as const,
+          why_in_scope: item.why_in_scope,
+          key_signals: [],
+          key_risks: [],
+          linked_clusters: item.linked_clusters,
+          linked_notes: item.linked_notes,
+          watchlist_member: item.watchlist_member,
+        })),
+        cluster_briefs: [],
+        note_briefs: [],
+        source_health_flags: [],
+        coverage_gaps: request.coverage_gaps,
+      };
+    },
+    renderPreparedBriefingMarkdown() {
+      return '# prepared briefing';
+    },
+  } as unknown as InvestmentDecisionPromptBuilder;
+}
+
 describe('investment decision module', () => {
   let server: ReturnType<express.Express['listen']> | undefined;
 
@@ -333,8 +370,21 @@ describe('investment decision module', () => {
         },
         ['mock'],
       ),
-      { build: async () => 'prompt' } as unknown as InvestmentDecisionPromptBuilder,
+      makePromptBuilderStub(),
       5_000,
+      {
+        enabled: false,
+        providers: [],
+        modelProfile: 'cheap',
+        toolPolicy: 'none',
+        timeoutMs: 1_000,
+      },
+      {
+        providers: [],
+        modelProfile: 'premium',
+        toolPolicy: 'default',
+        timeoutMs: 5_000,
+      },
     );
 
     const artifact = await runner.run({
@@ -413,8 +463,21 @@ describe('investment decision module', () => {
         },
         ['mock'],
       ),
-      { build: async () => 'prompt' } as unknown as InvestmentDecisionPromptBuilder,
+      makePromptBuilderStub(),
       5_000,
+      {
+        enabled: false,
+        providers: [],
+        modelProfile: 'cheap',
+        toolPolicy: 'none',
+        timeoutMs: 1_000,
+      },
+      {
+        providers: [],
+        modelProfile: 'premium',
+        toolPolicy: 'default',
+        timeoutMs: 5_000,
+      },
     );
 
     const artifact = await runner.run({
@@ -430,7 +493,7 @@ describe('investment decision module', () => {
       '2026-03-29',
       'run-wrap',
       'provider-attempts',
-      'mock-initial.json',
+      'decision-mock-initial.json',
     );
     const attempt = JSON.parse(readFileSync(attemptPath, 'utf8')) as { parse_error: string | null };
     expect(attempt.parse_error).toBeNull();
@@ -506,8 +569,21 @@ describe('investment decision module', () => {
         },
         ['mock'],
       ),
-      { build: async () => 'prompt' } as unknown as InvestmentDecisionPromptBuilder,
+      makePromptBuilderStub(),
       5_000,
+      {
+        enabled: false,
+        providers: [],
+        modelProfile: 'cheap',
+        toolPolicy: 'none',
+        timeoutMs: 1_000,
+      },
+      {
+        providers: [],
+        modelProfile: 'premium',
+        toolPolicy: 'default',
+        timeoutMs: 5_000,
+      },
     );
 
     const artifact = await runner.run({
@@ -524,19 +600,273 @@ describe('investment decision module', () => {
       '2026-03-29',
       'run-retry',
       'provider-attempts',
-      'mock-initial.json',
+      'decision-mock-initial.json',
     );
     const repairAttemptPath = join(
       dataDir,
       '2026-03-29',
       'run-retry',
       'provider-attempts',
-      'mock-repair.json',
+      'decision-mock-repair.json',
     );
     const initialAttempt = JSON.parse(readFileSync(initialAttemptPath, 'utf8')) as { parse_error: string | null };
     const repairAttempt = JSON.parse(readFileSync(repairAttemptPath, 'utf8')) as { parse_error: string | null };
     expect(initialAttempt.parse_error).toContain('raw={\"summary\":\"partial\"');
     expect(repairAttempt.parse_error).toBeNull();
+  });
+
+  it('runs a preprocessing step before the final decision and writes prepared artifacts', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'investment-preprocess-'));
+    const registry = new ProviderRegistry();
+    const seenCalls: Array<{ agentName: string; toolPolicy: string | undefined }> = [];
+    registry.register({
+      name: 'mock',
+      defaultTransportMode: 'cli_exec',
+      async execute(request) {
+        seenCalls.push({ agentName: request.agentName, toolPolicy: request.toolPolicy });
+        if (request.agentName === 'investment_decision_prepare') {
+          return {
+            text: JSON.stringify({
+              executive_summary: 'prepared summary',
+              market_context: 'prepared context',
+              watchlist_focus: ['005930'],
+              resolved_equity_briefs: [
+                {
+                  asset_key: 'stock:005930',
+                  ticker: '005930',
+                  company_name: '삼성전자',
+                  priority: 'high',
+                  why_in_scope: 'watchlist member',
+                  key_signals: ['HBM demand'],
+                  key_risks: ['macro'],
+                  linked_clusters: [],
+                  linked_notes: [],
+                  watchlist_member: true,
+                },
+              ],
+              cluster_briefs: [],
+              note_briefs: [],
+              source_health_flags: [],
+              coverage_gaps: [],
+            }),
+            sessionId: `provider-session-${request.agentName}`,
+            durationMs: 50,
+            status: 'completed' as const,
+          };
+        }
+        return {
+          text: JSON.stringify({
+            summary: 'Final shortlist',
+            market_view: 'Constructive',
+            top_picks: [],
+            watch_candidates: [],
+            rejected_candidates: [],
+            coverage_gaps: [],
+            risks: [],
+            degraded: false,
+            degraded_reason: null,
+          }),
+          sessionId: `provider-session-${request.agentName}`,
+          durationMs: 60,
+          status: 'completed' as const,
+        };
+      },
+      async health() {
+        return true;
+      },
+      async probeHealth() {
+        return { available: true, ready_for_execution: true, status: 'healthy' as const };
+      },
+    });
+    const runner = new ProviderExecDecisionRunner(
+      registry,
+      new SessionStore(dataDir),
+      new ExecutionPolicyResolver(
+        {
+          defaults: {
+            triage: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
+            debate: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
+            verdict: { providers: ['mock'], modelProfile: 'premium', responseFormat: 'json' },
+            report: { providers: ['mock'], modelProfile: 'balanced', responseFormat: 'json' },
+            investment_decision: {
+              providers: ['mock'],
+              modelProfile: 'premium',
+              responseFormat: 'json',
+            },
+          },
+          agents: {
+            investment_decision_prepare: {
+              phase: 'investment_decision',
+              providers: ['mock'],
+              modelProfile: 'cheap',
+              responseFormat: 'json',
+            },
+            investment_decision: {
+              phase: 'investment_decision',
+              providers: ['mock'],
+              modelProfile: 'premium',
+              responseFormat: 'json',
+            },
+          },
+        },
+        {
+          providers: {
+            mock: {
+              cheap: 'mock-cheap',
+              balanced: 'mock-balanced',
+              premium: 'mock-premium',
+            },
+          },
+        },
+        ['mock'],
+      ),
+      makePromptBuilderStub(),
+      5_000,
+      {
+        enabled: true,
+        providers: ['mock'],
+        modelProfile: 'cheap',
+        toolPolicy: 'none',
+        timeoutMs: 1_000,
+      },
+      {
+        providers: ['mock'],
+        modelProfile: 'premium',
+        toolPolicy: 'default',
+        timeoutMs: 5_000,
+      },
+    );
+
+    const artifact = await runner.run({
+      run: makeRunRecord(dataDir, 'run-prepare'),
+      request: makeRequest('run-prepare'),
+      requestMarkdown: '# request',
+    });
+
+    expect(artifact.status).toBe('completed');
+    expect(seenCalls).toEqual([
+      { agentName: 'investment_decision_prepare', toolPolicy: 'none' },
+      { agentName: 'investment_decision', toolPolicy: 'default' },
+    ]);
+    const prepared = JSON.parse(
+      readFileSync(
+        join(dataDir, '2026-03-29', 'run-prepare', 'prepared_request.json'),
+        'utf8',
+      ),
+    ) as { executive_summary: string };
+    expect(prepared.executive_summary).toBe('prepared summary');
+  });
+
+  it('falls back to a deterministic prepared briefing when preprocessing fails', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'investment-preprocess-fallback-'));
+    const registry = new ProviderRegistry();
+    registry.register({
+      name: 'mock',
+      defaultTransportMode: 'cli_exec',
+      async execute(request) {
+        if (request.agentName === 'investment_decision_prepare') {
+          throw new Error('preprocess exploded');
+        }
+        return {
+          text: JSON.stringify({
+            summary: 'Final shortlist after fallback',
+            market_view: 'Neutral',
+            top_picks: [],
+            watch_candidates: [],
+            rejected_candidates: [],
+            coverage_gaps: [],
+            risks: [],
+            degraded: false,
+            degraded_reason: null,
+          }),
+          sessionId: 'provider-session-final',
+          durationMs: 90,
+          status: 'completed' as const,
+        };
+      },
+      async health() {
+        return true;
+      },
+      async probeHealth() {
+        return { available: true, ready_for_execution: true, status: 'healthy' as const };
+      },
+    });
+    const runner = new ProviderExecDecisionRunner(
+      registry,
+      new SessionStore(dataDir),
+      new ExecutionPolicyResolver(
+        {
+          defaults: {
+            triage: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
+            debate: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
+            verdict: { providers: ['mock'], modelProfile: 'premium', responseFormat: 'json' },
+            report: { providers: ['mock'], modelProfile: 'balanced', responseFormat: 'json' },
+            investment_decision: {
+              providers: ['mock'],
+              modelProfile: 'premium',
+              responseFormat: 'json',
+            },
+          },
+          agents: {
+            investment_decision_prepare: {
+              phase: 'investment_decision',
+              providers: ['mock'],
+              modelProfile: 'cheap',
+              responseFormat: 'json',
+            },
+            investment_decision: {
+              phase: 'investment_decision',
+              providers: ['mock'],
+              modelProfile: 'premium',
+              responseFormat: 'json',
+            },
+          },
+        },
+        {
+          providers: {
+            mock: {
+              cheap: 'mock-cheap',
+              balanced: 'mock-balanced',
+              premium: 'mock-premium',
+            },
+          },
+        },
+        ['mock'],
+      ),
+      makePromptBuilderStub(),
+      5_000,
+      {
+        enabled: true,
+        providers: ['mock'],
+        modelProfile: 'cheap',
+        toolPolicy: 'none',
+        timeoutMs: 1_000,
+      },
+      {
+        providers: ['mock'],
+        modelProfile: 'premium',
+        toolPolicy: 'default',
+        timeoutMs: 5_000,
+      },
+    );
+
+    const artifact = await runner.run({
+      run: makeRunRecord(dataDir, 'run-fallback'),
+      request: makeRequest('run-fallback'),
+      requestMarkdown: '# request',
+    });
+
+    expect(artifact.status).toBe('degraded');
+    expect(artifact.degraded).toBe(true);
+    expect(artifact.degraded_reason).toContain('Preprocessing failed');
+    const meta = JSON.parse(
+      readFileSync(
+        join(dataDir, '2026-03-29', 'run-fallback', 'prepared_request.meta.json'),
+        'utf8',
+      ),
+    ) as { source: string; warning: string | null };
+    expect(meta.source).toBe('fallback_error');
+    expect(meta.warning).toContain('preprocess exploded');
   });
 
   it('accepts an external response.json artifact', async () => {
@@ -709,8 +1039,21 @@ describe('investment decision module', () => {
           },
           ['mock'],
         ),
-        { build: async () => 'prompt' } as unknown as InvestmentDecisionPromptBuilder,
+        makePromptBuilderStub(),
         5_000,
+        {
+          enabled: false,
+          providers: [],
+          modelProfile: 'cheap',
+          toolPolicy: 'none',
+          timeoutMs: 1_000,
+        },
+        {
+          providers: [],
+          modelProfile: 'premium',
+          toolPolicy: 'default',
+          timeoutMs: 5_000,
+        },
       ),
       new InvestmentReportFormatter(),
       'provider_exec',

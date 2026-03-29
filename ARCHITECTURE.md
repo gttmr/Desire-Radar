@@ -121,10 +121,12 @@ Important property:
 - auth health, execute readiness, repair, and alerting are separate concerns.
 
 ### 7. Daily Investment Decision
-`watchlist + collector clusters + investment notes + source health -> investment decision request artifact -> provider or external runner -> response artifact -> deterministic report -> Discord`
+`watchlist + collector clusters + investment notes + source health -> investment decision request artifact -> optional preprocessing briefing artifact -> final decision artifact -> deterministic report -> Discord`
 
 Important property:
 - downstream consumers depend on the request/response/report artifact contract, not on how the LLM was invoked.
+- preprocessing is an internal compression step, not a second source of truth
+- preprocessing와 final decision은 provider/model/tool policy를 각각 따로 가질 수 있다
 
 ## Core Abstractions
 
@@ -384,6 +386,7 @@ The system should not think in terms of isolated keywords only.
 
 ### Artifact-First Decision Contracts
 - investment decision request and response artifacts are the canonical interface
+- optional preprocessing artifacts may exist, but they are auxiliary and never replace `request.json` or `response.json`
 - `provider_exec` and `external_artifact` are interchangeable execution modes behind that contract
 - Discord and scheduled reports should consume `response.json`, not re-run LLM formatting
 

@@ -66,9 +66,14 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
   request.json
   request.md
   status.json
+  prepared_request.json
+  prepared_request.md
+  prepared_request.meta.json
   provider-attempts/
-    <provider>-initial.json
-    <provider>-repair.json
+    decision-<provider>-initial.json
+    decision-<provider>-repair.json
+    prepare-<provider>-initial.json
+    prepare-<provider>-repair.json
   response.json
   response.md
   report.md
@@ -76,6 +81,7 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 
 규칙:
 - orchestrator는 항상 `request.json`과 `request.md`를 먼저 쓴다.
+- preprocessing step이 켜져 있으면 `prepared_request.*`를 내부 artifact로 추가 생성한다.
 - `provider_exec` 경로는 raw provider output과 parse error를 `provider-attempts/` 아래에 남긴다.
 - direct provider execution도 결과를 `response.json`으로 정규화한다.
 - external mode는 외부 프로세스가 `request.*`를 읽고 `response.json`을 쓴다.
@@ -90,6 +96,8 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 - orchestrator가 provider adapter를 직접 호출한다.
 - phase는 `investment_decision`으로 분리한다.
 - provider/model policy도 기존 `verdict`와 독립적으로 둘 수 있다.
+- 내부적으로는 `prepare -> final decision` 2단 실행을 지원한다.
+- `prepare`는 정보 압축과 재구성만 맡고, canonical final artifact는 항상 final decision step이 만든다.
 - direct provider output은 내부적으로 파싱한 뒤 canonical artifact로 정규화한다.
 
 ### `external_artifact`
@@ -198,9 +206,10 @@ bootstrap 규칙:
 - starter set은 exact/curated public-equity alias만 포함한다.
 - `OpenAI`, `Anthropic`, `Bitcoin`, `Ethereum`처럼 직접 상장사로 고정하기 어려운 항목은 기본적으로 coverage gap으로 남긴다.
 - `codex` provider는 큰 investment decision prompt를 argv가 아니라 stdin으로 전달한다. prompt가 커질 때 resume/repair 실행 안정성을 높이기 위한 조치다.
-- investment decision prompt에는 full `request.json`을 그대로 다시 싣지 않는다. prompt에는 compact projection만 넣고, full artifact는 run dir의 `request.json`에만 남긴다.
-- `investment_decision` phase 기본 profile은 `cheap`이다. 이 phase는 deterministic formatter를 위한 structured shortlist 생성이라, `gpt-5.4-mini` 같은 더 가벼운 모델로 latency를 낮추는 편이 운영상 낫다.
-- 2026-03-30 기준 `investment_decision` phase 기본 provider는 `gemini`다. 현재 Docker 런타임에서 Codex CLI는 이 phase의 긴 구조화 판단 prompt를 받으면 workspace/tool 탐색으로 들어가 지연되는 경향이 있어, decision phase에서는 더 결정형으로 동작하는 provider를 우선한다.
+- investment decision prompt에는 full `request.json`을 그대로 다시 싣지 않는다. raw/full artifact는 run dir의 `request.json`에 보존하고, final step에는 `prepared_request.*`와 compact exact scope만 넣는다.
+- preprocessing 단계는 “도구 사용 금지, 요약/압축 전용”으로 prompt 계약을 고정한다.
+- 기본 권장값은 `prepare=cheap`, `final=premium`이다. 예를 들어 `prepare=codex(gpt-5.4-mini)`, `final=codex(gpt-5.4)` 같은 구성이 가능하다.
+- preprocessing provider와 final provider는 env로 따로 바꿀 수 있다. 즉 전처리 provider가 Gemini일 필요는 없다.
 - Gemini readiness probe도 `gemini-2.5-flash`를 명시적으로 사용한다. health가 phase와 다른 default model 상태에 끌려가면 안 되기 때문이다.
 - stale `running` run은 timeout budget을 넘기면 자동으로 `failed`로 정리한다. 오래된 status가 영구히 `running`으로 남아 dashboard나 latest API를 오염시키면 안 된다.
 
@@ -252,7 +261,24 @@ flow:
 - `INVESTMENT_DECISION_RUN_ROOT`
 - `INVESTMENT_DECISION_TIMEOUT_MS`
 - `INVESTMENT_DECISION_POLL_INTERVAL_MS`
+- `INVESTMENT_DECISION_PREPROCESS_ENABLED`
+- `INVESTMENT_DECISION_PREPROCESS_PROVIDERS`
+- `INVESTMENT_DECISION_PREPROCESS_MODEL_PROFILE`
+- `INVESTMENT_DECISION_PREPROCESS_TOOL_POLICY`
+- `INVESTMENT_DECISION_PREPROCESS_TIMEOUT_MS`
+- `INVESTMENT_DECISION_FINAL_PROVIDERS`
+- `INVESTMENT_DECISION_FINAL_MODEL_PROFILE`
+- `INVESTMENT_DECISION_FINAL_TOOL_POLICY`
+- `INVESTMENT_DECISION_FINAL_TIMEOUT_MS`
 - `INVESTMENT_EQUITY_MAP_PATH`
+
+권장 운영 기본값:
+- `prepare`: `providers=codex,gemini`, `model_profile=cheap`, `tool_policy=none`
+- `final`: `providers=codex,gemini`, `model_profile=premium`, `tool_policy=default`
+
+현재 model profile 기준:
+- `codex + cheap` = `gpt-5.4-mini`
+- `codex + premium` = `gpt-5.4`
 
 문제 확인 순서:
 1. `status.json`

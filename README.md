@@ -82,7 +82,9 @@ Discord human input / slash commands
 - investment decision run은 항상 request/response/report artifact를 먼저 남기고, Discord와 daily report는 그 결과 artifact만 소비한다.
 - 실행 모드는 `provider_exec`와 `external_artifact` 두 가지를 지원한다.
 - 일반 debate/report 기본 provider 경로는 `codex, claude, gemini`다.
-- `investment_decision` phase는 2026-03-30 기준으로 `gemini`를 기본 provider로 사용한다. 현재 Docker 런타임에서 Codex CLI는 이 phase의 긴 구조화 판단 prompt에서 tool/workspace inspection으로 들어가 지연되기 쉽기 때문이다.
+- `investment_decision`은 `preprocess -> final decision` 2단 구조를 지원한다.
+- 기본 권장값은 `preprocess=cheap profile`, `final=premium profile`이며, provider 우선순위와 model profile은 env로 덮을 수 있다.
+- 전처리 단계는 tool/workspace inspection 없이 request를 loss-aware briefing으로 압축하는 역할만 맡고, 최종 판단 단계가 canonical `response.json`을 만든다.
 - `ENABLED_PROVIDERS`가 실제 등록과 health monitoring 대상을 결정하고, `DEFAULT_PROVIDERS`는 그 안에서 실행 우선순위를 결정한다.
 - `OPENAI_API_KEY`만으로는 OpenAI provider가 자동 등록되지 않고, `ENABLED_PROVIDERS`에 `openai`를 넣었을 때만 추가 등록된다.
 - provider session마다 request/response artifact를 JSON으로 남긴다.
@@ -243,6 +245,9 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
   request.json
   request.md
   status.json
+  prepared_request.json
+  prepared_request.md
+  prepared_request.meta.json
   response.json
   response.md
   report.md
@@ -251,6 +256,7 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 핵심 규칙:
 - orchestrator는 항상 `request.json`과 `request.md`를 먼저 쓴다.
 - direct CLI 실행도 최종 결과는 `response.json`으로 정규화한다.
+- provider_exec 모드에서 전처리 단계가 켜져 있으면 `prepared_request.*`가 먼저 생성된다.
 - `external_artifact` 모드에서는 외부 프로세스가 `request.*`를 읽고 `response.json`을 쓴다.
 - Discord와 scheduled report는 `response.json` 기반 deterministic formatter만 사용한다.
 
@@ -483,6 +489,15 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 | `INVESTMENT_DECISION_RUN_ROOT` | mcp-orchestrator | investment decision run artifact 루트 |
 | `INVESTMENT_DECISION_TIMEOUT_MS` | mcp-orchestrator | decision run 최대 대기 시간 |
 | `INVESTMENT_DECISION_POLL_INTERVAL_MS` | mcp-orchestrator | external artifact polling 간격 |
+| `INVESTMENT_DECISION_PREPROCESS_ENABLED` | mcp-orchestrator | 전처리 briefing 단계 on/off |
+| `INVESTMENT_DECISION_PREPROCESS_PROVIDERS` | mcp-orchestrator | 전처리 provider 우선순위 |
+| `INVESTMENT_DECISION_PREPROCESS_MODEL_PROFILE` | mcp-orchestrator | 전처리 model profile |
+| `INVESTMENT_DECISION_PREPROCESS_TOOL_POLICY` | mcp-orchestrator | 전처리 단계 tool 정책 (`none` 권장) |
+| `INVESTMENT_DECISION_PREPROCESS_TIMEOUT_MS` | mcp-orchestrator | 전처리 단계 timeout |
+| `INVESTMENT_DECISION_FINAL_PROVIDERS` | mcp-orchestrator | 최종 판단 provider 우선순위 |
+| `INVESTMENT_DECISION_FINAL_MODEL_PROFILE` | mcp-orchestrator | 최종 판단 model profile |
+| `INVESTMENT_DECISION_FINAL_TOOL_POLICY` | mcp-orchestrator | 최종 판단 단계 tool 정책 |
+| `INVESTMENT_DECISION_FINAL_TIMEOUT_MS` | mcp-orchestrator | 최종 판단 단계 timeout |
 | `INVESTMENT_EQUITY_MAP_PATH` | mcp-orchestrator | curated equity alias/ticker mapping 파일 경로 |
 | `PROVIDER_HEALTH_POLL_INTERVAL_SEC` | mcp-orchestrator | provider health probe 주기 |
 | `PROVIDER_REPAIR_COOLDOWN_SEC` | mcp-orchestrator | provider repair 재시도 cooldown |

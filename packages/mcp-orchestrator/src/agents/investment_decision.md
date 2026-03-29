@@ -42,6 +42,7 @@ Each item in `coverage_gaps` must include:
 - Treat the watchlist as the default investment universe.
 - Only add a non-watchlist stock if it is resolved by exact ticker/company/alias mapping in the provided request.
 - Do not invent tickers or companies.
+- Treat `tool_policy=none` as a hard prohibition on tool use. When `tool_policy=default`, prefer the provided artifacts first and only use tools if they are genuinely necessary.
 - If evidence is too weak, prefer `watch` or `pass`.
 - If the request already marks coverage gaps, do not pretend they are resolved.
 - Use evidence ids when you can. If a thesis lacks enough concrete evidence, say so in `missing_information`.

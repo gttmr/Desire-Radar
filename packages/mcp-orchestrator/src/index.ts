@@ -185,6 +185,19 @@ async function main(): Promise<void> {
           executionPolicy,
           investmentPromptBuilder,
           config.investmentDecision.INVESTMENT_DECISION_TIMEOUT_MS,
+          {
+            enabled: config.investmentDecision.preprocessEnabled,
+            providers: config.investmentDecision.preprocessProviders,
+            modelProfile: config.investmentDecision.INVESTMENT_DECISION_PREPROCESS_MODEL_PROFILE,
+            toolPolicy: config.investmentDecision.INVESTMENT_DECISION_PREPROCESS_TOOL_POLICY,
+            timeoutMs: config.investmentDecision.INVESTMENT_DECISION_PREPROCESS_TIMEOUT_MS,
+          },
+          {
+            providers: config.investmentDecision.finalProviders,
+            modelProfile: config.investmentDecision.INVESTMENT_DECISION_FINAL_MODEL_PROFILE,
+            toolPolicy: config.investmentDecision.INVESTMENT_DECISION_FINAL_TOOL_POLICY,
+            timeoutMs: config.investmentDecision.INVESTMENT_DECISION_FINAL_TIMEOUT_MS,
+          },
         );
   const investmentDecisionService = new InvestmentDecisionService(
     investmentDecisionStore,

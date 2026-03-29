@@ -1,4 +1,5 @@
 export type ModelProfile = 'cheap' | 'balanced' | 'premium';
+export type ToolPolicy = 'default' | 'none';
 export type ExecutionPhase =
   | 'triage'
   | 'debate'
@@ -29,6 +30,7 @@ export type ProviderExecutionRequest = {
   transportTarget?: string | null;
   model?: string;
   modelProfile: ModelProfile;
+  toolPolicy?: ToolPolicy;
   phase: ExecutionPhase;
   agentName: string;
   responseFormat?: ResponseFormat;

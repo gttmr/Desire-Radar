@@ -33,9 +33,10 @@
     },
     "investment_decision": {
       "providers": [
+        "codex",
         "gemini"
       ],
-      "modelProfile": "cheap",
+      "modelProfile": "premium",
       "responseFormat": "json"
     }
   },
@@ -143,7 +144,17 @@
     "investment_decision": {
       "phase": "investment_decision",
       "providers": [
+        "codex",
         "gemini"
+      ],
+      "modelProfile": "premium",
+      "responseFormat": "json"
+    },
+    "investment_decision_prepare": {
+      "phase": "investment_decision",
+      "providers": [
+        "gemini",
+        "codex"
       ],
       "modelProfile": "cheap",
       "responseFormat": "json"

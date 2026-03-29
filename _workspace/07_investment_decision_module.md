@@ -30,21 +30,31 @@
 - 목적은 “coverage gap 전부 제거”가 아니라, public company/product 수준의 저위험 exact mapping을 즉시 usable 상태로 만드는 것이다.
 - 추가로 `codex` investment decision prompt는 argv가 아니라 stdin으로 넘기도록 바꿨다. resolved equity가 많아질수록 prompt가 길어지기 때문에, large request에서 provider 실행이 붙잡히는 문제를 줄이기 위한 조치다.
 - 같은 이유로 provider prompt에는 full `request.json`을 다시 싣지 않고 compact projection만 넣도록 줄였다. raw/full artifact는 계속 run dir의 `request.json`에 보존한다.
-- 그리고 `investment_decision` phase 기본 profile을 `cheap`으로 낮췄다. structured shortlist 생성에는 `gpt-5.4-mini` 수준이 더 적합하고, latency 절감 이득이 더 크다고 판단했다.
-- 추가 조사 결과, 현재 Docker 런타임의 Codex CLI는 이 phase의 긴 판단 prompt를 받으면 tool/workspace inspection으로 들어가고 user-namespace 제한 때문에 응답이 길게 묶였다.
-- 그래서 `investment_decision` phase 기본 provider를 당분간 `gemini` 단독으로 바꿨다.
-- 그리고 Gemini readiness probe도 `gemini-2.5-flash`로 고정했다. provider health가 실제 decision phase 모델과 어긋나면 실행 전에 false negative가 나기 때문이다.
+- 그 시점에는 `investment_decision`을 단일 provider/cheap profile 중심으로 단순화했지만, 이 구조는 이후 2단 preprocessor + final decision 구조로 다시 정리됐다.
+- 추가 조사 결과, 긴 판단 prompt에서 provider별 행동 편차가 커서 “전처리 provider”와 “최종 판단 provider”를 분리할 필요가 있었다.
+- Gemini readiness probe를 `gemini-2.5-flash`로 고정한 점은 유지한다. provider health가 실제 phase 모델과 어긋나면 실행 전에 false negative가 나기 때문이다.
 - prompt에도 “workspace 조사 금지, follow-up 질문 금지, 지금 결론” 제약을 더 명시했다.
 - 예전 버그로 남은 stale `running` run은 timeout budget 초과 시 자동으로 `failed`로 정리한다.
+
+## 2026-03-30 Late Update
+
+- investment decision는 이제 `prepare -> final decision` 2단 구조를 지원한다.
+- `prepare` 단계는 canonical output이 아니고, request를 loss-aware briefing으로 압축하는 내부 단계다.
+- `prepared_request.json`, `prepared_request.md`, `prepared_request.meta.json`이 run dir에 남는다.
+- 전처리 provider는 Gemini 고정이 아니다. env로 provider 우선순위와 model profile을 따로 바꿀 수 있다.
+- 권장 기본값은 `prepare=cheap`, `final=premium`이다.
+- 실무적으로는 `prepare=codex(gpt-5.4-mini)`, `final=codex(gpt-5.4)` 또는 `prepare=gemini flash`, `final=codex(gpt-5.4)` 둘 다 가능하다.
+- 전처리 단계는 `INVESTMENT_DECISION_PREPROCESS_TOOL_POLICY=none`을 기본으로 두고, 최종 판단 단계는 별도 tool policy를 가질 수 있게 분리했다.
+- 전처리 실패 시 run 전체를 버리지 않고 deterministic fallback briefing을 생성한 뒤 final decision을 계속 진행한다.
 
 ## Current Gaps
 
 - verdict pipeline과 investment decision의 연결은 아직 느슨하다.
 - equity mapping은 exact/curated 수준만 지원한다.
-- external artifact writer에 대한 운영 runbook은 추가됐지만 실제 worker는 아직 없다.
+- external artifact worker는 들어갔지만, 실제 운영에서 어떤 외부 판단 주체가 `response.json`을 쓰는지 절차는 더 구체화할 여지가 있다.
 - investment decision artifact 품질을 평가하는 replay/golden fixture는 더 보강할 수 있다.
 - provider session dir에는 아직 raw turn transcript가 남지 않는다. 현재 디버깅 기준 원문은 run dir의 `provider-attempts/`다.
-- `gemini` decision quality는 provider availability와 prompt tuning에 더 좌우될 수 있다.
+- preprocessing provider와 final provider를 phase가 아니라 agent 단위로 더 세밀하게 policy 관리할 여지는 있다.
 
 ## Next Likely Work
 
