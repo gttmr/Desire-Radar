@@ -102,7 +102,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Global state
-evidence_sink: EvidenceSink = EvidenceSink(freshness_ttl_days=7)
+evidence_sink: EvidenceSink = EvidenceSink(
+    freshness_ttl_days=7,
+    path=os.path.join(DATA_DIR, "evidence.json"),
+)
 cadence_runner: CadenceRunner | None = None
 _ttl_scheduler: AsyncIOScheduler | None = None
 analysis_engine: AnalysisEngine | None = None

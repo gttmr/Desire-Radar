@@ -1,6 +1,8 @@
 """Thread-safe evidence storage with TTL enforcement and query support."""
 
+import json
 import logging
+import os
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -19,11 +21,19 @@ class EvidenceSink:
         - count property
     """
 
-    def __init__(self, freshness_ttl_days: int = 7) -> None:
+    def __init__(
+        self,
+        freshness_ttl_days: int = 7,
+        *,
+        path: str | None = None,
+    ) -> None:
         self._items: list[Evidence] = []
         self._fingerprints: set[str] = set()
         self._lock = threading.Lock()
         self.freshness_ttl = timedelta(days=freshness_ttl_days)
+        self.path = path
+        self._load()
+        self.enforce_ttl()
 
     @property
     def count(self) -> int:
@@ -37,15 +47,20 @@ class EvidenceSink:
                 return
             self._items.append(evidence)
             self._fingerprints.add(fingerprint)
+            self._save_locked()
 
     def extend(self, evidences: list[Evidence]) -> None:
         with self._lock:
+            changed = False
             for evidence in evidences:
                 fingerprint = self._fingerprint(evidence)
                 if fingerprint in self._fingerprints:
                     continue
                 self._items.append(evidence)
                 self._fingerprints.add(fingerprint)
+                changed = True
+            if changed:
+                self._save_locked()
 
     def get_all(self) -> list[Evidence]:
         """Return a copy of all evidence items."""
@@ -103,6 +118,7 @@ class EvidenceSink:
             self._fingerprints = {self._fingerprint(item) for item in self._items}
             removed = before - len(self._items)
             if removed > 0:
+                self._save_locked()
                 logger.info("TTL cleanup: removed %d stale evidence items", removed)
             return removed
 
@@ -122,3 +138,50 @@ class EvidenceSink:
                 parents,
             ]
         )
+
+    def _load(self) -> None:
+        if not self.path or not os.path.exists(self.path):
+            return
+        try:
+            with open(self.path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            logger.warning("Failed to load persisted evidence from %s", self.path)
+            return
+
+        items = payload.get("evidence", [])
+        loaded: list[Evidence] = []
+        fingerprints: set[str] = set()
+        for item in items:
+            try:
+                evidence = Evidence.model_validate(item)
+            except Exception:
+                logger.warning("Skipping invalid persisted evidence item from %s", self.path)
+                continue
+            fingerprint = self._fingerprint(evidence)
+            if fingerprint in fingerprints:
+                continue
+            loaded.append(evidence)
+            fingerprints.add(fingerprint)
+
+        self._items = loaded
+        self._fingerprints = fingerprints
+
+    def _save_locked(self) -> None:
+        if not self.path:
+            return
+        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+        tmp_path = f"{self.path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(
+                {
+                    "evidence": [
+                        item.model_dump(mode="json")
+                        for item in self._items
+                    ]
+                },
+                handle,
+                indent=2,
+                ensure_ascii=False,
+            )
+        os.replace(tmp_path, self.path)

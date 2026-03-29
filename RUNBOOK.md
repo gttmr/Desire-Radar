@@ -188,10 +188,12 @@ xdg-open http://127.0.0.1:5002/dashboard
 - `/health`: 빠른 liveness + analysis/source queue 요약
 - `/sources/status`: source별 enabled/tier/validity + readiness + 현재 run state + 최근 quality/run summary
 - `/runtime/status`: source run queue, worker 수, scheduler 상태 + recent run ledger/freshness snapshot
+- `dashboard/api/overview`와 `/health`의 `evidence_count`: 실제 candidate 빌드 입력이 메모리에만 있는지, 또는 `data/evidence.json`에서 정상 복구됐는지 확인하는 빠른 지표
 
 현재 collector는 source run을 request thread에서 직접 끝내지 않는다.
 - `POST /collect/run` 또는 `POST /internal/sources/run/{source_id}`는 기본적으로 source run을 queue에 넣고 즉시 `submission_id`를 반환한다.
 - 실제 진행 상황은 `submission status`와 `sources/status`에서 본다.
+- source freshness가 살아 있어도 `evidence_count=0`이면 재기동 후 shortlist 입력이 비어 있는 상태다. 현재 collector는 `data/evidence.json`을 같이 유지해 이 상태를 줄인다.
 
 ### Orchestrator
 

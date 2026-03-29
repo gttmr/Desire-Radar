@@ -81,6 +81,7 @@ Shared types exist to keep contracts synchronized across services. Any API shape
 
 Important property:
 - raw snapshots and provenance remain intact even when analysis layers add derived fields.
+- normalized evidence is also persisted so candidate generation and investment assembly survive collector restarts; persistence must not mutate raw source facts
 - long-running source collection should not block request/health handling; source execution is queued and runtime state is observable separately
 - source status should expose partial-failure metadata instead of collapsing mixed outcomes into a binary success/failure view
 - source operability is not just `enabled/runnable`; collector also tracks `readiness_status`, fetch strategy, checkpoint/watermark state, quality status, and recent run history

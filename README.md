@@ -179,6 +179,7 @@ docker compose up --build
 - allowlist 된 일부 collector `.env` 값도 편집할 수 있다.
 - `.env` 저장 후 collector 재기동 전까지는 startup-time 설정이 즉시 반영되지 않는다.
 - queued source run은 raw evidence 저장과 candidate enqueue가 끝나면 `submission.status=completed`로 먼저 떨어질 수 있고, source-agent는 `metadata.source_agent_status`에서 별도로 추적된다.
+- normalized evidence는 `data/evidence.json`에 영속화된다. collector 재기동 뒤에도 source freshness와 candidate 입력이 함께 유지된다.
 
 자세한 재기동/강제 recreate/troubleshooting은 [RUNBOOK.md](RUNBOOK.md)를 따른다.
 
@@ -362,6 +363,7 @@ source-agent timeout 전략:
 - collector source run은 기본적으로 queue 기반 비동기 실행이다. 장시간 수집은 `submission_id`와 `/sources/status`, `/runtime/status`로 추적한다.
 - `sources/status`와 `runtime/status`는 `readiness_status`, `readiness_reason`, `fetch_strategy`, `freshness_lag_seconds`, `quality_status`, `recent_runs`와 함께 `last_failure_kind`, `partial_failure_count`, `last_warning_kind`, `last_warning_message` 같은 partial failure metadata도 함께 보여준다.
 - incremental source는 checkpoint 기반 `last_seen_ids / last_cursor` 상태를 유지해서 같은 payload 재수집 시 duplicate 폭증을 줄인다.
+- source run history는 디스크에 남아도 normalized evidence가 비면 shortlist는 다시 0이 된다. 현재는 `data/evidence.json`을 같이 유지해서 collector 재기동 후에도 investment decision assembler가 바로 candidate를 읽을 수 있게 한다.
 - collector evidence bundle은 prompt용 요약뿐 아니라 graph snapshot도 같이 만든다.
 
 벤치:

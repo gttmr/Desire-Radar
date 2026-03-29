@@ -21,6 +21,8 @@
 ## 2026-03-30 Update
 
 - direct investment decision run은 이제 정상 완료되지만, `equity-map`이 비어 있으면 shortlist 품질이 크게 떨어진다.
+- 또 하나의 병목은 collector 재기동 뒤 source freshness/history는 남아도 normalized evidence가 비어, investment decision request의 `candidate_clusters`가 다시 0이 되는 점이었다.
+- 이를 줄이기 위해 collector가 normalized evidence를 `data/evidence.json`에 영속화하고, 재기동 시 TTL을 적용해 다시 로드하도록 바꿨다.
 - 그래서 `data/investment-module/equity-map.json`이 missing/empty일 때만 starter map을 자동 bootstrap 하도록 바꿨다.
 - starter set은 exact/curated public-equity alias만 포함한다.
   - 포함 예: 삼성전자, Microsoft, NVIDIA, Alphabet/Google/YouTube, Meta, Amazon, Netflix, Tesla, Disney, Sony/PlayStation, Apple
