@@ -23,11 +23,20 @@ export class InvestmentDecisionService {
     private readonly runner: InvestmentDecisionRunner,
     private readonly formatter: InvestmentReportFormatter,
     private readonly runnerMode: 'provider_exec' | 'external_artifact',
+    private readonly timeoutMs: number,
   ) {}
+
+  private async reconcileStaleRuns(): Promise<void> {
+    await this.store.reconcileTimedOutRuns({
+      maxAgeMs: this.timeoutMs + 15_000,
+      reason: `investment decision run exceeded timeout budget (${this.timeoutMs}ms)`,
+    });
+  }
 
   async run(
     request: CreateInvestmentDecisionRunRequest,
   ): Promise<CreateInvestmentDecisionRunResponse> {
+    await this.reconcileStaleRuns();
     const runId = randomUUID();
     const assembled = await this.assembler.assemble({
       runId,
@@ -74,6 +83,7 @@ export class InvestmentDecisionService {
     runId: string,
     detail: ReportDetailLevel = 'full',
   ): Promise<GetInvestmentDecisionRunResponse | null> {
+    await this.reconcileStaleRuns();
     const run = await this.store.getRun(runId);
     if (!run) {
       return null;
@@ -101,6 +111,7 @@ export class InvestmentDecisionService {
   async getLatest(
     detail: ReportDetailLevel = 'full',
   ): Promise<GetLatestInvestmentDecisionResponse> {
+    await this.reconcileStaleRuns();
     const run = await this.store.getLatestRun();
     if (!run) {
       return { latest: null };

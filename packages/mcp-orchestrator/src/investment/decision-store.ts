@@ -155,6 +155,43 @@ export class InvestmentDecisionStore {
     return index.runs[index.latest_run_id] ?? null;
   }
 
+  async reconcileTimedOutRuns(args: {
+    maxAgeMs: number;
+    reason: string;
+  }): Promise<number> {
+    const index = await this.readIndex();
+    const now = Date.now();
+    let changed = 0;
+
+    for (const [runId, record] of Object.entries(index.runs)) {
+      if (record.status !== 'running') {
+        continue;
+      }
+      const updatedAtMs = Date.parse(record.updated_at);
+      if (Number.isNaN(updatedAtMs) || now - updatedAtMs <= args.maxAgeMs) {
+        continue;
+      }
+      index.runs[runId] = {
+        ...record,
+        status: 'failed',
+        degraded_reason: args.reason,
+        error: args.reason,
+        updated_at: new Date().toISOString(),
+      };
+      changed += 1;
+      await writeFile(
+        index.runs[runId].status_path,
+        JSON.stringify(index.runs[runId], null, 2),
+        'utf8',
+      );
+    }
+
+    if (changed > 0) {
+      await this.writeIndex(index);
+    }
+    return changed;
+  }
+
   private async updateRecord(
     runId: string,
     patch: Partial<InvestmentDecisionRunRecord> & { status?: InvestmentDecisionRunStatus },

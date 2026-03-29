@@ -173,6 +173,91 @@ describe('investment decision module', () => {
     expect(request.coverage_gaps).toEqual([]);
   });
 
+  it('bootstraps a starter equity map when the file is missing or empty', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'investment-equity-map-'));
+    const equityMapPath = join(dataDir, 'investment-module', 'equity-map.json');
+    const store = new EquityMapStore(equityMapPath);
+
+    await store.ensureExists();
+    let entries = await store.list();
+    expect(entries.find((entry) => entry.ticker === '005930')?.company_name).toBe('삼성전자');
+    expect(entries.find((entry) => entry.ticker === 'MSFT')?.aliases).toContain('Xbox');
+
+    writeFileSync(
+      equityMapPath,
+      JSON.stringify({ version: 1, equities: [] }, null, 2),
+      'utf8',
+    );
+    await store.ensureExists();
+    entries = await store.list();
+
+    expect(entries.find((entry) => entry.ticker === 'SONY')?.aliases).toContain('PlayStation 5');
+    expect(entries.find((entry) => entry.ticker === 'GOOGL')?.aliases).toContain('YouTube');
+  });
+
+  it('renders compact request markdown without embedding the full request json', () => {
+    const formatter = new InvestmentReportFormatter();
+    const markdown = formatter.renderRequestMarkdown({
+      ...makeRequest('run-compact'),
+      supporting_evidence_refs: ['ev-1', 'ev-2', 'ev-3'],
+      coverage_gaps: [
+        {
+          label: 'OpenAI',
+          reason: 'No exact equity mapping found',
+          linked_cluster_id: 'entity:openai',
+          linked_note_ids: [],
+        },
+      ],
+    });
+
+    expect(markdown).toContain('supporting_evidence_ref_count: 3');
+    expect(markdown).toContain('coverage_gap_count: 1');
+    expect(markdown).not.toContain('## Request JSON');
+    expect(markdown).not.toContain('"supporting_evidence_refs"');
+  });
+
+  it('reconciles stale running decision runs into failed status', async () => {
+    const runRoot = mkdtempSync(join(tmpdir(), 'investment-stale-runs-'));
+    const store = new InvestmentDecisionStore(runRoot);
+    const request = makeRequest('run-stale');
+    const run = await store.createRun({
+      runId: 'run-stale',
+      mode: request.mode,
+      runner: 'provider_exec',
+      request,
+      requestMarkdown: '# request',
+    });
+    const running = await store.markRunning('run-stale');
+    const staleRun = {
+      ...running,
+      updated_at: '2026-03-29T00:00:00.000Z',
+    };
+    writeFileSync(
+      join(runRoot, '..', 'index.json'),
+      JSON.stringify(
+        {
+          version: 1,
+          latest_run_id: staleRun.run_id,
+          runs: {
+            [staleRun.run_id]: staleRun,
+          },
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+    writeFileSync(staleRun.status_path, JSON.stringify(staleRun, null, 2), 'utf8');
+    await store.reconcileTimedOutRuns({
+      maxAgeMs: 1,
+      reason: 'investment decision run exceeded timeout budget (60000ms)',
+    });
+
+    const updated = await store.getRun('run-stale');
+    expect(updated?.status).toBe('failed');
+    expect(updated?.error).toContain('exceeded timeout budget');
+  });
+
   it('normalizes provider_exec output into the canonical response artifact', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'investment-provider-'));
     const registry = new ProviderRegistry();
@@ -629,6 +714,7 @@ describe('investment decision module', () => {
       ),
       new InvestmentReportFormatter(),
       'provider_exec',
+      5_000,
     );
 
     const app = express();

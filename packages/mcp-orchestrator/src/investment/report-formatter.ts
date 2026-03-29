@@ -158,6 +158,8 @@ export class InvestmentReportFormatter {
       `- run_id: ${request.run_id}`,
       `- mode: ${request.mode}`,
       `- watchlist: ${request.watchlist.join(', ') || '(none)'}`,
+      `- supporting_evidence_ref_count: ${request.supporting_evidence_refs.length}`,
+      `- coverage_gap_count: ${request.coverage_gaps.length}`,
       '',
       '## Resolved Equities',
       '',
@@ -192,12 +194,6 @@ export class InvestmentReportFormatter {
       '## Coverage Gaps',
       '',
       ...request.coverage_gaps.map((gap) => `- ${gap.label}: ${gap.reason}`),
-      '',
-      '## Request JSON',
-      '',
-      '```json',
-      JSON.stringify(request, null, 2),
-      '```',
     ].join('\n');
   }
 

@@ -8,6 +8,75 @@ type EquityMapFile = {
   equities: InvestmentEquityMapEntry[];
 };
 
+const STARTER_EQUITIES: InvestmentEquityMapEntry[] = [
+  {
+    asset_key: 'stock:KRX:005930',
+    ticker: '005930',
+    company_name: '삼성전자',
+    aliases: ['Samsung Electronics', 'Samsung', '005930.KS'],
+  },
+  {
+    asset_key: 'stock:NASDAQ:MSFT',
+    ticker: 'MSFT',
+    company_name: 'Microsoft',
+    aliases: ['MSFT', 'Xbox'],
+  },
+  {
+    asset_key: 'stock:NASDAQ:NVDA',
+    ticker: 'NVDA',
+    company_name: 'NVIDIA',
+    aliases: ['NVDA', 'GeForce'],
+  },
+  {
+    asset_key: 'stock:NASDAQ:GOOGL',
+    ticker: 'GOOGL',
+    company_name: 'Alphabet',
+    aliases: ['Google', 'GOOGL', 'YouTube', 'Youtube', 'Android'],
+  },
+  {
+    asset_key: 'stock:NASDAQ:META',
+    ticker: 'META',
+    company_name: 'Meta Platforms',
+    aliases: ['Meta', 'Facebook', 'Instagram', 'WhatsApp'],
+  },
+  {
+    asset_key: 'stock:NASDAQ:AMZN',
+    ticker: 'AMZN',
+    company_name: 'Amazon',
+    aliases: ['Amazon', 'AWS', 'Prime Video'],
+  },
+  {
+    asset_key: 'stock:NASDAQ:NFLX',
+    ticker: 'NFLX',
+    company_name: 'Netflix',
+    aliases: ['Netflix'],
+  },
+  {
+    asset_key: 'stock:NASDAQ:TSLA',
+    ticker: 'TSLA',
+    company_name: 'Tesla',
+    aliases: ['Tesla'],
+  },
+  {
+    asset_key: 'stock:NYSE:DIS',
+    ticker: 'DIS',
+    company_name: 'Disney',
+    aliases: ['Disney', 'Disney+'],
+  },
+  {
+    asset_key: 'stock:NYSE:SONY',
+    ticker: 'SONY',
+    company_name: 'Sony Group',
+    aliases: ['Sony', 'PlayStation', 'PlayStation 5', 'PS5'],
+  },
+  {
+    asset_key: 'stock:NASDAQ:AAPL',
+    ticker: 'AAPL',
+    company_name: 'Apple',
+    aliases: ['Apple', 'App Store', 'iPhone'],
+  },
+];
+
 function normalize(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -36,11 +105,14 @@ export class EquityMapStore {
 
   async ensureExists(): Promise<void> {
     if (existsSync(this.filePath)) {
+      const entries = await this.list();
+      if (entries.length > 0) {
+        return;
+      }
+      await this.writeDefaults();
       return;
     }
-    await mkdir(dirname(this.filePath), { recursive: true });
-    const payload: EquityMapFile = { version: 1, equities: [] };
-    await writeFile(this.filePath, JSON.stringify(payload, null, 2), 'utf8');
+    await this.writeDefaults();
   }
 
   async list(): Promise<InvestmentEquityMapEntry[]> {
@@ -103,5 +175,14 @@ export class EquityMapStore {
         return entry.aliases.some((alias) => normalize(alias) === normalized);
       }) ?? null
     );
+  }
+
+  private async writeDefaults(): Promise<void> {
+    await mkdir(dirname(this.filePath), { recursive: true });
+    const payload: EquityMapFile = {
+      version: 1,
+      equities: STARTER_EQUITIES.map((entry) => normalizeEntry(entry)),
+    };
+    await writeFile(this.filePath, JSON.stringify(payload, null, 2), 'utf8');
   }
 }

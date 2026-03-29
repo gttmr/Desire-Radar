@@ -192,6 +192,7 @@ async function main(): Promise<void> {
     investmentDecisionRunner,
     investmentReportFormatter,
     config.investmentDecision.INVESTMENT_DECISION_RUNNER,
+    config.investmentDecision.INVESTMENT_DECISION_TIMEOUT_MS,
   );
 
   const orchestrator = new RunOrchestrator(agentExecutor, runStore, config.providers.defaultProviders, {

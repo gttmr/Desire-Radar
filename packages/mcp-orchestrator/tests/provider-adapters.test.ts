@@ -84,7 +84,7 @@ warn line
         '-s',
         'read-only',
         '--json',
-        'Reply with exactly OK',
+        '-',
       ]);
     });
 
@@ -113,7 +113,7 @@ warn line
         '--skip-git-repo-check',
         '--json',
         'thread-123',
-        'Reply with exactly OK',
+        '-',
       ]);
       callback(
         null,
@@ -150,7 +150,7 @@ warn line
         '-s',
         'read-only',
         '--json',
-        'Reply with exactly OK',
+        '-',
       ]);
       callback(
         null,
@@ -191,7 +191,7 @@ warn line
         '-s',
         'read-only',
         '--json',
-        'Reply with exactly OK',
+        '-',
       ]);
       callback(
         null,
@@ -540,7 +540,14 @@ warn line
 
   it('surfaces gemini probe failures with classified errors', async () => {
     mockExecFile((_file, args, _options, callback) => {
-      expect(args).toEqual(['-o', 'json', '-p', 'Reply with exactly OK']);
+      expect(args).toEqual([
+        '-o',
+        'json',
+        '--model',
+        'gemini-2.5-flash',
+        '-p',
+        'Reply with exactly OK',
+      ]);
       callback(
         new Error('Command failed'),
         '',
@@ -564,7 +571,15 @@ warn line
   });
 
   it('marks gemini empty output as execute-unready even when the command succeeds', async () => {
-    mockExecFile((_file, _args, _options, callback) => {
+    mockExecFile((_file, args, _options, callback) => {
+      expect(args).toEqual([
+        '-o',
+        'json',
+        '--model',
+        'gemini-2.5-flash',
+        '-p',
+        'Reply with exactly OK',
+      ]);
       callback(null, '', '');
     });
 

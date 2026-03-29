@@ -81,7 +81,8 @@ Discord human input / slash commands
 - watchlist-prioritized daily shortlist는 별도 investment decision subsystem이 담당한다.
 - investment decision run은 항상 request/response/report artifact를 먼저 남기고, Discord와 daily report는 그 결과 artifact만 소비한다.
 - 실행 모드는 `provider_exec`와 `external_artifact` 두 가지를 지원한다.
-- 기본 provider 경로는 `codex, claude, gemini`다.
+- 일반 debate/report 기본 provider 경로는 `codex, claude, gemini`다.
+- `investment_decision` phase는 2026-03-30 기준으로 `gemini`를 기본 provider로 사용한다. 현재 Docker 런타임에서 Codex CLI는 이 phase의 긴 구조화 판단 prompt에서 tool/workspace inspection으로 들어가 지연되기 쉽기 때문이다.
 - `ENABLED_PROVIDERS`가 실제 등록과 health monitoring 대상을 결정하고, `DEFAULT_PROVIDERS`는 그 안에서 실행 우선순위를 결정한다.
 - `OPENAI_API_KEY`만으로는 OpenAI provider가 자동 등록되지 않고, `ENABLED_PROVIDERS`에 `openai`를 넣었을 때만 추가 등록된다.
 - provider session마다 request/response artifact를 JSON으로 남긴다.
@@ -257,6 +258,8 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 - collector cluster, beneficiary mapping, investment dossier는 보조 입력으로만 들어간다.
 - exact alias/ticker/company_name 매칭이 안 되는 신규 후보는 `coverage_gaps`로 남긴다.
 - curated equity mapping 파일 기본 경로는 `data/investment-module/equity-map.json`이다.
+- 이 파일이 없거나 비어 있으면 orchestrator가 보수적인 starter map을 자동으로 채운다.
+  - 예: `삼성전자/005930`, `Microsoft/MSFT`, `NVIDIA/NVDA`, `Alphabet/Google/YouTube`, `Meta`, `Amazon`, `Netflix`, `Tesla`, `Disney`, `Sony/PlayStation`, `Apple`
 - orchestrator는 `GET /investment/equity-map`, `PUT /investment/equity-map`로 이 매핑 파일을 읽고 교체할 수 있다.
 - `external_artifact` 모드를 실제로 처리하려면 별도 worker를 실행한다. 기본 스크립트는 `npm --prefix packages/mcp-orchestrator run worker:investment-decisions -- --watch`다.
 

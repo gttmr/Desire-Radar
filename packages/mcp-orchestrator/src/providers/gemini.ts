@@ -15,6 +15,7 @@ import {
 } from './errors.js';
 type GeminiProviderOptions = {
   defaultTransportMode?: ProviderTransportMode;
+  healthProbeModel?: string;
 };
 
 export function classifyGeminiError(message: string): string {
@@ -68,6 +69,7 @@ export function extractGeminiPromptResult(stdout: string): string {
 export class GeminiProvider implements ProviderAdapter {
   readonly name = 'gemini';
   readonly defaultTransportMode: ProviderTransportMode;
+  private readonly healthProbeModel: string;
 
   constructor(
     private readonly execPath: string = 'gemini',
@@ -75,6 +77,7 @@ export class GeminiProvider implements ProviderAdapter {
     options: GeminiProviderOptions = {},
   ) {
     this.defaultTransportMode = options.defaultTransportMode ?? 'cli_exec';
+    this.healthProbeModel = options.healthProbeModel ?? 'gemini-2.5-flash';
   }
 
   async execute(request: ProviderExecutionRequest): Promise<ProviderResult> {
@@ -113,7 +116,10 @@ export class GeminiProvider implements ProviderAdapter {
 
   async probeHealth(): Promise<ProviderHealthProbe> {
     try {
-      const output = await this.run(['-o', 'json', '-p', 'Reply with exactly OK'], 20_000);
+      const output = await this.run(
+        ['-o', 'json', '--model', this.healthProbeModel, '-p', 'Reply with exactly OK'],
+        20_000,
+      );
       extractGeminiPromptResult(output);
       return buildProviderHealthProbe({
         auth_status: 'healthy',

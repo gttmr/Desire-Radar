@@ -193,6 +193,21 @@ curated mapping 기본 경로:
 data/investment-module/equity-map.json
 ```
 
+bootstrap 규칙:
+- 파일이 없거나 비어 있으면 orchestrator가 보수적인 starter map을 자동으로 채운다.
+- starter set은 exact/curated public-equity alias만 포함한다.
+- `OpenAI`, `Anthropic`, `Bitcoin`, `Ethereum`처럼 직접 상장사로 고정하기 어려운 항목은 기본적으로 coverage gap으로 남긴다.
+- `codex` provider는 큰 investment decision prompt를 argv가 아니라 stdin으로 전달한다. prompt가 커질 때 resume/repair 실행 안정성을 높이기 위한 조치다.
+- investment decision prompt에는 full `request.json`을 그대로 다시 싣지 않는다. prompt에는 compact projection만 넣고, full artifact는 run dir의 `request.json`에만 남긴다.
+- `investment_decision` phase 기본 profile은 `cheap`이다. 이 phase는 deterministic formatter를 위한 structured shortlist 생성이라, `gpt-5.4-mini` 같은 더 가벼운 모델로 latency를 낮추는 편이 운영상 낫다.
+- 2026-03-30 기준 `investment_decision` phase 기본 provider는 `gemini`다. 현재 Docker 런타임에서 Codex CLI는 이 phase의 긴 구조화 판단 prompt를 받으면 workspace/tool 탐색으로 들어가 지연되는 경향이 있어, decision phase에서는 더 결정형으로 동작하는 provider를 우선한다.
+- Gemini readiness probe도 `gemini-2.5-flash`를 명시적으로 사용한다. health가 phase와 다른 default model 상태에 끌려가면 안 되기 때문이다.
+- stale `running` run은 timeout budget을 넘기면 자동으로 `failed`로 정리한다. 오래된 status가 영구히 `running`으로 남아 dashboard나 latest API를 오염시키면 안 된다.
+
+Gemini-specific notes:
+- prompt는 “추가 질문 금지, workspace 조사 금지, 현재 정보만으로 즉시 결론” 규칙을 명시한다.
+- 이 phase에서 provider를 바꾸더라도 canonical output은 계속 `response.json`이다.
+
 권장 shape:
 
 ```json

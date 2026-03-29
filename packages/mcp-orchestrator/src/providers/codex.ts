@@ -33,6 +33,11 @@ type CommandOutput = {
   stderr: string;
 };
 
+type CodexCommand = {
+  args: string[];
+  stdin?: string;
+};
+
 const CODEX_HEALTH_PROMPT = 'Reply with exactly OK';
 
 type CodexProviderOptions = {
@@ -125,9 +130,10 @@ export class CodexProvider implements ProviderAdapter {
     const model = request.model;
 
     try {
+      const command = this.buildExecuteCommand(request);
       const output = await this.runDetailed(
-        this.buildExecuteArgs(request),
-        undefined,
+        command.args,
+        command.stdin,
         request.timeoutMs,
         undefined,
       );
@@ -165,8 +171,8 @@ export class CodexProvider implements ProviderAdapter {
       }
 
       try {
-        const execOutput = await this.runDetailed(
-          [
+        const command: CodexCommand = {
+          args: [
             'exec',
             '--skip-git-repo-check',
             '--ephemeral',
@@ -175,9 +181,13 @@ export class CodexProvider implements ProviderAdapter {
             '-s',
             'read-only',
             '--json',
-            CODEX_HEALTH_PROMPT,
+            '-',
           ],
-          undefined,
+          stdin: CODEX_HEALTH_PROMPT,
+        };
+        const execOutput = await this.runDetailed(
+          command.args,
+          command.stdin,
           20_000,
         );
         extractCodexExecResult(execOutput.stdout);
@@ -259,7 +269,7 @@ export class CodexProvider implements ProviderAdapter {
     });
   }
 
-  private buildExecuteArgs(request: ProviderExecutionRequest): string[] {
+  private buildExecuteCommand(request: ProviderExecutionRequest): CodexCommand {
     const model = request.model;
     const workingDirectory = resolve(request.workingDirectory || '/tmp');
     const isResume = (request.turnCount ?? 0) > 0 && Boolean(request.sessionId);
@@ -274,8 +284,11 @@ export class CodexProvider implements ProviderAdapter {
       if (model) {
         args.splice(1, 0, '-m', model);
       }
-      args.push(request.sessionId as string, request.prompt);
-      return args;
+      args.push(request.sessionId as string, '-');
+      return {
+        args,
+        stdin: request.prompt,
+      };
     }
 
     const args = [
@@ -286,11 +299,14 @@ export class CodexProvider implements ProviderAdapter {
       '-s',
       'read-only',
       '--json',
-      request.prompt,
+      '-',
     ];
     if (model) {
       args.splice(1, 0, '-m', model);
     }
-    return args;
+    return {
+      args,
+      stdin: request.prompt,
+    };
   }
 }
