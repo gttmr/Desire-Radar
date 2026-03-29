@@ -10,6 +10,7 @@
 - [ARCHITECTURE.md](ARCHITECTURE.md): 서비스 경계, 핵심 추상화, CLI/provider 변동성 대응 원칙
 - [RUNBOOK.md](RUNBOOK.md): WSL 기준 로컬 런타임, 네이티브 실행, 재기동, health, smoke, 장애 대응 절차
 - [docs/collector-source-agents.md](docs/collector-source-agents.md): collector source-agent living design
+- [docs/collector-external-source-notes.md](docs/collector-external-source-notes.md): 외부 소스/skill 비교와 collector 편입 기준 메모
 - [docs/investment-module.md](docs/investment-module.md): free-form human input와 orchestrator investment module living design
 - [docs/investment-decision-module.md](docs/investment-decision-module.md): watchlist-prioritized daily shortlist와 artifact-first decision contract
 - `packages/mcp-orchestrator/src/agents/*.md`: 오케스트레이터 분석 에이전트 프롬프트
@@ -53,8 +54,10 @@ Discord human input / slash commands
 ### Collector
 - 공개 API, 사람 입력, agent push, pull connector를 모두 공통 ingestion pipeline으로 처리한다.
 - collector pull source 다양화는 `public-first` 원칙을 따른다.
-  - 기본 활성 세트: `app_store_top_charts`, `google_trends`, `steamdb_top_sellers`, `similarweb_movers`
+  - 기본 활성 세트: `app_store_top_charts`, `google_trends`, `hackernews`, `polymarket_markets`, `steamdb_top_sellers`, `similarweb_movers`
   - gating 세트: `reddit_mentions`(OAuth 필요), `naver_datalab`(Naver credential 필요), `tiktok_creative_center`(public endpoint 안정성 검증 전 기본 비활성)
+- `hackernews`는 Algolia public API로 `show_hn`, `ask_hn`, 일반 story 버킷을 수집하고, 상위 스레드에 대해 comment enrichment를 붙인다.
+- `polymarket_markets`는 Polymarket Gamma public search로 active event/market을 수집하고, 확률/유동성/price movement를 raw evidence로 남긴다.
 - `reddit_mentions`는 비공식 `.json` 스크래핑이 아니라 Reddit OAuth Data API를 기준 경로로 사용한다. `REDDIT_CLIENT_ID`와 `REDDIT_REFRESH_TOKEN` 또는 `REDDIT_USERNAME`/`REDDIT_PASSWORD`가 없으면 source는 warning과 함께 skip된다.
 - source registry가 각 source의 `kind`, `ingestion_mode`, `configured_tier`, `effective_tier`, validity 상태를 관리한다.
 - source별 `agent.md`를 통해 source submission 단위 요약과 파생 evidence를 만들 수 있다.

@@ -1,13 +1,15 @@
 """Connector registry for pull-based data sources."""
 
-from .reddit_mentions import RedditMentionsConnector
-from .google_trends import GoogleTrendsConnector
-from .naver_datalab import NaverDatalabConnector
 from .app_store_top_charts import AppStoreTopChartsConnector
+from .base import BaseConnector
+from .google_trends import GoogleTrendsConnector
+from .hackernews import HackerNewsConnector
+from .naver_datalab import NaverDatalabConnector
+from .polymarket_markets import PolymarketMarketsConnector
+from .reddit_mentions import RedditMentionsConnector
+from .similarweb_movers import SimilarwebMoversConnector
 from .steamdb_top_sellers import SteamdbTopSellersConnector
 from .tiktok_creative_center import TiktokCreativeCenterConnector
-from .similarweb_movers import SimilarwebMoversConnector
-from .base import BaseConnector
 
 
 def build_connector_registry(
@@ -17,8 +19,10 @@ def build_connector_registry(
     connectors: list[BaseConnector] = [
         RedditMentionsConnector(),
         GoogleTrendsConnector(),
+        HackerNewsConnector(),
         NaverDatalabConnector(),
         AppStoreTopChartsConnector(),
+        PolymarketMarketsConnector(),
         SteamdbTopSellersConnector(),
         TiktokCreativeCenterConnector(),
         SimilarwebMoversConnector(),

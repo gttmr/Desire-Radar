@@ -1,0 +1,14 @@
+{
+  "source_id": "hackernews",
+  "kind": "pull",
+  "ingestion_mode": "raw",
+  "configured_tier": 2,
+  "enabled": true,
+  "adapter_name": "hackernews",
+  "default_producer_ref": "hackernews",
+  "description": "Hacker News public pull source for Show HN, Ask HN, and high-signal story discussion.",
+  "capabilities": ["demand", "validation"],
+  "request_kinds_supported": ["run_source"],
+  "normalizer_key": "hackernews",
+  "fetch_strategy": "incremental"
+}

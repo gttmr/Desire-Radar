@@ -1,0 +1,14 @@
+{
+  "source_id": "polymarket_markets",
+  "kind": "pull",
+  "ingestion_mode": "raw",
+  "configured_tier": 2,
+  "enabled": true,
+  "adapter_name": "polymarket_markets",
+  "default_producer_ref": "polymarket_markets",
+  "description": "Polymarket public pull source for active prediction market odds, liquidity, and price movement.",
+  "capabilities": ["pricing", "validation"],
+  "request_kinds_supported": ["run_source"],
+  "normalizer_key": "polymarket_markets",
+  "fetch_strategy": "full_snapshot"
+}

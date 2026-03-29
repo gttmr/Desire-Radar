@@ -36,6 +36,34 @@ class EditableEnvSetting:
 
 EDITABLE_ENV_SETTINGS: tuple[EditableEnvSetting, ...] = (
     EditableEnvSetting(
+        key="HACKERNEWS_TAGS",
+        label="Hacker News Tags",
+        description="Comma-separated Algolia tags fetched by the Hacker News connector.",
+    ),
+    EditableEnvSetting(
+        key="HACKERNEWS_HITS_PER_TAG",
+        label="Hacker News Hits Per Tag",
+        description="Maximum number of Algolia hits fetched for each Hacker News tag bucket.",
+        input_type="integer",
+    ),
+    EditableEnvSetting(
+        key="HACKERNEWS_COMMENT_ENRICH_LIMIT",
+        label="Hacker News Comment Enrich Limit",
+        description="Top Hacker News threads per run whose comments are fetched for enrichment.",
+        input_type="integer",
+    ),
+    EditableEnvSetting(
+        key="POLYMARKET_SEARCH_QUERIES",
+        label="Polymarket Search Queries",
+        description="Comma-separated query list used to discover active Polymarket events.",
+    ),
+    EditableEnvSetting(
+        key="POLYMARKET_PAGES_PER_QUERY",
+        label="Polymarket Pages Per Query",
+        description="How many Polymarket search result pages are fetched for each query.",
+        input_type="integer",
+    ),
+    EditableEnvSetting(
         key="GOOGLE_TRENDS_GEO",
         label="Google Trends Regions",
         description="Comma-separated geo codes used by the Google Trends connector.",

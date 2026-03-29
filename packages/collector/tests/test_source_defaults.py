@@ -17,7 +17,9 @@ def test_build_default_sources_loads_checked_in_manifest_examples():
     connectors = {
         "app_store_top_charts": _Connector("app_store_top_charts", 3600, 1),
         "google_trends": _Connector("google_trends", 3600, 2),
+        "hackernews": _Connector("hackernews", 3600, 2),
         "naver_datalab": _Connector("naver_datalab", 43200, 1),
+        "polymarket_markets": _Connector("polymarket_markets", 3600, 2),
         "reddit_mentions": _Connector("reddit_mentions", 900, 2),
         "similarweb_movers": _Connector("similarweb_movers", 3600, 2),
         "steamdb_top_sellers": _Connector("steamdb_top_sellers", 3600, 2),
@@ -28,7 +30,9 @@ def test_build_default_sources_loads_checked_in_manifest_examples():
 
     app_store = defaults["app_store_top_charts"]
     google_trends = defaults["google_trends"]
+    hackernews = defaults["hackernews"]
     naver_datalab = defaults["naver_datalab"]
+    polymarket_markets = defaults["polymarket_markets"]
     reddit_mentions = defaults["reddit_mentions"]
     similarweb_movers = defaults["similarweb_movers"]
     steamdb_top_sellers = defaults["steamdb_top_sellers"]
@@ -49,8 +53,18 @@ def test_build_default_sources_loads_checked_in_manifest_examples():
     assert google_trends.agent_session_domain == "source-agent:google_trends"
     assert google_trends.cadence_seconds == 3600
     assert google_trends.runnable is True
+    assert hackernews.capabilities == ["demand", "validation"]
+    assert hackernews.fetch_strategy == "incremental"
+    assert hackernews.enabled is True
+    assert hackernews.agent_prompt_path is not None
+    assert hackernews.agent_session_domain == "source-agent:hackernews"
     assert naver_datalab.capabilities == ["demand", "ranking", "validation"]
     assert naver_datalab.enabled is False
+    assert polymarket_markets.capabilities == ["pricing", "validation"]
+    assert polymarket_markets.fetch_strategy == "full_snapshot"
+    assert polymarket_markets.enabled is True
+    assert polymarket_markets.agent_prompt_path is not None
+    assert polymarket_markets.agent_session_domain == "source-agent:polymarket_markets"
     assert reddit_mentions.fetch_strategy == "incremental"
     assert reddit_mentions.enabled is True
     assert similarweb_movers.capabilities == ["demand", "ranking", "validation"]

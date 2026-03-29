@@ -53,6 +53,21 @@ REDDIT_SUBREDDITS: str = _get(
     "technology,gadgets,gaming,apps,business",
 )
 
+# Hacker News
+HACKERNEWS_TAGS: str = _get("HACKERNEWS_TAGS", "show_hn,ask_hn,story")
+HACKERNEWS_HITS_PER_TAG: int = _get_int("HACKERNEWS_HITS_PER_TAG", 15)
+HACKERNEWS_COMMENT_ENRICH_LIMIT: int = _get_int(
+    "HACKERNEWS_COMMENT_ENRICH_LIMIT",
+    5,
+)
+
+# Polymarket
+POLYMARKET_SEARCH_QUERIES: str = _get(
+    "POLYMARKET_SEARCH_QUERIES",
+    "ai,openai,nvidia,tesla,bitcoin,tiktok,ipo",
+)
+POLYMARKET_PAGES_PER_QUERY: int = _get_int("POLYMARKET_PAGES_PER_QUERY", 1)
+
 # Optional API keys
 NAVER_CLIENT_ID: str = _get("NAVER_CLIENT_ID")
 NAVER_CLIENT_SECRET: str = _get("NAVER_CLIENT_SECRET")

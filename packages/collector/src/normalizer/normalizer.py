@@ -222,6 +222,42 @@ def _normalize_google_trends(
     ]
 
 
+@register_normalizer("hackernews")
+def _normalize_hackernews(
+    raw_payload: dict[str, Any], snapshot_ref: str
+) -> list[Evidence]:
+    title = raw_payload.get("title", "")
+    points = raw_payload.get("points")
+    num_comments = raw_payload.get("num_comments")
+    discussion_url = raw_payload.get("discussion_url") or raw_payload.get("url", "")
+    rank = raw_payload.get("bucket_rank") or raw_payload.get("rank")
+
+    entity_candidates = _extract_title_keywords(title)
+    if not entity_candidates:
+        return []
+
+    return [
+        Evidence(
+            evidence_id=_gen_id(),
+            source="hackernews",
+            source_tier=2,
+            collected_at=datetime.now(timezone.utc).isoformat(),
+            entity_candidates=entity_candidates,
+            signal_type="developer_discussion",
+            title_or_label=title,
+            metric_value=float(points) if points is not None else None,
+            metric_delta=float(num_comments) if num_comments is not None else None,
+            rank=int(rank) if rank is not None else None,
+            geo="global",
+            url_or_ref=discussion_url,
+            raw_snapshot_ref=snapshot_ref,
+            trust_score=0.75,
+            tos_risk="low",
+            freshness_ttl=21600,
+        )
+    ]
+
+
 @register_normalizer("naver_datalab")
 def _normalize_naver_datalab(
     raw_payload: dict[str, Any], snapshot_ref: str
@@ -407,6 +443,71 @@ def _normalize_similarweb_movers(
             url_or_ref=url or f"https://{domain}" if domain else "",
             raw_snapshot_ref=snapshot_ref,
             trust_score=0.6,
+            tos_risk="medium",
+            freshness_ttl=3600,
+        )
+    ]
+
+
+@register_normalizer("polymarket_markets")
+def _normalize_polymarket_markets(
+    raw_payload: dict[str, Any], snapshot_ref: str
+) -> list[Evidence]:
+    question = raw_payload.get("question") or raw_payload.get("event_title") or ""
+    probability = raw_payload.get("probability_yes")
+    if probability is None:
+        probability = raw_payload.get("best_outcome_probability")
+    price_change = raw_payload.get("price_change_1d")
+    rank = raw_payload.get("market_rank") or raw_payload.get("rank")
+    liquidity = raw_payload.get("liquidity") or 0
+    url = raw_payload.get("event_url") or raw_payload.get("url", "")
+
+    entity_candidates = _extract_title_keywords(question)
+    for tag in raw_payload.get("tags", []):
+        if len(entity_candidates) >= 4:
+            break
+        candidate = str(tag or "").strip()
+        if not candidate or candidate in entity_candidates:
+            continue
+        if candidate.lower() in _STOP_WORDS or candidate.lower() in _GENERIC_TITLE_WORDS:
+            continue
+        entity_candidates.append(candidate)
+
+    if not entity_candidates:
+        return []
+
+    trust_score = 0.55
+    try:
+        numeric_liquidity = float(liquidity)
+    except (TypeError, ValueError):
+        numeric_liquidity = 0.0
+    if numeric_liquidity >= 100000:
+        trust_score = 0.8
+    elif numeric_liquidity >= 10000:
+        trust_score = 0.7
+    elif numeric_liquidity >= 1000:
+        trust_score = 0.6
+
+    label = question
+    if probability is not None:
+        label = f"{question} ({float(probability):.1f}%)"
+
+    return [
+        Evidence(
+            evidence_id=_gen_id(),
+            source="polymarket_markets",
+            source_tier=2,
+            collected_at=datetime.now(timezone.utc).isoformat(),
+            entity_candidates=entity_candidates,
+            signal_type="prediction_market",
+            title_or_label=label,
+            metric_value=float(probability) if probability is not None else None,
+            metric_delta=float(price_change) if price_change is not None else None,
+            rank=int(rank) if rank is not None else None,
+            geo="global",
+            url_or_ref=url,
+            raw_snapshot_ref=snapshot_ref,
+            trust_score=trust_score,
             tos_risk="medium",
             freshness_ttl=3600,
         )

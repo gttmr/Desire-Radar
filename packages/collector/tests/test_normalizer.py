@@ -153,9 +153,60 @@ class TestManualObservationNormalizer:
         assert ev.trust_score == 1.0
 
 
+class TestHackerNewsNormalizer:
+    def test_normalize_hackernews_thread(self):
+        raw = {
+            "title": "Show HN: Acme AI Copilot",
+            "points": 42,
+            "num_comments": 11,
+            "discussion_url": "https://news.ycombinator.com/item?id=1001",
+            "bucket_rank": 1,
+        }
+        results = normalize("hackernews", raw, "snap_hn_001")
+
+        assert len(results) == 1
+        ev = results[0]
+        assert ev.source == "hackernews"
+        assert ev.signal_type == "developer_discussion"
+        assert ev.metric_value == 42.0
+        assert ev.metric_delta == 11.0
+        assert ev.rank == 1
+        assert "Acme" in ev.entity_candidates
+        assert "AI" in ev.entity_candidates
+        assert ev.url_or_ref == "https://news.ycombinator.com/item?id=1001"
+
+
+class TestPolymarketNormalizer:
+    def test_normalize_polymarket_market(self):
+        raw = {
+            "question": "Will OpenAI have the best AI model by June 2026?",
+            "probability_yes": 61.0,
+            "price_change_1d": 7.0,
+            "market_rank": 1,
+            "liquidity": 150000.0,
+            "event_url": "https://polymarket.com/event/best-ai-model",
+            "tags": ["OpenAI", "Tech"],
+        }
+        results = normalize("polymarket_markets", raw, "snap_pm_001")
+
+        assert len(results) == 1
+        ev = results[0]
+        assert ev.source == "polymarket_markets"
+        assert ev.signal_type == "prediction_market"
+        assert ev.metric_value == 61.0
+        assert ev.metric_delta == 7.0
+        assert ev.rank == 1
+        assert "OpenAI" in ev.entity_candidates
+        assert "AI" in ev.entity_candidates
+        assert ev.trust_score == 0.8
+        assert ev.url_or_ref == "https://polymarket.com/event/best-ai-model"
+
+
 class TestUnknownSource:
     def test_registry_exposes_known_normalizer_keys(self):
         assert "google_trends" in DEFAULT_NORMALIZER_REGISTRY.keys()
+        assert "hackernews" in DEFAULT_NORMALIZER_REGISTRY.keys()
+        assert "polymarket_markets" in DEFAULT_NORMALIZER_REGISTRY.keys()
         assert "reddit_mentions" in DEFAULT_NORMALIZER_REGISTRY.keys()
 
     def test_unknown_source_returns_empty(self):

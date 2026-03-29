@@ -144,6 +144,8 @@ collector source gate 해석:
 현재 기본 public-first pull 세트:
 - `app_store_top_charts`
 - `google_trends`
+- `hackernews`
+- `polymarket_markets`
 - `steamdb_top_sellers`
 - `similarweb_movers`
 
@@ -151,6 +153,10 @@ collector source gate 해석:
 - `reddit_mentions`: Reddit OAuth credential 필요
 - `naver_datalab`: Naver API credential 준비 후 enable
 - `tiktok_creative_center`: public endpoint 안정성 검증 전 기본 disabled
+
+추가 public pull source 메모:
+- `hackernews`: Algolia public API 사용, `HACKERNEWS_TAGS`/`HACKERNEWS_HITS_PER_TAG`/`HACKERNEWS_COMMENT_ENRICH_LIMIT`로 버킷과 enrichment 범위를 조절
+- `polymarket_markets`: Gamma public search 사용, `POLYMARKET_SEARCH_QUERIES`/`POLYMARKET_PAGES_PER_QUERY`로 active market discovery 범위를 조절
 
 `reddit_mentions`는 Reddit OAuth Data API를 전제로 한다. 아래 중 하나가 없으면 source는 `auth_not_configured` warning과 함께 skip된다.
 
