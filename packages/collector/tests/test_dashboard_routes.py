@@ -176,7 +176,9 @@ def test_dashboard_overview_returns_runtime_data(tmp_path, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["health"]["service"] == "collector"
+    assert payload["health"]["ready_source_count"] >= 1
     assert any(source["source_id"] == "enabled_pull" for source in payload["sources"])
+    assert payload["sources"][0]["readiness_status"] == "ready"
     assert payload["candidates"][0]["entity"] == "Cursor"
     assert payload["recent_evidence"][0]["title_or_label"] == "Cursor demand rising"
     assert payload["submissions"][0]["submission_id"] == "sub-1"

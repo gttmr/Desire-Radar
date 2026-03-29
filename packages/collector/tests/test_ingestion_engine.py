@@ -121,6 +121,37 @@ class SlowProcessingConnector(BaseConnector):
         ]
 
 
+class IncrementalConnector(BaseConnector):
+    name = "incremental_pull"
+    cadence_seconds = 60
+    source_tier = 2
+    fetch_strategy = "incremental"
+
+    async def fetch(self) -> list[RawPayload]:
+        return [
+            RawPayload(
+                source=self.name,
+                data={"id": "post-1", "title": "Cursor demand rising", "entities": ["Cursor"]},
+                request_params={},
+                url_or_ref="",
+            )
+        ]
+
+    def payload_identity(self, payload: RawPayload) -> str | None:
+        data = payload.data if isinstance(payload.data, dict) else {}
+        identifier = str(data.get("id") or "").strip()
+        return identifier or None
+
+
+class EmptyConnector(BaseConnector):
+    name = "empty_pull"
+    cadence_seconds = 60
+    source_tier = 2
+
+    async def fetch(self) -> list[RawPayload]:
+        return []
+
+
 class StubAnalysisEngine:
     def __init__(self) -> None:
         self.calls = 0
@@ -1060,3 +1091,59 @@ async def test_human_input_inbox_completes_command_only_input_without_evidence(t
     assert stored.metadata["classification"]["route"] == "none"
     assert stored.metadata["classification"]["action_requests"][0]["ticker"] == "005930"
     assert registry.status()["human_input_inbox"]["pending_submissions"] == 0
+
+
+@pytest.mark.asyncio
+async def test_incremental_source_uses_checkpoint_and_marks_no_new_payloads(tmp_path):
+    connectors = {IncrementalConnector.name: IncrementalConnector()}
+    registry = SourceRegistry(
+        str(tmp_path / "sources.json"),
+        build_default_sources(connectors),
+    )
+    engine = IngestionEngine(
+        source_registry=registry,
+        submission_store=SubmissionStore(str(tmp_path / "submissions.json")),
+        snapshot_store=RawSnapshotStore(str(tmp_path / "snapshots")),
+        evidence_sink=EvidenceSink(),
+        entity_resolver=EntityResolver(EntityStore(str(tmp_path / "entities.json"))),
+        normalizer_fn=_normalizer,
+        connectors=connectors,
+        analysis_engine=StubAnalysisEngine(),
+    )
+
+    first = await engine.run_source("incremental_pull")
+    second = await engine.run_source("incremental_pull")
+
+    assert first.status == "completed"
+    assert len(first.evidence_ids) == 1
+    assert second.status == "completed"
+    assert second.metadata["quality_status"] == "completed_with_warnings"
+    assert "checkpoint_filtered_duplicates" in second.metadata["quality_warnings"]
+    runtime = engine.get_runtime_status()["sources"]["incremental_pull"]
+    assert runtime["fetch_strategy"] == "incremental"
+    assert runtime["last_cursor"] == "post-1"
+
+
+@pytest.mark.asyncio
+async def test_empty_payload_source_marks_quality_degraded(tmp_path):
+    connectors = {EmptyConnector.name: EmptyConnector()}
+    registry = SourceRegistry(
+        str(tmp_path / "sources.json"),
+        build_default_sources(connectors),
+    )
+    engine = IngestionEngine(
+        source_registry=registry,
+        submission_store=SubmissionStore(str(tmp_path / "submissions.json")),
+        snapshot_store=RawSnapshotStore(str(tmp_path / "snapshots")),
+        evidence_sink=EvidenceSink(),
+        entity_resolver=EntityResolver(EntityStore(str(tmp_path / "entities.json"))),
+        normalizer_fn=_normalizer,
+        connectors=connectors,
+        analysis_engine=StubAnalysisEngine(),
+    )
+
+    record = await engine.run_source("empty_pull")
+
+    assert record.status == "completed"
+    assert record.metadata["quality_status"] == "quality_degraded"
+    assert "empty_payloads" in record.metadata["quality_warnings"]

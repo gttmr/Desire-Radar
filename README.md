@@ -160,6 +160,7 @@ docker compose up --build
 - `http://localhost:5002/dashboard`
 - source enable/disable, tier 변경, source run, source-agent run, 최근 evidence/submission/candidate 조회를 한 화면에서 볼 수 있다.
 - source row에는 현재 stage, 마지막 outcome, payload/evidence counters, warning/failure, source-agent status/error가 함께 보여서 “fetch가 느린지 / 부분 실패인지 / source-agent 후처리만 남았는지”를 구분할 수 있다.
+- source row에는 `readiness_status`, `fetch_strategy`, `freshness_lag_seconds`, `quality_status`, 최근 run 요약도 같이 보여서 “지금 queue 가능한지 / checkpoint가 있는지 / 최근 품질이 무너졌는지”를 함께 해석할 수 있다.
 - source별 `packages/collector/src/agents/sources/*.md` 프롬프트를 대시보드에서 수정할 수 있다.
 - allowlist 된 일부 collector `.env` 값도 편집할 수 있다.
 - `.env` 저장 후 collector 재기동 전까지는 startup-time 설정이 즉시 반영되지 않는다.
@@ -248,7 +249,7 @@ collector는 이를 `human_input_inbox` source로 받고 다음을 판단한다.
 
 `POST /collect/run` 기본 의미:
 - connector를 지정하지 않으면 현재 `enabled=true` 인 pull source만 queue에 넣는다.
-- disabled source는 자동 skip 하며 응답에 `queued_sources`, `skipped_sources`, `skipped_disabled_count`가 포함된다.
+- disabled source와 `readiness_status!=ready` 인 source는 자동 skip 하며 응답에 `queued_sources`, `skipped_sources`, `skipped_disabled_count`가 포함된다.
 - disabled connector를 명시하면 500이 아니라 structured `409`를 반환한다.
 
 ### Collector internal
@@ -304,7 +305,8 @@ source-agent timeout 전략:
 - provider session은 provider/phase/agent/run 단위 디렉터리에 유지되고, request/response artifact를 turn별 JSON으로 기록한다.
 - direct stdout 회수가 불안정하거나 future bridge가 필요하면 provider별 `external_injection` transport로 전환할 수 있다.
 - collector source run은 기본적으로 queue 기반 비동기 실행이다. 장시간 수집은 `submission_id`와 `/sources/status`, `/runtime/status`로 추적한다.
-- `sources/status`와 `runtime/status`는 `last_failure_kind`, `partial_failure_count`, `last_warning_kind`, `last_warning_message` 같은 partial failure metadata도 함께 보여준다.
+- `sources/status`와 `runtime/status`는 `readiness_status`, `readiness_reason`, `fetch_strategy`, `freshness_lag_seconds`, `quality_status`, `recent_runs`와 함께 `last_failure_kind`, `partial_failure_count`, `last_warning_kind`, `last_warning_message` 같은 partial failure metadata도 함께 보여준다.
+- incremental source는 checkpoint 기반 `last_seen_ids / last_cursor` 상태를 유지해서 같은 payload 재수집 시 duplicate 폭증을 줄인다.
 - collector evidence bundle은 prompt용 요약뿐 아니라 graph snapshot도 같이 만든다.
 
 벤치:

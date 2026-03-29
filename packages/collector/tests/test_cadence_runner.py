@@ -36,6 +36,13 @@ class StubIngestionEngine:
     def __init__(self) -> None:
         self.calls = []
 
+    def get_source_dispatch_state(self, _source_id: str):
+        return {
+            "ready_for_run": True,
+            "reason": None,
+            "readiness_status": "ready",
+        }
+
     async def enqueue_source_run(self, source_id: str, *, metadata=None):
         self.calls.append((source_id, metadata))
 
@@ -68,6 +75,29 @@ async def test_cadence_runner_skips_disabled_sources_at_runtime() -> None:
         connectors={DummyConnector.name: DummyConnector()},
         ingestion_engine=engine,
         source_registry=StubSourceRegistry(enabled=False),
+        bootstrap_on_start=False,
+    )
+
+    await runner._run_wrapper("dummy_pull")
+
+    assert engine.calls == []
+
+
+@pytest.mark.asyncio
+async def test_cadence_runner_skips_not_ready_sources() -> None:
+    class NotReadyEngine(StubIngestionEngine):
+        def get_source_dispatch_state(self, _source_id: str):
+            return {
+                "ready_for_run": False,
+                "reason": "missing_credentials",
+                "readiness_status": "missing_credentials",
+            }
+
+    engine = NotReadyEngine()
+    runner = CadenceRunner(
+        connectors={DummyConnector.name: DummyConnector()},
+        ingestion_engine=engine,
+        source_registry=StubSourceRegistry(),
         bootstrap_on_start=False,
     )
 

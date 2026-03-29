@@ -42,6 +42,11 @@ class SourceValidityEngine:
             if metrics.research_fulfillment_total > 0
             else 0.5
         )
+        quality_issue_rate = (
+            (metrics.quality_degraded_total + metrics.quality_failed_total)
+            / total_runs
+        )
+        quality_failure_rate = metrics.quality_failed_total / total_runs
 
         score = 0.2
         score += (1.0 - failure_rate) * 0.22
@@ -51,11 +56,14 @@ class SourceValidityEngine:
         score += analysis_completion_rate * 0.12
         score += research_usefulness_rate * 0.14
         score -= needs_review_ratio * 0.12
+        score -= quality_issue_rate * 0.14
+        score -= quality_failure_rate * 0.12
         score = max(0.0, min(1.0, score))
 
         if (
             failure_rate >= 0.7
             or score < 0.25
+            or quality_failure_rate >= 0.5
             or (
                 metrics.analysis_candidates_total >= 3
                 and analysis_completion_rate < 0.2
@@ -65,6 +73,7 @@ class SourceValidityEngine:
         elif (
             failure_rate >= 0.4
             or score < 0.45
+            or quality_issue_rate >= 0.35
             or (
                 metrics.research_fulfillment_total >= 2
                 and research_usefulness_rate < 0.35
@@ -84,7 +93,8 @@ class SourceValidityEngine:
                 "High failure/noise or weak downstream usefulness detected "
                 f"(failure_rate={failure_rate:.2f}, dedupe_ratio={dedupe_ratio:.2f}, "
                 f"analysis_completion_rate={analysis_completion_rate:.2f}, "
-                f"research_usefulness_rate={research_usefulness_rate:.2f})."
+                f"research_usefulness_rate={research_usefulness_rate:.2f}, "
+                f"quality_issue_rate={quality_issue_rate:.2f})."
             )
         elif status == "healthy" and score > 0.92 and source.configured_tier > 1:
             recommended_tier = max(1, source.configured_tier - 1)

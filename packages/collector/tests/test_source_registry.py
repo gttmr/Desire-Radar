@@ -84,6 +84,8 @@ def test_source_registry_surfaces_selection_metadata(tmp_path):
     assert status["request_kinds_supported"] == ["run_source"]
     assert status["normalizer_key"] == "alpha"
     assert status["manifest_path"] is None
+    assert status["readiness_status"] == "ready"
+    assert status["fetch_strategy"] == "full_snapshot"
     assert status["agent_enabled"] is False
     assert status["agent_prompt_path"] is None
     assert status["agent_session_domain"] is None
@@ -142,3 +144,25 @@ def test_source_registry_tracks_partial_failure_metadata(tmp_path):
     assert status["partial_failure_count"] == 2
     assert status["last_warning_kind"] == "http_403_blocked"
     assert status["last_warning_message"] == "Failed to fetch r/gadgets: HTTP 403"
+
+
+def test_source_registry_tracks_readiness_and_quality_metadata(tmp_path):
+    registry = SourceRegistry(str(tmp_path / "sources.json"), _defaults())
+
+    registry.set_readiness("alpha", "missing_credentials", "API key missing")
+    registry.set_fetch_strategy("alpha", "incremental")
+    registry.record_processing(
+        "alpha",
+        success=True,
+        quality_status="quality_degraded",
+        is_run=True,
+    )
+
+    status = registry.status()["alpha"]
+    catalog = {item["source_id"]: item for item in registry.catalog()}
+
+    assert status["readiness_status"] == "missing_credentials"
+    assert status["readiness_reason"] == "API key missing"
+    assert status["fetch_strategy"] == "incremental"
+    assert status["last_quality_status"] == "quality_degraded"
+    assert catalog["alpha"]["last_quality_status"] == "quality_degraded"

@@ -211,6 +211,15 @@ async def run_source(source_id: str, body: RunSourceRequest | None = None) -> di
             status_code=status.HTTP_409_CONFLICT,
             detail={"reason": "missing_connector_adapter", "source_id": source_id},
         )
+    dispatch_state = ingestion_engine.get_source_dispatch_state(source_id)
+    if not dispatch_state["ready_for_run"]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "reason": dispatch_state["reason"],
+                "source_id": source_id,
+            },
+        )
     metadata = dict(body.metadata) if body else {}
     metadata.setdefault("trigger", "manual")
     if body and body.wait_for_completion:

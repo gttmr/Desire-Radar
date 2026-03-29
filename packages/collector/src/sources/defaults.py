@@ -57,6 +57,9 @@ def _definition_from_manifest(
         request_kinds_supported=list(manifest.request_kinds_supported),
         normalizer_key=manifest.normalizer_key,
         manifest_path=manifest.manifest_path,
+        readiness_status=manifest.readiness_status or "ready",
+        readiness_reason=manifest.readiness_reason,
+        fetch_strategy=manifest.fetch_strategy or "full_snapshot",
         agent_enabled=(
             manifest.agent_enabled
             if manifest.agent_enabled is not None
@@ -85,6 +88,7 @@ def _connector_default_source(name: str, connector: BaseConnector) -> SourceDefi
         capabilities=["validation"],
         request_kinds_supported=["run_source"],
         normalizer_key=name,
+        fetch_strategy=getattr(connector, "fetch_strategy", "full_snapshot"),
         agent_enabled=True,
         agent_prompt_path=get_source_agent_prompt_path(name),
         agent_session_domain=_default_agent_session_domain(name),

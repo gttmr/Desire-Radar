@@ -79,6 +79,7 @@ Important property:
 - raw snapshots and provenance remain intact even when analysis layers add derived fields.
 - long-running source collection should not block request/health handling; source execution is queued and runtime state is observable separately
 - source status should expose partial-failure metadata instead of collapsing mixed outcomes into a binary success/failure view
+- source operability is not just `enabled/runnable`; collector also tracks `readiness_status`, fetch strategy, checkpoint/watermark state, quality status, and recent run history
 - source-agents may enrich a source submission, but they do not replace raw evidence or make final investment judgments
 - queued pull runs may complete raw evidence persistence and candidate enqueue before source-agent enrichment finishes; source-agent completion is tracked separately via `source_agent_status`
 

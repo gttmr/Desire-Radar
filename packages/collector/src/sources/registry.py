@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timezone
 from typing import Literal
 
-from .models import SourceDefinition
+from .models import FetchStrategy, SourceDefinition, SourceReadinessStatus
 from .validity import SourceValidityEngine
 
 
@@ -65,6 +65,35 @@ class SourceRegistry:
         self._save()
         return source.model_copy(deep=True)
 
+    def set_readiness(
+        self,
+        source_id: str,
+        readiness_status: SourceReadinessStatus,
+        readiness_reason: str | None = None,
+    ) -> SourceDefinition:
+        source = self._sources[source_id]
+        if (
+            source.readiness_status == readiness_status
+            and source.readiness_reason == readiness_reason
+        ):
+            return source.model_copy(deep=True)
+        source.readiness_status = readiness_status
+        source.readiness_reason = readiness_reason
+        self._save()
+        return source.model_copy(deep=True)
+
+    def set_fetch_strategy(
+        self,
+        source_id: str,
+        fetch_strategy: FetchStrategy,
+    ) -> SourceDefinition:
+        source = self._sources[source_id]
+        if source.fetch_strategy == fetch_strategy:
+            return source.model_copy(deep=True)
+        source.fetch_strategy = fetch_strategy
+        self._save()
+        return source.model_copy(deep=True)
+
     def record_submission(self, source_id: str) -> None:
         source = self._sources[source_id]
         source.metrics.submissions_total += 1
@@ -88,6 +117,7 @@ class SourceRegistry:
         warning_kind: str | None = None,
         warning_message: str | None = None,
         warning_count: int = 0,
+        quality_status: str | None = None,
         is_run: bool = False,
         is_submission: bool = False,
     ) -> None:
@@ -116,6 +146,14 @@ class SourceRegistry:
                 source.metrics.last_warning_kind = None
                 source.metrics.last_warning_message = None
                 source.metrics.last_warning_count = 0
+        if quality_status is not None:
+            source.metrics.last_quality_status = quality_status
+            if quality_status == "completed_with_warnings":
+                source.metrics.completed_with_warnings_total += 1
+            elif quality_status == "quality_degraded":
+                source.metrics.quality_degraded_total += 1
+            elif quality_status == "quality_failed":
+                source.metrics.quality_failed_total += 1
 
         source.metrics.snapshot_total += snapshot_total
         source.metrics.deduped_snapshot_total += deduped_snapshot_total
@@ -208,6 +246,9 @@ class SourceRegistry:
                 "request_kinds_supported": source.request_kinds_supported,
                 "normalizer_key": source.normalizer_key,
                 "manifest_path": source.manifest_path,
+                "readiness_status": source.readiness_status,
+                "readiness_reason": source.readiness_reason,
+                "fetch_strategy": source.fetch_strategy,
                 "agent_enabled": source.agent_enabled,
                 "agent_prompt_path": source.agent_prompt_path,
                 "agent_session_domain": source.agent_session_domain,
@@ -215,6 +256,7 @@ class SourceRegistry:
                 "last_agent_run": source.metrics.last_agent_run,
                 "last_agent_status": source.metrics.last_agent_status,
                 "last_agent_error": source.metrics.last_agent_error,
+                "last_quality_status": source.metrics.last_quality_status,
             }
             for source in self._sources.values()
         ]
@@ -254,6 +296,9 @@ class SourceRegistry:
                 "request_kinds_supported": source.request_kinds_supported,
                 "normalizer_key": source.normalizer_key,
                 "manifest_path": source.manifest_path,
+                "readiness_status": source.readiness_status,
+                "readiness_reason": source.readiness_reason,
+                "fetch_strategy": source.fetch_strategy,
                 "agent_enabled": source.agent_enabled,
                 "agent_prompt_path": source.agent_prompt_path,
                 "agent_session_domain": source.agent_session_domain,
@@ -261,6 +306,7 @@ class SourceRegistry:
                 "last_agent_run": source.metrics.last_agent_run,
                 "last_agent_status": source.metrics.last_agent_status,
                 "last_agent_error": source.metrics.last_agent_error,
+                "last_quality_status": source.metrics.last_quality_status,
             }
             for source in self._sources.values()
         }
@@ -303,6 +349,9 @@ class SourceRegistry:
             current.request_kinds_supported = list(default.request_kinds_supported)
             current.normalizer_key = default.normalizer_key
             current.manifest_path = default.manifest_path
+            current.readiness_status = default.readiness_status
+            current.readiness_reason = default.readiness_reason
+            current.fetch_strategy = default.fetch_strategy
             current.agent_enabled = default.agent_enabled
             current.agent_prompt_path = default.agent_prompt_path
             current.agent_session_domain = default.agent_session_domain

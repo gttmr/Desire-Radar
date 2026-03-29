@@ -93,6 +93,7 @@ from .source_agents.runner import SourceAgentRunner
 from .store.entity_store import EntityStore
 from .store.evidence_sink import EvidenceSink
 from .store.raw_snapshot_store import RawSnapshotStore
+from .store.source_run_state_store import SourceRunStateStore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -125,6 +126,9 @@ async def lifespan(app: FastAPI):
     )
     source_agent_artifact_store = SourceAgentArtifactStore(
         path=os.path.join(DATA_DIR, "source_agent_artifacts.json")
+    )
+    source_run_state_store = SourceRunStateStore(
+        path=os.path.join(DATA_DIR, "source_runs.json")
     )
     submission_store = SubmissionStore(
         path=os.path.join(DATA_DIR, "submissions.json")
@@ -282,6 +286,7 @@ async def lifespan(app: FastAPI):
         analysis_engine=analysis_engine,
         human_input_router=human_input_router,
         source_agent_runner=source_agent_runner,
+        source_run_state_store=source_run_state_store,
         source_run_worker_concurrency=SOURCE_RUN_WORKER_CONCURRENCY,
     )
     ingestion_engine_instance = ingestion_engine
@@ -332,6 +337,7 @@ async def lifespan(app: FastAPI):
         "analysis_store": analysis_store,
         "source_agent_runner": source_agent_runner,
         "source_agent_artifact_store": source_agent_artifact_store,
+        "source_run_state_store": source_run_state_store,
         "analysis_engine": analysis_engine,
         "submission_store": submission_store,
         "ingestion_engine": ingestion_engine,
@@ -412,4 +418,6 @@ async def health() -> dict:
         "source_run_queue_size": runtime["source_run_queue_size"],
         "active_source_count": runtime["active_source_count"],
         "source_run_worker_concurrency": runtime["source_run_worker_concurrency"],
+        "ready_source_count": runtime.get("ready_source_count", 0),
+        "not_ready_source_count": runtime.get("not_ready_source_count", 0),
     }

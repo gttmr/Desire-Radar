@@ -1,5 +1,9 @@
 # Collector Data Quality Plan
 
+## Implementation Status
+- 2026-03-29: collector는 run 완료 시 `quality_status`와 `quality_warnings`를 submission/runtime/source metrics에 남긴다.
+- 현재는 공통 규칙 + 일부 source-specific floor만 들어가 있고, source별 상세 P0/P1 contract는 추가 보강 대상이다.
+
 ## 품질 목표
 - raw evidence 보존
 - source별 mixed outcome를 binary success/failure로 뭉개지 않기

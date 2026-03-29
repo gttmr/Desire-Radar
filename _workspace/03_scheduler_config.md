@@ -1,5 +1,9 @@
 # Collector Scheduler And Run State Recommendation
 
+## Implementation Status
+- 2026-03-29: scheduler와 manual `collect/run`은 `enabled/runnable` 외에 source `readiness_status`도 같이 본다.
+- `ready`가 아닌 source는 queue 대신 skip reason을 남긴다.
+
 ## 오케스트레이터 선택
 - 유지: APScheduler + collector 내부 queue
 - 교체하지 않음: Airflow 같은 외부 오케스트레이터는 현재 범위 밖

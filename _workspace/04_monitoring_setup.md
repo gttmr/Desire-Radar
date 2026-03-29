@@ -1,5 +1,9 @@
 # Collector Monitoring And Observability Recommendation
 
+## Implementation Status
+- 2026-03-29: `sources/status`, `sources/catalog`, `runtime/status`, collector dashboard source rows에 readiness/freshness/quality/recent run summary가 노출된다.
+- 아직 dedicated alert rule까지는 붙지 않았고, 현재 단계는 operator-facing visibility 강화에 초점을 둔다.
+
 ## 모니터링 목표
 - 지금 왜 멈췄는지 보이기
 - 최근 며칠간 어떤 source가 나빠졌는지 보이기

@@ -135,6 +135,12 @@ curl http://127.0.0.1:5002/runtime/status
 
 `sources/status`에서 source가 오래 `source_agent_analysis` 단계에 머물면 먼저 `LLM_SOURCE_AGENT_TIMEOUT_SECONDS` 값을 확인한다. 기본값은 `60`이며, source-agent가 불안정할 때 collector 전체 수집 시간이 묶이지 않도록 source-agent timeout을 analysis timeout과 분리해 둔다. 기본 실행이 실패하면 collector는 더 작은 `compact` 또는 `minimal` 컨텍스트로 fresh 재시도를 시도한다.
 
+collector source gate 해석:
+- `enabled=false`: 운영자가 꺼 둔 상태
+- `runnable=false`: source 정의상 직접 실행 경로가 없는 상태
+- `readiness_status!=ready`: 지금 queue에 넣지 않는 것이 맞는 상태
+  - 예: `missing_credentials`, `rate_limited`, `dependency_missing`
+
 `reddit_mentions`는 Reddit OAuth Data API를 전제로 한다. 아래 중 하나가 없으면 source는 `auth_not_configured` warning과 함께 skip된다.
 
 - `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` + `REDDIT_REFRESH_TOKEN`
@@ -155,6 +161,7 @@ xdg-open http://127.0.0.1:5002/dashboard
 - allowlist 된 collector `.env` 값 수정
 - candidate 카드는 raw word list보다 canonical cluster/event facet를 우선 보여준다.
 - source row subtext는 현재 stage, 마지막 warning/failure, source-agent error 순으로 보여준다.
+- source row subtext에는 `readiness_status`, `fetch_strategy`, `freshness_lag_seconds`, `quality_status`, recent warning/failure trend도 포함된다.
 
 주의:
 - 대시보드의 `.env` 편집은 파일을 저장하지만, startup-time 설정은 collector 재기동 후 반영된다.
@@ -162,8 +169,8 @@ xdg-open http://127.0.0.1:5002/dashboard
 
 의미:
 - `/health`: 빠른 liveness + analysis/source queue 요약
-- `/sources/status`: source별 enabled/tier/validity + 현재 run state
-- `/runtime/status`: source run queue, worker 수, scheduler 상태
+- `/sources/status`: source별 enabled/tier/validity + readiness + 현재 run state + 최근 quality/run summary
+- `/runtime/status`: source run queue, worker 수, scheduler 상태 + recent run ledger/freshness snapshot
 
 현재 collector는 source run을 request thread에서 직접 끝내지 않는다.
 - `POST /collect/run` 또는 `POST /internal/sources/run/{source_id}`는 기본적으로 source run을 queue에 넣고 즉시 `submission_id`를 반환한다.

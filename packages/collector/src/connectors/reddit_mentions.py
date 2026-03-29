@@ -43,6 +43,7 @@ class RedditMentionsConnector(BaseConnector):
     name = "reddit_mentions"
     cadence_seconds = 3600
     source_tier = 2
+    fetch_strategy = "incremental"
 
     def __init__(
         self,
@@ -164,6 +165,17 @@ class RedditMentionsConnector(BaseConnector):
         if warnings:
             return FetchResult(payloads=payloads, warnings=warnings)
         return payloads
+
+    def readiness(self) -> tuple[str, str | None]:
+        auth_payload, _auth_mode = self._build_auth_payload()
+        if not self.client_id or auth_payload is None:
+            return "missing_credentials", "Reddit OAuth credentials are not configured."
+        return "ready", None
+
+    def payload_identity(self, payload: RawPayload) -> str | None:
+        data = payload.data if isinstance(payload.data, dict) else {}
+        identifier = str(data.get("name") or data.get("id") or "").strip()
+        return identifier or None
 
     async def _get_access_token(self) -> _AccessToken | None:
         if self._token_cache is not None and self._token_cache.expires_at > time.time() + 30:

@@ -42,6 +42,7 @@ class SignalCandidate(BaseModel):
     primary_entity: str | None = None
     aliases: list[str] = Field(default_factory=list)
     supporting_terms: list[str] = Field(default_factory=list)
+    supporting_sources: list[str] = Field(default_factory=list)
     theme_tags: list[str] = Field(default_factory=list)
     event_summary: str | None = None
     graph_summary: str | None = None
@@ -207,6 +208,7 @@ class SignalCandidateBuilder:
                     primary_entity=entity,
                     aliases=sorted(entity_aliases.get(entity, set())),
                     supporting_terms=sorted(entity_supporting_terms.get(entity, set())),
+                    supporting_sources=sources,
                     theme_tags=theme_tags,
                     event_summary=event_summary,
                     graph_summary=graph_summary,

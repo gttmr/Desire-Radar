@@ -19,11 +19,18 @@ from ..normalizer.evidence_schema import Evidence
 from ..resolver.entity_resolver import EntityResolver
 from ..source_agents.runner import SourceAgentRunner
 from ..sources.registry import SourceRegistry
+from ..store.source_run_state_store import (
+    SourceRunLedgerEntry,
+    SourceRunStateStore,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class IngestionEngine:
+    _DEFAULT_LAST_SEEN_ID_LIMIT = 500
+    _DEFAULT_COOLDOWN_SECONDS = 600
+
     def __init__(
         self,
         *,
@@ -37,6 +44,7 @@ class IngestionEngine:
         analysis_engine: AnalysisEngine | None = None,
         human_input_router: HumanInputRouter | None = None,
         source_agent_runner: SourceAgentRunner | None = None,
+        source_run_state_store: SourceRunStateStore | None = None,
         source_run_worker_concurrency: int = 2,
         processing_yield_every: int = 1,
     ) -> None:
@@ -50,6 +58,7 @@ class IngestionEngine:
         self.analysis_engine = analysis_engine
         self.human_input_router = human_input_router
         self.source_agent_runner = source_agent_runner
+        self.source_run_state_store = source_run_state_store or SourceRunStateStore()
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._source_run_queue: asyncio.Queue[str] = asyncio.Queue()
         self._worker: asyncio.Task | None = None
@@ -61,8 +70,11 @@ class IngestionEngine:
         self._source_runtime: dict[str, dict[str, Any]] = {}
         for source in self.source_registry.list():
             self._source_runtime[source.source_id] = self._new_source_runtime()
+            self._refresh_source_contract(source.source_id)
 
     async def start(self) -> None:
+        for source in self.source_registry.list():
+            self._refresh_source_contract(source.source_id)
         self._running = True
         self._worker = asyncio.create_task(self._worker_loop())
         self._source_workers = [
@@ -95,6 +107,38 @@ class IngestionEngine:
                 pass
         self._background_tasks.clear()
 
+    def get_source_dispatch_state(self, source_id: str) -> dict[str, Any]:
+        source = self.source_registry.require(source_id)
+        if not source.enabled:
+            return {
+                "ready_for_run": False,
+                "reason": "source_disabled",
+                "readiness_status": "manual_blocked",
+                "readiness_reason": "Source disabled.",
+            }
+        if not source.runnable:
+            return {
+                "ready_for_run": False,
+                "reason": "source_not_runnable",
+                "readiness_status": source.readiness_status,
+                "readiness_reason": source.readiness_reason,
+            }
+        if source.kind == "pull" and source.adapter_name not in self.connectors:
+            return {
+                "ready_for_run": False,
+                "reason": "missing_connector_adapter",
+                "readiness_status": source.readiness_status,
+                "readiness_reason": source.readiness_reason,
+            }
+        contract = self._refresh_source_contract(source_id)
+        readiness_status = str(contract["readiness_status"])
+        return {
+            "ready_for_run": readiness_status == "ready",
+            "reason": None if readiness_status == "ready" else readiness_status,
+            "readiness_status": readiness_status,
+            "readiness_reason": contract.get("readiness_reason"),
+        }
+
     async def enqueue_source_run(
         self,
         source_id: str,
@@ -104,10 +148,9 @@ class IngestionEngine:
         metadata: dict[str, Any] | None = None,
     ) -> SubmissionRecord:
         source = self.source_registry.require(source_id)
-        if not source.enabled:
-            raise ValueError(f"Source disabled: {source_id}")
-        if not source.runnable:
-            raise ValueError(f"Source is not runnable: {source_id}")
+        dispatch_state = self.get_source_dispatch_state(source_id)
+        if not dispatch_state["ready_for_run"]:
+            raise ValueError(str(dispatch_state["reason"]))
 
         trigger = str((metadata or {}).get("trigger", "manual"))
         record = SubmissionRecord(
@@ -122,6 +165,7 @@ class IngestionEngine:
             metadata={**(metadata or {}), "trigger": trigger},
         )
         self.submission_store.create(record)
+        self._update_run_state(source_id, last_attempt_at=self._now())
         self._mark_source_queued(source_id, record.submission_id, trigger=trigger)
         await self._source_run_queue.put(record.submission_id)
         return record
@@ -389,10 +433,9 @@ class IngestionEngine:
         metadata: dict[str, Any] | None = None,
     ) -> SubmissionRecord:
         source = self.source_registry.require(source_id)
-        if not source.enabled:
-            raise ValueError(f"Source disabled: {source_id}")
-        if not source.runnable:
-            raise ValueError(f"Source is not runnable: {source_id}")
+        dispatch_state = self.get_source_dispatch_state(source_id)
+        if not dispatch_state["ready_for_run"]:
+            raise ValueError(str(dispatch_state["reason"]))
 
         trigger = str((metadata or {}).get("trigger", "manual"))
 
@@ -422,6 +465,7 @@ class IngestionEngine:
                 metadata={**(metadata or {}), "trigger": trigger},
             )
             self.submission_store.create(record)
+        self._update_run_state(source_id, last_attempt_at=self._now())
         return await self._execute_source_run(record)
 
     async def get_submission(self, submission_id: str) -> SubmissionRecord | None:
@@ -431,9 +475,25 @@ class IngestionEngine:
         sources = {}
         active_sources = 0
         for source_id in sorted(self._source_runtime):
-            runtime = self._source_runtime[source_id]
+            runtime = self._refresh_source_contract(source_id)
             snapshot = {
                 "run_state": runtime["run_state"],
+                "readiness_status": runtime["readiness_status"],
+                "readiness_reason": runtime["readiness_reason"],
+                "fetch_strategy": runtime["fetch_strategy"],
+                "freshness_lag_seconds": runtime["freshness_lag_seconds"],
+                "last_attempt_at": runtime["last_attempt_at"],
+                "last_success_at": runtime["last_success_at"],
+                "cooldown_until": runtime["cooldown_until"],
+                "last_cursor": runtime["last_cursor"],
+                "last_rate_limit_reset_at": runtime["last_rate_limit_reset_at"],
+                "quality_status": runtime["quality_status"],
+                "quality_warnings": list(runtime["quality_warnings"]),
+                "watermark_ref": runtime["watermark_ref"],
+                "recent_runs": list(runtime["recent_runs"]),
+                "recent_warning_kinds": list(runtime["recent_warning_kinds"]),
+                "recent_failure_count": runtime["recent_failure_count"],
+                "median_duration_ms": runtime["median_duration_ms"],
                 "queued_runs": runtime["queued_runs"],
                 "active_runs": runtime["active_runs"],
                 "active_submission_ids": list(runtime["active_submission_ids"]),
@@ -469,6 +529,12 @@ class IngestionEngine:
             "source_run_queue_size": self._source_run_queue.qsize(),
             "source_run_worker_concurrency": self._source_run_worker_concurrency,
             "active_source_count": active_sources,
+            "ready_source_count": sum(
+                1 for runtime in sources.values() if runtime["readiness_status"] == "ready"
+            ),
+            "not_ready_source_count": sum(
+                1 for runtime in sources.values() if runtime["readiness_status"] != "ready"
+            ),
             "sources": sources,
         }
 
@@ -543,6 +609,17 @@ class IngestionEngine:
                     )
                 fetch_result = await connector.fetch()
                 payloads, warnings = self._normalize_fetch_result(fetch_result)
+                self._apply_warning_readiness(
+                    running_record.source_id,
+                    warnings,
+                    payloads=payloads,
+                )
+                pre_checkpoint_payload_total = len(payloads)
+                payloads, checkpoint = self._filter_payloads_by_checkpoint(
+                    running_record.source_id,
+                    connector,
+                    payloads,
+                )
                 warning_dicts = [self._warning_to_dict(item) for item in warnings]
                 running = self.submission_store.update(
                     running_record.submission_id,
@@ -551,13 +628,24 @@ class IngestionEngine:
                     metadata={
                         **running_record.metadata,
                         "warnings": warning_dicts,
+                        "watermark_ref": self._checkpoint_ref(running_record.source_id),
+                        "fetch_strategy": getattr(connector, "fetch_strategy", "full_snapshot"),
+                        "filtered_duplicate_count": checkpoint["filtered_duplicate_count"],
+                        "pre_checkpoint_payload_total": pre_checkpoint_payload_total,
                     },
                 )
                 self._update_source_progress(
                     running_record.source_id,
                     running_record.submission_id,
                     stage="processing_payloads",
-                    message=f"fetched {len(payloads)} payloads from connector",
+                    message=(
+                        f"fetched {len(payloads)} payloads from connector"
+                        + (
+                            f" ({checkpoint['filtered_duplicate_count']} skipped by checkpoint)"
+                            if checkpoint["filtered_duplicate_count"] > 0
+                            else ""
+                        )
+                    ),
                     payload_total=len(payloads),
                     payloads_processed=0,
                     snapshot_total=0,
@@ -609,6 +697,22 @@ class IngestionEngine:
                 error_message=str(exc),
                 failure_kind=failure_kind,
             )
+            runtime = self._runtime_for_source(running_record.source_id)
+            self._record_run_ledger(
+                source_id=running_record.source_id,
+                submission_id=running_record.submission_id,
+                started_at=runtime["last_started_at"],
+                finished_at=runtime["last_finished_at"],
+                status="failed",
+                payload_total=runtime["payload_total"],
+                snapshot_total=runtime["snapshot_total"],
+                evidence_total=runtime["evidence_total"],
+                partial_failure_count=runtime["partial_failure_count"],
+                failure_kind=failure_kind,
+                warning_kinds=self._warning_kinds(updated.metadata.get("warnings", [])),
+                source_agent_status=runtime["source_agent_status"],
+                quality_status=runtime["quality_status"],
+            )
             return updated
 
         self._mark_source_finished(
@@ -630,11 +734,43 @@ class IngestionEngine:
             warning_message=self._primary_warning_value(updated.metadata.get("warnings"), "message"),
             warning_targets=self._warning_targets(updated.metadata.get("warnings")),
         )
+        runtime = self._runtime_for_source(running_record.source_id)
+        self._record_run_ledger(
+            source_id=running_record.source_id,
+            submission_id=running_record.submission_id,
+            started_at=runtime["last_started_at"],
+            finished_at=runtime["last_finished_at"],
+            status=runtime["last_outcome"] or updated.status,
+            payload_total=runtime["payload_total"],
+            snapshot_total=runtime["snapshot_total"],
+            evidence_total=runtime["evidence_total"] + runtime["derived_evidence_total"],
+            partial_failure_count=runtime["partial_failure_count"],
+            failure_kind=runtime["last_failure_kind"],
+            warning_kinds=self._warning_kinds(updated.metadata.get("warnings", [])),
+            source_agent_status=runtime["source_agent_status"],
+            quality_status=runtime["quality_status"],
+        )
         return updated
 
     def _new_source_runtime(self) -> dict[str, Any]:
         return {
             "run_state": "idle",
+            "readiness_status": "ready",
+            "readiness_reason": None,
+            "fetch_strategy": "full_snapshot",
+            "freshness_lag_seconds": None,
+            "last_attempt_at": None,
+            "last_success_at": None,
+            "cooldown_until": None,
+            "last_cursor": None,
+            "last_rate_limit_reset_at": None,
+            "quality_status": None,
+            "quality_warnings": [],
+            "watermark_ref": None,
+            "recent_runs": [],
+            "recent_warning_kinds": [],
+            "recent_failure_count": 0,
+            "median_duration_ms": None,
             "queued_runs": 0,
             "active_runs": 0,
             "active_submission_ids": [],
@@ -664,6 +800,154 @@ class IngestionEngine:
             "last_warning_message": None,
             "last_warning_targets": [],
         }
+
+    def _refresh_source_contract(self, source_id: str) -> dict[str, Any]:
+        source = self.source_registry.require(source_id)
+        connector = self.connectors.get(source.adapter_name)
+        fetch_strategy = getattr(connector, "fetch_strategy", source.fetch_strategy)
+        self.source_registry.set_fetch_strategy(source_id, fetch_strategy)
+        state = self.source_run_state_store.ensure_state(
+            source_id,
+            fetch_strategy=fetch_strategy,
+        )
+        readiness_status = "ready"
+        readiness_reason = None
+        now = datetime.now(timezone.utc)
+
+        cooldown_until = self._parse_timestamp(state.cooldown_until)
+        if cooldown_until is not None and cooldown_until > now:
+            readiness_status = (
+                state.readiness_status
+                if state.readiness_status in {"cooldown", "rate_limited"}
+                else "cooldown"
+            )
+            readiness_reason = state.readiness_reason or (
+                f"Cooldown until {cooldown_until.isoformat()}"
+            )
+        elif connector is not None:
+            readiness_status, readiness_reason = connector.readiness()
+
+        self.source_registry.set_readiness(
+            source_id,
+            readiness_status,
+            readiness_reason,
+        )
+        state = self.source_run_state_store.update_state(
+            source_id,
+            fetch_strategy=fetch_strategy,
+            readiness_status=readiness_status,
+            readiness_reason=readiness_reason,
+            cooldown_until=(
+                state.cooldown_until
+                if cooldown_until is not None and cooldown_until > now
+                else None
+            ),
+        )
+        freshness_lag_seconds = self.source_run_state_store.freshness_lag_seconds(source_id)
+        recent = self.source_run_state_store.summarize_recent_runs(source_id)
+        runtime = self._runtime_for_source(source_id)
+        runtime.update(
+            {
+                "readiness_status": readiness_status,
+                "readiness_reason": readiness_reason,
+                "fetch_strategy": fetch_strategy,
+                "freshness_lag_seconds": freshness_lag_seconds,
+                "last_attempt_at": state.last_attempt_at,
+                "last_success_at": state.last_success_at,
+                "cooldown_until": state.cooldown_until,
+                "last_cursor": state.last_cursor,
+                "last_rate_limit_reset_at": state.last_rate_limit_reset_at,
+                "recent_runs": recent["recent_runs"],
+                "recent_warning_kinds": recent["recent_warning_kinds"],
+                "recent_failure_count": recent["recent_failure_count"],
+                "median_duration_ms": recent["median_duration_ms"],
+            }
+        )
+        return runtime
+
+    def _update_run_state(
+        self,
+        source_id: str,
+        **updates: Any,
+    ) -> dict[str, Any]:
+        state = self.source_run_state_store.update_state(source_id, **updates)
+        runtime = self._runtime_for_source(source_id)
+        runtime.update(
+            {
+                "readiness_status": state.readiness_status,
+                "readiness_reason": state.readiness_reason,
+                "fetch_strategy": state.fetch_strategy,
+                "freshness_lag_seconds": self.source_run_state_store.freshness_lag_seconds(source_id),
+                "last_attempt_at": state.last_attempt_at,
+                "last_success_at": state.last_success_at,
+                "cooldown_until": state.cooldown_until,
+                "last_cursor": state.last_cursor,
+                "last_rate_limit_reset_at": state.last_rate_limit_reset_at,
+            }
+        )
+        return runtime
+
+    def _record_run_ledger(
+        self,
+        *,
+        source_id: str,
+        submission_id: str,
+        started_at: str | None,
+        finished_at: str | None,
+        status: str,
+        payload_total: int,
+        snapshot_total: int,
+        evidence_total: int,
+        partial_failure_count: int,
+        failure_kind: str | None,
+        warning_kinds: list[str],
+        source_agent_status: str | None,
+        quality_status: str | None,
+    ) -> None:
+        if not started_at or not finished_at:
+            return
+        start = self._parse_timestamp(started_at)
+        finish = self._parse_timestamp(finished_at)
+        duration_ms = max(0, int((finish - start).total_seconds() * 1000))
+        self.source_run_state_store.append_ledger_entry(
+            SourceRunLedgerEntry(
+                run_id=submission_id,
+                source_id=source_id,
+                submission_id=submission_id,
+                started_at=started_at,
+                finished_at=finished_at,
+                duration_ms=duration_ms,
+                status=status,
+                payload_total=payload_total,
+                snapshot_total=snapshot_total,
+                evidence_total=evidence_total,
+                partial_failure_count=partial_failure_count,
+                failure_kind=failure_kind,
+                warning_kinds=warning_kinds,
+                source_agent_status=source_agent_status,
+                quality_status=quality_status,
+            )
+        )
+        recent = self.source_run_state_store.summarize_recent_runs(source_id)
+        runtime = self._runtime_for_source(source_id)
+        runtime["recent_runs"] = recent["recent_runs"]
+        runtime["recent_warning_kinds"] = recent["recent_warning_kinds"]
+        runtime["recent_failure_count"] = recent["recent_failure_count"]
+        runtime["median_duration_ms"] = recent["median_duration_ms"]
+
+    def _parse_timestamp(self, value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _checkpoint_ref(self, source_id: str) -> str:
+        return f"source-run-state:{source_id}"
 
     def _runtime_for_source(self, source_id: str) -> dict[str, Any]:
         runtime = self._source_runtime.get(source_id)
@@ -813,6 +1097,149 @@ class IngestionEngine:
                 targets.append(normalized)
         return targets[:5]
 
+    def _warning_kinds(self, warnings: list[ConnectorWarning] | list[dict[str, Any]]) -> list[str]:
+        kinds: list[str] = []
+        for item in warnings:
+            if isinstance(item, ConnectorWarning):
+                kind = item.kind
+            elif isinstance(item, dict):
+                kind = item.get("kind")
+            else:
+                kind = None
+            normalized = str(kind or "").strip()
+            if normalized and normalized not in kinds:
+                kinds.append(normalized)
+        return kinds
+
+    def _filter_payloads_by_checkpoint(
+        self,
+        source_id: str,
+        connector: BaseConnector,
+        payloads: list[RawPayload],
+    ) -> tuple[list[RawPayload], dict[str, Any]]:
+        if getattr(connector, "fetch_strategy", "full_snapshot") != "incremental":
+            return payloads, {
+                "seen_ids": [],
+                "filtered_duplicate_count": 0,
+            }
+        state = self.source_run_state_store.ensure_state(
+            source_id,
+            fetch_strategy="incremental",
+        )
+        seen_ids = set(state.last_seen_ids)
+        filtered: list[RawPayload] = []
+        new_seen_ids: list[str] = []
+        filtered_duplicate_count = 0
+        for payload in payloads:
+            payload_id = connector.payload_identity(payload)
+            if payload_id and payload_id not in new_seen_ids:
+                new_seen_ids.append(payload_id)
+            if payload_id and payload_id in seen_ids:
+                filtered_duplicate_count += 1
+                continue
+            filtered.append(payload)
+        return filtered, {
+            "seen_ids": new_seen_ids,
+            "filtered_duplicate_count": filtered_duplicate_count,
+        }
+
+    def _assess_quality(
+        self,
+        *,
+        source_id: str,
+        fetch_strategy: str,
+        payload_total: int,
+        evidence_total: int,
+        resolve_success_total: int,
+        resolve_miss_total: int,
+        warning_items: list[ConnectorWarning],
+        filtered_duplicate_count: int = 0,
+    ) -> tuple[str, list[str]]:
+        quality_warnings: list[str] = []
+        if filtered_duplicate_count > 0:
+            quality_warnings.append("checkpoint_filtered_duplicates")
+        if warning_items:
+            quality_warnings.extend(self._warning_kinds(warning_items))
+        if payload_total <= 0:
+            if fetch_strategy == "incremental" and filtered_duplicate_count > 0:
+                return "completed_with_warnings", quality_warnings or ["no_new_payloads_after_checkpoint"]
+            if warning_items:
+                return "quality_failed", quality_warnings or ["empty_payloads"]
+            return "quality_degraded", ["empty_payloads"]
+        if evidence_total <= 0:
+            if warning_items:
+                return "quality_failed", quality_warnings or ["no_evidence_generated"]
+            return "quality_degraded", ["no_evidence_generated"]
+        resolve_total = resolve_success_total + resolve_miss_total
+        resolve_rate = (
+            resolve_success_total / resolve_total
+            if resolve_total > 0
+            else 1.0
+        )
+        if source_id == "app_store_top_charts" and payload_total < 10:
+            quality_warnings.append("chart_payload_floor_breached")
+            return "quality_degraded", quality_warnings
+        if source_id == "google_trends" and payload_total < 2:
+            quality_warnings.append("geo_series_incomplete")
+            return "quality_degraded", quality_warnings
+        if resolve_rate < 0.2:
+            quality_warnings.append("resolve_rate_low")
+            return "quality_degraded", quality_warnings
+        if warning_items:
+            return "completed_with_warnings", quality_warnings
+        return "ok", quality_warnings
+
+    def _apply_warning_readiness(
+        self,
+        source_id: str,
+        warning_items: list[ConnectorWarning],
+        *,
+        payloads: list[RawPayload] | None = None,
+    ) -> None:
+        warning_kinds = self._warning_kinds(warning_items)
+        if "rate_limited" in warning_kinds:
+            reset_seconds = None
+            for payload in payloads or []:
+                request_params = payload.request_params or {}
+                if "ratelimit_reset_seconds" in request_params:
+                    try:
+                        reset_seconds = int(request_params["ratelimit_reset_seconds"])
+                    except (TypeError, ValueError):
+                        reset_seconds = None
+                    break
+            cooldown_seconds = max(60, min(reset_seconds or self._DEFAULT_COOLDOWN_SECONDS, 3600))
+            cooldown_until = datetime.fromtimestamp(
+                datetime.now(timezone.utc).timestamp() + cooldown_seconds,
+                tz=timezone.utc,
+            ).isoformat()
+            self._update_run_state(
+                source_id,
+                readiness_status="rate_limited",
+                readiness_reason="Source is cooling down after rate limiting.",
+                cooldown_until=cooldown_until,
+                last_rate_limit_reset_at=cooldown_until,
+            )
+            self.source_registry.set_readiness(
+                source_id,
+                "rate_limited",
+                "Source is cooling down after rate limiting.",
+            )
+            return
+        if "auth_not_configured" in warning_kinds or "auth_failed" in warning_kinds:
+            self._update_run_state(
+                source_id,
+                readiness_status="missing_credentials",
+                readiness_reason="Source credentials are missing or invalid.",
+                cooldown_until=None,
+            )
+            self.source_registry.set_readiness(
+                source_id,
+                "missing_credentials",
+                "Source credentials are missing or invalid.",
+            )
+            return
+        self._refresh_source_contract(source_id)
+
     def _update_submission_progress(
         self,
         submission_id: str,
@@ -868,6 +1295,12 @@ class IngestionEngine:
             runtime["source_agent_artifact_id"] = counts["source_agent_artifact_id"]
         if "source_agent_error" in counts:
             runtime["source_agent_error"] = counts.get("source_agent_error")
+        if "quality_status" in counts:
+            runtime["quality_status"] = counts.get("quality_status")
+        if counts.get("quality_warnings") is not None:
+            runtime["quality_warnings"] = list(counts["quality_warnings"])
+        if "watermark_ref" in counts:
+            runtime["watermark_ref"] = counts.get("watermark_ref")
         if counts.get("last_warning_kind") is not None:
             runtime["last_warning_kind"] = counts["last_warning_kind"]
         if counts.get("last_warning_message") is not None:
@@ -938,6 +1371,9 @@ class IngestionEngine:
         resolve_success = 0
         resolve_miss = 0
         warning_items = warnings or []
+        fetch_strategy = source.fetch_strategy
+        filtered_duplicate_count = int(record.metadata.get("filtered_duplicate_count") or 0)
+        watermark_ref = str(record.metadata.get("watermark_ref") or self._checkpoint_ref(source_id))
         progress_update(
             stage="processing_payloads",
             message=f"processing {len(payloads)} raw payloads",
@@ -947,6 +1383,9 @@ class IngestionEngine:
             evidence_total=0,
             resolve_success_total=0,
             resolve_miss_total=0,
+            quality_status=None,
+            quality_warnings=[],
+            watermark_ref=watermark_ref,
             partial_failure_count=len(warning_items),
             last_warning_count=len(warning_items),
             last_warning_targets=[item.target for item in warning_items if item.target][:5],
@@ -1008,6 +1447,16 @@ class IngestionEngine:
                     )
                 await self._maybe_yield_processing(index)
 
+            quality_status, quality_warnings = self._assess_quality(
+                source_id=source_id,
+                fetch_strategy=fetch_strategy,
+                payload_total=len(payloads),
+                evidence_total=len(resolved_evidence_ids),
+                resolve_success_total=resolve_success,
+                resolve_miss_total=resolve_miss,
+                warning_items=warning_items,
+                filtered_duplicate_count=filtered_duplicate_count,
+            )
             progress_update(
                 stage="source_agent_analysis",
                 message="writing evidence and running source agent",
@@ -1015,6 +1464,9 @@ class IngestionEngine:
                 payloads_processed=len(payloads),
                 snapshot_total=len(snapshot_ids),
                 evidence_total=len(resolved_evidence_ids),
+                quality_status=quality_status,
+                quality_warnings=quality_warnings,
+                watermark_ref=watermark_ref,
                 resolve_success_total=resolve_success,
                 resolve_miss_total=resolve_miss,
                 partial_failure_count=len(warning_items),
@@ -1057,6 +1509,9 @@ class IngestionEngine:
                 derived_evidence_total=len(source_agent_evidence),
                 source_agent_status=source_agent_metadata.get("source_agent_status"),
                 source_agent_artifact_id=source_agent_metadata.get("source_agent_artifact_id"),
+                quality_status=quality_status,
+                quality_warnings=quality_warnings,
+                watermark_ref=watermark_ref,
                 resolve_success_total=resolve_success,
                 resolve_miss_total=resolve_miss,
                 partial_failure_count=len(warning_items),
@@ -1075,9 +1530,71 @@ class IngestionEngine:
                 metadata={
                     **record.metadata,
                     "warnings": [self._warning_to_dict(item) for item in warning_items],
+                    "quality_status": quality_status,
+                    "quality_warnings": quality_warnings,
+                    "readiness_status": self._runtime_for_source(source_id)["readiness_status"],
+                    "watermark_ref": watermark_ref,
                     **source_agent_metadata,
                 },
             )
+            connector = self.connectors.get(source.adapter_name)
+            warning_kinds = self._warning_kinds(warning_items)
+            state = self.source_run_state_store.get_state(source_id)
+            if connector is not None and fetch_strategy == "incremental":
+                existing_seen = state.last_seen_ids if state is not None else []
+                payload_seen_ids = [
+                    connector.payload_identity(payload)
+                    for payload in payloads
+                ]
+                merged_seen_ids = [
+                    item for item in [*payload_seen_ids, *existing_seen] if item
+                ]
+                deduped_seen_ids: list[str] = []
+                for item in merged_seen_ids:
+                    normalized = str(item).strip()
+                    if normalized and normalized not in deduped_seen_ids:
+                        deduped_seen_ids.append(normalized)
+                self._update_run_state(
+                    source_id,
+                    last_success_at=self._now(),
+                    last_cursor=deduped_seen_ids[0] if deduped_seen_ids else None,
+                    last_seen_ids=deduped_seen_ids[: self._DEFAULT_LAST_SEEN_ID_LIMIT],
+                    cooldown_until=(
+                        state.cooldown_until
+                        if state is not None and "rate_limited" in warning_kinds
+                        else None
+                    ),
+                    readiness_status=(
+                        state.readiness_status
+                        if state is not None and warning_kinds
+                        else "ready"
+                    ),
+                    readiness_reason=(
+                        state.readiness_reason
+                        if state is not None and warning_kinds
+                        else None
+                    ),
+                )
+            else:
+                self._update_run_state(
+                    source_id,
+                    last_success_at=self._now(),
+                    cooldown_until=(
+                        state.cooldown_until
+                        if state is not None and "rate_limited" in warning_kinds
+                        else None
+                    ),
+                    readiness_status=(
+                        state.readiness_status
+                        if state is not None and warning_kinds
+                        else "ready"
+                    ),
+                    readiness_reason=(
+                        state.readiness_reason
+                        if state is not None and warning_kinds
+                        else None
+                    ),
+                )
             updated = progress_update(
                 stage="completed",
                 message="source processing completed",
@@ -1088,6 +1605,9 @@ class IngestionEngine:
                 derived_evidence_total=len(source_agent_evidence),
                 source_agent_status=source_agent_metadata.get("source_agent_status"),
                 source_agent_artifact_id=source_agent_metadata.get("source_agent_artifact_id"),
+                quality_status=quality_status,
+                quality_warnings=quality_warnings,
+                watermark_ref=watermark_ref,
                 resolve_success_total=resolve_success,
                 resolve_miss_total=resolve_miss,
                 partial_failure_count=len(warning_items),
@@ -1107,6 +1627,7 @@ class IngestionEngine:
                 warning_kind=warning_items[0].kind if warning_items else None,
                 warning_message=warning_items[0].message if warning_items else None,
                 warning_count=len(warning_items),
+                quality_status=quality_status,
                 is_run=is_run,
                 is_submission=is_submission,
             )
@@ -1123,8 +1644,13 @@ class IngestionEngine:
                 metadata={
                     **record.metadata,
                     "warnings": [self._warning_to_dict(item) for item in warning_items],
+                    "quality_status": "quality_failed",
+                    "quality_warnings": self._warning_kinds(warning_items) or ["run_failed"],
+                    "readiness_status": self._runtime_for_source(source_id)["readiness_status"],
+                    "watermark_ref": watermark_ref,
                 },
             )
+            self._update_run_state(source_id, cooldown_until=None)
             updated = progress_update(
                 stage="failed",
                 message=str(exc),
@@ -1132,6 +1658,9 @@ class IngestionEngine:
                 payloads_processed=len(snapshot_ids),
                 snapshot_total=len(snapshot_ids),
                 evidence_total=len(resolved_evidence_ids),
+                quality_status="quality_failed",
+                quality_warnings=self._warning_kinds(warning_items) or ["run_failed"],
+                watermark_ref=watermark_ref,
                 resolve_success_total=resolve_success,
                 resolve_miss_total=resolve_miss,
                 partial_failure_count=len(warning_items),
@@ -1148,6 +1677,7 @@ class IngestionEngine:
                 warning_kind=warning_items[0].kind if warning_items else None,
                 warning_message=warning_items[0].message if warning_items else None,
                 warning_count=len(warning_items),
+                quality_status="quality_failed",
                 is_run=is_run,
                 is_submission=is_submission,
             )

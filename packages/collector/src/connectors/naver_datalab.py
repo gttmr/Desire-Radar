@@ -43,6 +43,11 @@ class NaverDatalabConnector(BaseConnector):
     cadence_seconds = 43200  # 12h
     source_tier = 1
 
+    def readiness(self) -> tuple[str, str | None]:
+        if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+            return "missing_credentials", "NAVER_CLIENT_ID / NAVER_CLIENT_SECRET not set."
+        return "ready", None
+
     async def fetch(self) -> list[RawPayload]:
         if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
             logger.warning(

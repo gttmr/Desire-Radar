@@ -33,6 +33,15 @@ export type CollectorSourceCatalogEntry = {
   request_kinds_supported?: string[];
   normalizer_key?: string | null;
   manifest_path?: string | null;
+  readiness_status?: string | null;
+  readiness_reason?: string | null;
+  fetch_strategy?: 'full_snapshot' | 'incremental';
+  freshness_lag_seconds?: number | null;
+  last_attempt_at?: string | null;
+  last_success_at?: string | null;
+  cooldown_until?: string | null;
+  last_cursor?: string | null;
+  last_rate_limit_reset_at?: string | null;
   agent_enabled?: boolean;
   agent_prompt_path?: string | null;
   agent_session_domain?: string | null;
@@ -40,6 +49,7 @@ export type CollectorSourceCatalogEntry = {
   last_agent_run?: string | null;
   last_agent_status?: string | null;
   last_agent_error?: string | null;
+  last_quality_status?: string | null;
   description?: string | null;
 };
 
@@ -178,6 +188,8 @@ export type SourcesStatusResponse = {
     source_run_queue_size: number;
     source_run_worker_concurrency: number;
     active_source_count: number;
+    ready_source_count?: number;
+    not_ready_source_count?: number;
     scheduled_source_count?: number;
     active_schedules?: number;
     scheduler_enabled?: boolean;

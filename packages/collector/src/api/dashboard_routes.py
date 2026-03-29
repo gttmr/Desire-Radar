@@ -72,6 +72,8 @@ def _health_summary() -> dict[str, Any]:
         "source_run_queue_size": runtime["source_run_queue_size"],
         "active_source_count": runtime["active_source_count"],
         "source_run_worker_concurrency": runtime["source_run_worker_concurrency"],
+        "ready_source_count": runtime.get("ready_source_count", 0),
+        "not_ready_source_count": runtime.get("not_ready_source_count", 0),
     }
 
 
@@ -124,6 +126,8 @@ async def dashboard_overview() -> dict[str, Any]:
             "source_run_queue_size": runtime["source_run_queue_size"],
             "source_run_worker_concurrency": runtime["source_run_worker_concurrency"],
             "active_source_count": runtime["active_source_count"],
+            "ready_source_count": runtime.get("ready_source_count", 0),
+            "not_ready_source_count": runtime.get("not_ready_source_count", 0),
             **cadence_runner.runtime_status(),
         },
         "source_agents": {

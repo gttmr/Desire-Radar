@@ -158,14 +158,11 @@ async def collect_run(body: CollectRunRequest | None = None) -> dict:
         source = registry_map.get(body.connector)
         if source is None:
             raise HTTPException(404, f"Unknown connector: {body.connector}")
+        dispatch_state = ingestion_engine.get_source_dispatch_state(body.connector)
         if source.kind != "pull":
             raise _collect_run_conflict("source_not_pull", body.connector)
-        if not source.enabled:
-            raise _collect_run_conflict("source_disabled", body.connector)
-        if not source.runnable:
-            raise _collect_run_conflict("source_not_runnable", body.connector)
-        if source.adapter_name not in connectors:
-            raise _collect_run_conflict("missing_connector_adapter", body.connector)
+        if not dispatch_state["ready_for_run"]:
+            raise _collect_run_conflict(str(dispatch_state["reason"]), body.connector)
         if async_mode:
             submission = await ingestion_engine.enqueue_source_run(
                 body.connector,
@@ -196,14 +193,9 @@ async def collect_run(body: CollectRunRequest | None = None) -> dict:
     for source_id, source in registry_map.items():
         if source.kind != "pull":
             continue
-        if not source.enabled:
-            skipped_sources[source_id] = "source_disabled"
-            continue
-        if not source.runnable:
-            skipped_sources[source_id] = "source_not_runnable"
-            continue
-        if source.adapter_name not in connectors:
-            skipped_sources[source_id] = "missing_connector_adapter"
+        dispatch_state = ingestion_engine.get_source_dispatch_state(source_id)
+        if not dispatch_state["ready_for_run"]:
+            skipped_sources[source_id] = str(dispatch_state["reason"])
             continue
         if async_mode:
             submission = await ingestion_engine.enqueue_source_run(
@@ -299,6 +291,8 @@ async def get_sources_status() -> dict:
             "source_run_queue_size": runtime["source_run_queue_size"],
             "source_run_worker_concurrency": runtime["source_run_worker_concurrency"],
             "active_source_count": runtime["active_source_count"],
+            "ready_source_count": runtime["ready_source_count"],
+            "not_ready_source_count": runtime["not_ready_source_count"],
             **cadence_runner.runtime_status(),
         },
     }
@@ -308,10 +302,19 @@ async def get_sources_status() -> dict:
 async def get_sources_catalog() -> dict:
     """Return source catalog metadata."""
     registry = _deps["source_registry"]
+    runtime = _deps["ingestion_engine"].get_runtime_status()
     catalog = registry.catalog()
+    runtime_map = runtime.get("sources", {})
+    merged_catalog: list[dict[str, Any]] = []
+    for item in catalog:
+        merged = dict(item)
+        runtime_state = runtime_map.get(item["source_id"])
+        if runtime_state is not None:
+            merged.update(runtime_state)
+        merged_catalog.append(merged)
     return {
-        "count": len(catalog),
-        "sources": {item["source_id"]: item for item in catalog},
+        "count": len(merged_catalog),
+        "sources": {item["source_id"]: item for item in merged_catalog},
     }
 
 

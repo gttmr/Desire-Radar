@@ -16,6 +16,13 @@ class GoogleTrendsConnector(BaseConnector):
     cadence_seconds = 21600  # 6h
     source_tier = 1
 
+    def readiness(self) -> tuple[str, str | None]:
+        try:
+            from pytrends.request import TrendReq  # noqa: F401
+        except ImportError:
+            return "dependency_missing", "pytrends is not installed."
+        return "ready", None
+
     async def fetch(self) -> list[RawPayload]:
         payloads: list[RawPayload] = []
 

@@ -135,7 +135,7 @@ function overviewValues() {
     {
       label: "Sources",
       value: fmtNumber(o.sources?.length || 0),
-      note: `${fmtNumber(runtime.active_source_count || 0)} active`,
+      note: `${fmtNumber(runtime.active_source_count || 0)} active · ${fmtNumber(runtime.ready_source_count || 0)} ready`,
     },
     {
       label: "Source Agents",
@@ -209,14 +209,23 @@ function sourceDetailLines(source) {
     source.request_kinds_supported?.length ? `requests: ${source.request_kinds_supported.join(", ")}` : "",
   ]));
   details.push(compactJoin([
+    source.readiness_status ? `readiness: ${source.readiness_status}` : "",
+    source.fetch_strategy ? `fetch: ${source.fetch_strategy}` : "",
+    typeof source.freshness_lag_seconds === "number" ? `freshness lag ${fmtNumber(source.freshness_lag_seconds)}s` : "",
+  ]));
+  details.push(compactJoin([
     source.current_stage ? `stage: ${source.current_stage}` : "",
-    source.current_stage_message || "",
+    source.current_stage_message || source.readiness_reason || "",
   ]));
   details.push(compactJoin([
     source.last_outcome ? `outcome: ${source.last_outcome}` : "",
     typeof source.payload_total === "number" && source.payload_total > 0 ? `payloads ${source.payloads_processed || 0}/${source.payload_total}` : "",
     typeof source.evidence_total === "number" && source.evidence_total > 0 ? `evidence ${source.evidence_total}` : "",
     typeof source.resolve_miss_total === "number" && source.resolve_miss_total > 0 ? `resolve miss ${source.resolve_miss_total}` : "",
+  ]));
+  details.push(compactJoin([
+    source.quality_status ? `quality: ${source.quality_status}` : "",
+    source.quality_warnings?.length ? `quality warnings: ${source.quality_warnings.slice(0, 3).join(", ")}` : "",
   ]));
   details.push(compactJoin([
     source.source_agent_status ? `agent: ${source.source_agent_status}` : "",
@@ -226,6 +235,11 @@ function sourceDetailLines(source) {
     source.last_warning_kind ? `warning: ${source.last_warning_kind}` : "",
     source.last_warning_targets?.length ? `targets: ${source.last_warning_targets.join(", ")}` : "",
     source.last_failure_kind ? `failure: ${source.last_failure_kind}` : "",
+  ]));
+  details.push(compactJoin([
+    typeof source.median_duration_ms === "number" ? `median ${fmtNumber(source.median_duration_ms)}ms` : "",
+    typeof source.recent_failure_count === "number" && source.recent_failure_count > 0 ? `recent failures ${source.recent_failure_count}` : "",
+    source.recent_warning_kinds?.length ? `recent warnings: ${source.recent_warning_kinds.join(", ")}` : "",
   ]));
   return details.filter(Boolean);
 }

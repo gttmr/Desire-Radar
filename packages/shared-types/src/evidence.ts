@@ -121,6 +121,7 @@ export type SignalCandidate = {
   primary_entity?: string | null;
   aliases?: string[];
   supporting_terms?: string[];
+  supporting_sources?: string[];
   theme_tags?: string[];
   event_summary?: string | null;
   graph_summary?: string | null;
@@ -211,6 +212,15 @@ export type SourceStatus = {
   request_kinds_supported?: string[];
   normalizer_key?: string | null;
   manifest_path?: string | null;
+  readiness_status?: string | null;
+  readiness_reason?: string | null;
+  fetch_strategy?: 'full_snapshot' | 'incremental';
+  freshness_lag_seconds?: number | null;
+  last_attempt_at?: string | null;
+  last_success_at?: string | null;
+  cooldown_until?: string | null;
+  last_cursor?: string | null;
+  last_rate_limit_reset_at?: string | null;
   agent_enabled?: boolean;
   agent_prompt_path?: string | null;
   agent_session_domain?: string | null;
@@ -236,6 +246,13 @@ export type SourceStatus = {
   source_agent_artifact_id?: string | null;
   source_agent_error?: string | null;
   derived_evidence_total?: number;
+  quality_status?: string | null;
+  quality_warnings?: string[];
+  watermark_ref?: string | null;
+  recent_runs?: Array<Record<string, unknown>>;
+  recent_warning_kinds?: string[];
+  recent_failure_count?: number;
+  median_duration_ms?: number | null;
 
   // Legacy / forward-compatible fields.
   source?: string;

@@ -5,7 +5,7 @@
 - submission / provenance / source registry: 양호
 - background source-agent 분리: 양호
 - dashboard 현재 상태 관측성: 개선됨
-- source readiness / checkpoint / quality contract / run history: 부족
+- source readiness / checkpoint / quality contract / run history: 1차 반영 완료
 
 ## 필수 수정
 
@@ -63,12 +63,12 @@
 | downstream handoff | cluster 개선 중 | cluster/event contract 고정 |
 
 ## 운영 준비도 체크리스트
-- [ ] readiness status 정의
-- [ ] scheduler readiness gate
-- [ ] manual collect no-arg readiness skip
-- [ ] source run state store
-- [ ] run ledger store
-- [ ] quality_status metadata
-- [ ] freshness lag metric
+- [x] readiness status 정의
+- [x] scheduler readiness gate
+- [x] manual collect no-arg readiness skip
+- [x] source run state store
+- [x] run ledger store
+- [x] quality_status metadata
+- [x] freshness lag metric
 - [ ] dashboard recent run trend
 - [ ] cluster/event output contract 문서화

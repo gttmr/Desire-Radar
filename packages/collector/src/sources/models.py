@@ -11,6 +11,21 @@ IngestionMode = Literal["raw", "evidence"]
 ValidityStatus = Literal["healthy", "noisy", "degraded", "blocked"]
 RequestKind = Literal["run_source", "submit_agent_evidence", "request_human_note"]
 SourceAgentOutputMode = Literal["artifact_only", "artifact_and_derived"]
+SourceReadinessStatus = Literal[
+    "ready",
+    "missing_credentials",
+    "cooldown",
+    "rate_limited",
+    "manual_blocked",
+    "dependency_missing",
+]
+FetchStrategy = Literal["full_snapshot", "incremental"]
+QualityStatus = Literal[
+    "ok",
+    "completed_with_warnings",
+    "quality_degraded",
+    "quality_failed",
+]
 
 
 class SourceMetrics(BaseModel):
@@ -44,6 +59,10 @@ class SourceMetrics(BaseModel):
     last_agent_status: str | None = None
     last_agent_artifact_id: str | None = None
     last_agent_error: str | None = None
+    completed_with_warnings_total: int = 0
+    quality_degraded_total: int = 0
+    quality_failed_total: int = 0
+    last_quality_status: QualityStatus | None = None
 
 
 class SourceDefinition(BaseModel):
@@ -68,6 +87,9 @@ class SourceDefinition(BaseModel):
     request_kinds_supported: list[RequestKind] = Field(default_factory=list)
     normalizer_key: str | None = None
     manifest_path: str | None = None
+    readiness_status: SourceReadinessStatus = "ready"
+    readiness_reason: str | None = None
+    fetch_strategy: FetchStrategy = "full_snapshot"
     agent_enabled: bool = False
     agent_prompt_path: str | None = None
     agent_session_domain: str | None = None
@@ -91,6 +113,9 @@ class SourceManifest(BaseModel):
     request_kinds_supported: list[RequestKind] = Field(default_factory=list)
     normalizer_key: str | None = None
     manifest_path: str | None = None
+    readiness_status: SourceReadinessStatus | None = None
+    readiness_reason: str | None = None
+    fetch_strategy: FetchStrategy | None = None
     agent_enabled: bool | None = None
     agent_prompt_path: str | None = None
     agent_session_domain: str | None = None

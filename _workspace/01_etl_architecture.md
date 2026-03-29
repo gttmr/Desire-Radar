@@ -1,5 +1,9 @@
 # Collector ETL Architecture Recommendation
 
+## Implementation Status
+- 2026-03-29: `readiness_status`, `fetch_strategy`, source run state store, incremental checkpoint filtering, quality metadata, recent run ledger exposure가 collector core에 반영되었다.
+- 남은 큰 항목은 cluster/event handoff를 downstream 기본 계약으로 더 강하게 고정하는 일이다.
+
 ## 데이터 소스 인벤토리
 
 ### Pull Sources

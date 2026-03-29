@@ -78,6 +78,15 @@ class CadenceRunner:
                     source.runnable if source is not None else None,
                 )
                 return
+            dispatch_state = self.ingestion_engine.get_source_dispatch_state(connector_name)
+            if not dispatch_state["ready_for_run"]:
+                logger.info(
+                    "Skipping scheduled run for %s (reason=%s readiness=%s)",
+                    connector_name,
+                    dispatch_state["reason"],
+                    dispatch_state["readiness_status"],
+                )
+                return
             record = await self.ingestion_engine.enqueue_source_run(
                 connector_name,
                 metadata={"trigger": "scheduled"},
@@ -104,6 +113,7 @@ class CadenceRunner:
         return {
             "scheduled_job_count": len(self._scheduler.get_jobs()),
             "bootstrap_on_start": self.bootstrap_on_start,
+            "scheduler_enabled": True,
         }
 
     def get_status(self) -> dict[str, dict]:

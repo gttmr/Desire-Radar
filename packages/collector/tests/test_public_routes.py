@@ -40,6 +40,9 @@ class DisabledConnector(BaseConnector):
     async def fetch(self):
         return []
 
+    def readiness(self):
+        return "missing_credentials", "disabled pull credentials missing"
+
 
 class StubAnalysisEngine:
     enabled = False
@@ -190,6 +193,17 @@ def test_collect_run_returns_no_enabled_pull_sources_when_all_pull_sources_are_d
     assert detail["skipped_disabled_count"] == 2
 
 
+def test_collect_run_skips_not_ready_sources(tmp_path):
+    client, _, _ = _build_client(tmp_path)
+
+    response = client.post("/collect/run", json={"async_mode": True})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["queued_sources"] == ["enabled_pull"]
+    assert payload["skipped_sources"]["disabled_pull"] == "missing_credentials"
+
+
 def test_internal_run_source_returns_structured_conflict_for_disabled_source(tmp_path):
     client, registry, _ = _build_client(tmp_path)
     registry.set_enabled("disabled_pull", False)
@@ -234,3 +248,4 @@ def test_sources_status_surfaces_source_agent_errors(tmp_path):
     source = response.json()["sources"]["enabled_pull"]
     assert source["last_agent_error"] == "collector codex session failed"
     assert source["source_agent_error"] == "collector codex session failed"
+    assert source["readiness_status"] == "ready"
