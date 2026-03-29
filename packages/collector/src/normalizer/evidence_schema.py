@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class EvidenceEventFrame(BaseModel):
@@ -12,6 +12,8 @@ class EvidenceEventFrame(BaseModel):
 
 
 class EvidenceRelationshipHint(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     from_: str = Field(alias="from")
     to: str
     kind: str

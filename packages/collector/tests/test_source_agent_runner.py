@@ -305,3 +305,43 @@ def test_source_agent_runner_status_surfaces_latest_artifact(tmp_path):
     assert status["agent_enabled"] is True
     assert status["latest_artifact"]["status"] == "completed"
     assert status["session"]["domain"] == "source-agent:reddit_mentions"
+
+
+def test_source_agent_artifact_store_loads_legacy_relationship_hint_field_names(tmp_path):
+    artifact_store_path = tmp_path / "source-agent-artifacts.json"
+    artifact_store_path.write_text(
+        """
+{
+  "artifacts": [
+    {
+      "artifact_id": "artifact-1",
+      "source_id": "reddit_mentions",
+      "submission_id": "submission-1",
+      "status": "completed",
+      "output_mode": "artifact_only",
+      "session_domain": "source-agent:reddit_mentions",
+      "relationship_hints": [
+        {
+          "from_": "google.com",
+          "to": "Cursor",
+          "kind": "traffic_to_product"
+        }
+      ],
+      "derived_evidence_ids": [],
+      "execution_notes": [],
+      "raw_text": "",
+      "usage": {},
+      "created_at": "2026-03-30T00:00:00Z",
+      "updated_at": "2026-03-30T00:00:00Z"
+    }
+  ]
+}
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    store = SourceAgentArtifactStore(str(artifact_store_path))
+
+    artifact = store.get("artifact-1")
+    assert artifact is not None
+    assert artifact.relationship_hints[0].from_ == "google.com"
