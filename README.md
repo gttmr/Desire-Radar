@@ -85,6 +85,7 @@ Discord human input / slash commands
 - `investment_decision`은 `preprocess -> final decision` 2단 구조를 지원한다.
 - 기본 권장값은 `preprocess=cheap profile`, `final=premium profile`이며, provider 우선순위와 model profile은 env로 덮을 수 있다.
 - 전처리 단계는 tool/workspace inspection 없이 request를 loss-aware briefing으로 압축하는 역할만 맡고, 최종 판단 단계가 canonical `response.json`을 만든다.
+- 전처리와 최종 판단은 `<structured_json>...</structured_json>` contract를 기본으로 쓰고, parser는 tagged JSON, fenced JSON, balanced JSON 순으로 복구를 시도한다.
 - `ENABLED_PROVIDERS`가 실제 등록과 health monitoring 대상을 결정하고, `DEFAULT_PROVIDERS`는 그 안에서 실행 우선순위를 결정한다.
 - `OPENAI_API_KEY`만으로는 OpenAI provider가 자동 등록되지 않고, `ENABLED_PROVIDERS`에 `openai`를 넣었을 때만 추가 등록된다.
 - provider session마다 request/response artifact를 JSON으로 남긴다.
@@ -257,6 +258,7 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 - orchestrator는 항상 `request.json`과 `request.md`를 먼저 쓴다.
 - direct CLI 실행도 최종 결과는 `response.json`으로 정규화한다.
 - provider_exec 모드에서 전처리 단계가 켜져 있으면 `prepared_request.*`가 먼저 생성된다.
+- provider raw output 점검은 `provider-attempts/*.json`의 `parse_error`, `parse_strategy`를 같이 본다.
 - `external_artifact` 모드에서는 외부 프로세스가 `request.*`를 읽고 `response.json`을 쓴다.
 - Discord와 scheduled report는 `response.json` 기반 deterministic formatter만 사용한다.
 

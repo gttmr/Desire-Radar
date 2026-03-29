@@ -18,6 +18,44 @@ type GeminiProviderOptions = {
   healthProbeModel?: string;
 };
 
+function extractGeminiTextFragments(value: unknown): string[] {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => extractGeminiTextFragments(item));
+  }
+  if (!value || typeof value !== 'object') {
+    return [];
+  }
+
+  const raw = value as Record<string, unknown>;
+  const fields: unknown[] = [
+    raw.response,
+    raw.text,
+    raw.output_text,
+    raw.content,
+    raw.parts,
+    raw.candidates,
+    raw.message,
+    raw.result,
+  ];
+  return fields.flatMap((field) => extractGeminiTextFragments(field));
+}
+
+function buildGeminiJsonCandidates(output: string): string[] {
+  const trimmed = output.trim();
+  const candidates = [trimmed];
+  for (const line of trimmed.split(/\r?\n/)) {
+    const normalized = line.trim();
+    if (normalized.startsWith('{') || normalized.startsWith('[')) {
+      candidates.push(normalized);
+    }
+  }
+  return [...new Set(candidates.filter(Boolean))];
+}
+
 export function classifyGeminiError(message: string): string {
   if (/MODEL_CAPACITY_EXHAUSTED|RESOURCE_EXHAUSTED|status 429|Too Many Requests/i.test(message)) {
     return 'Gemini reachable but temporarily unavailable (capacity/rate limit).';
@@ -52,18 +90,34 @@ export function extractGeminiPromptResult(stdout: string): string {
     throw new Error('Gemini CLI returned empty output');
   }
 
-  try {
-    const payload = JSON.parse(trimmed) as { response?: string };
-    if (typeof payload.response === 'string' && payload.response.trim()) {
-      return payload.response.trim();
+  for (const candidate of buildGeminiJsonCandidates(trimmed)) {
+    try {
+      const payload = JSON.parse(candidate) as Record<string, unknown>;
+      if (typeof payload.response === 'string' && payload.response.trim()) {
+        return payload.response.trim();
+      }
+
+      const extracted = extractGeminiTextFragments(payload);
+      if (extracted.length > 0) {
+        return extracted.join('\n').trim();
+      }
+
+      if (Object.keys(payload).length === 1 && 'response' in payload) {
+        throw new Error(`Gemini CLI returned empty response payload: ${candidate.slice(0, 500)}`);
+      }
+
+      // Gemini sometimes returns the final structured object directly instead of wrapping it
+      // under a response field. Preserve the raw JSON text so the caller can parse it.
+      return candidate;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Gemini CLI returned')) {
+        throw error;
+      }
+      continue;
     }
-    throw new Error(`Gemini CLI returned empty response payload: ${trimmed.slice(0, 500)}`);
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Gemini CLI returned')) {
-      throw error;
-    }
-    return trimmed;
   }
+
+  return trimmed;
 }
 
 export class GeminiProvider implements ProviderAdapter {

@@ -19,95 +19,14 @@ import {
 } from './prompt-builder.js';
 import type { ProviderHealthProbe } from '../providers/base.js';
 import type { ToolPolicy } from '../providers/base.js';
+import {
+  buildStructuredJsonRetryPrompt,
+  parseStructuredJsonText,
+  type StructuredJsonParseStrategy,
+} from './structured-output.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function stripMarkdownFences(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  return (fenced?.[1] ?? text).trim();
-}
-
-function buildRetryPrompt(originalPrompt: string): string {
-  return [
-    originalPrompt,
-    '---',
-    'Your previous reply was unreadable or invalid JSON.',
-    'Reply again with ONLY one valid JSON object.',
-    'Do not include markdown fences, prose, explanations, or trailing text.',
-  ].join('\n\n');
-}
-
-function summarizeParseError(error: unknown, text: string): string {
-  const message = error instanceof Error ? error.message : String(error);
-  const snippet = text.trim().slice(0, 300).replace(/\s+/g, ' ');
-  if (!snippet) {
-    return `${message} (empty provider response)`;
-  }
-  return `${message} (raw=${snippet})`;
-}
-
-function extractBalancedJson(text: string): string | null {
-  const source = text.trim();
-  for (let start = 0; start < source.length; start += 1) {
-    const opener = source[start];
-    if (opener !== '{' && opener !== '[') {
-      continue;
-    }
-    const closer = opener === '{' ? '}' : ']';
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    for (let index = start; index < source.length; index += 1) {
-      const char = source[index];
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (char === '\\') {
-          escaped = true;
-          continue;
-        }
-        if (char === '"') {
-          inString = false;
-        }
-        continue;
-      }
-      if (char === '"') {
-        inString = true;
-        continue;
-      }
-      if (char === opener) {
-        depth += 1;
-        continue;
-      }
-      if (char === closer) {
-        depth -= 1;
-        if (depth === 0) {
-          return source.slice(start, index + 1);
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function parseJsonText(text: string): unknown {
-  const trimmed = stripMarkdownFences(text);
-  if (!trimmed) {
-    throw new Error('Provider returned an empty response');
-  }
-  try {
-    return JSON.parse(trimmed);
-  } catch (error) {
-    const extracted = extractBalancedJson(trimmed);
-    if (extracted && extracted !== trimmed) {
-      return JSON.parse(extracted);
-    }
-    throw new Error(summarizeParseError(error, trimmed));
-  }
 }
 
 async function writeProviderAttemptArtifact(args: {
@@ -119,6 +38,7 @@ async function writeProviderAttemptArtifact(args: {
   resultStatus: string;
   degradedMessage?: string | null;
   parseError?: string | null;
+  parseStrategy?: StructuredJsonParseStrategy | null;
 }): Promise<void> {
   const attemptsDir = join(args.runDir, 'provider-attempts');
   await mkdir(attemptsDir, { recursive: true });
@@ -132,6 +52,7 @@ async function writeProviderAttemptArtifact(args: {
         status: args.resultStatus,
         degraded_message: args.degradedMessage ?? null,
         parse_error: args.parseError ?? null,
+        parse_strategy: args.parseStrategy ?? null,
         text: args.resultText,
       },
       null,
@@ -709,7 +630,8 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
 
         let parsed: unknown;
         try {
-          parsed = parseJsonText(result.text);
+          const parsedResult = parseStructuredJsonText(result.text);
+          parsed = parsedResult.parsed;
           await writeProviderAttemptArtifact({
             runDir,
             provider: providerName,
@@ -718,6 +640,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
             resultText: result.text,
             resultStatus: result.status,
             degradedMessage: result.degraded_message ?? null,
+            parseStrategy: parsedResult.strategy,
           });
         } catch (parseError) {
           const parseMessage = parseError instanceof Error ? parseError.message : String(parseError);
@@ -733,7 +656,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
           });
 
           const retryResult = await adapter.execute({
-            prompt: buildRetryPrompt(prompt),
+            prompt: buildStructuredJsonRetryPrompt(prompt),
             sessionId: result.sessionId ?? session.provider_session_id ?? undefined,
             logicalSessionId: session.session_id,
             workingDirectory: session.session_dir,
@@ -753,7 +676,8 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
             transportMode,
             transportTarget: session.transport_target ?? null,
           });
-          parsed = parseJsonText(retryResult.text);
+          const parsedResult = parseStructuredJsonText(retryResult.text);
+          parsed = parsedResult.parsed;
           await writeProviderAttemptArtifact({
             runDir,
             provider: providerName,
@@ -762,6 +686,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
             resultText: retryResult.text,
             resultStatus: retryResult.status,
             degradedMessage: retryResult.degraded_message ?? null,
+            parseStrategy: parsedResult.strategy,
           });
           return {
             parsed,

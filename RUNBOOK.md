@@ -237,7 +237,7 @@ curl 'http://127.0.0.1:5003/investment/decisions/runs/<run_id>/report?detail=sum
 - run은 항상 artifact-first다. `request.json`과 `request.md`가 먼저 생성된다.
 - `INVESTMENT_DECISION_RUNNER=provider_exec`면 orchestrator가 직접 provider를 호출한다.
 - `provider_exec`에서 전처리 단계가 켜져 있으면 `prepared_request.json`, `prepared_request.md`, `prepared_request.meta.json`이 먼저 생성된다.
-- `provider_exec` 경로는 provider raw output과 parse error를 `provider-attempts/`에 남긴다.
+- `provider_exec` 경로는 provider raw output, parse error, parse strategy를 `provider-attempts/`에 남긴다.
 - `INVESTMENT_DECISION_RUNNER=external_artifact`면 외부 판단 주체가 `response.json`을 쓸 때까지 polling 한다.
 - 결정 결과와 Discord 리포트는 모두 `response.json`을 기준으로 생성된다.
 
@@ -271,6 +271,7 @@ data/investment-module/equity-map.json
 - provider 우선순위는 `INVESTMENT_DECISION_PREPROCESS_PROVIDERS`, `INVESTMENT_DECISION_FINAL_PROVIDERS`로 따로 바꿀 수 있다.
 - `codex`를 최종 판단에 쓰고, 전처리에는 `codex` cheap 또는 `gemini` cheap을 두는 구성이 가능하다.
 - `codex + cheap`은 현재 model profile 기준으로 `gpt-5.4-mini`를 뜻한다.
+- 전처리와 최종 판단은 `<structured_json>...</structured_json>` 계약을 기본으로 쓰고, parser는 tagged JSON, fenced JSON, balanced JSON 순으로 복구한다.
 - Gemini health probe는 `gemini-2.5-flash`를 명시적으로 사용한다. provider readiness가 실제 decision phase 모델과 동떨어진 default model 때문에 흔들리면 안 된다.
 - 전처리 단계는 기본적으로 `INVESTMENT_DECISION_PREPROCESS_TOOL_POLICY=none`을 권장한다.
 - 최종 판단 단계는 `INVESTMENT_DECISION_FINAL_TOOL_POLICY`로 분리해서 조정할 수 있다.
