@@ -263,6 +263,197 @@ describe('investment decision module', () => {
     expect(artifact.summary).toContain('Buy shortlist');
   });
 
+  it('extracts JSON when the provider wraps it with prose', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'investment-provider-wrapped-'));
+    const registry = new ProviderRegistry();
+    registry.register({
+      name: 'mock',
+      defaultTransportMode: 'cli_exec',
+      async execute() {
+        return {
+          text: [
+            'Here is the final decision artifact.',
+            '```json',
+            JSON.stringify({
+              summary: 'Wrapped shortlist ready',
+              market_view: 'Neutral',
+              top_picks: [],
+              watch_candidates: [],
+              rejected_candidates: [],
+              coverage_gaps: [],
+              risks: [],
+              degraded: false,
+              degraded_reason: null,
+            }),
+            '```',
+          ].join('\n'),
+          sessionId: 'provider-session',
+          durationMs: 120,
+          status: 'completed' as const,
+        };
+      },
+      async health() {
+        return true;
+      },
+      async probeHealth() {
+        return { available: true, ready_for_execution: true, status: 'healthy' as const };
+      },
+    });
+    const runner = new ProviderExecDecisionRunner(
+      registry,
+      new SessionStore(dataDir),
+      new ExecutionPolicyResolver(
+        {
+          defaults: {
+            triage: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
+            debate: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
+            verdict: { providers: ['mock'], modelProfile: 'premium', responseFormat: 'json' },
+            report: { providers: ['mock'], modelProfile: 'balanced', responseFormat: 'json' },
+            investment_decision: {
+              providers: ['mock'],
+              modelProfile: 'premium',
+              responseFormat: 'json',
+            },
+          },
+          agents: {},
+        },
+        {
+          providers: {
+            mock: {
+              cheap: 'mock-cheap',
+              balanced: 'mock-balanced',
+              premium: 'mock-premium',
+            },
+          },
+        },
+        ['mock'],
+      ),
+      { build: async () => 'prompt' } as unknown as InvestmentDecisionPromptBuilder,
+      5_000,
+    );
+
+    const artifact = await runner.run({
+      run: makeRunRecord(dataDir, 'run-wrap'),
+      request: makeRequest('run-wrap'),
+      requestMarkdown: '# request',
+    });
+
+    expect(artifact.status).toBe('completed');
+    expect(artifact.summary).toContain('Wrapped shortlist');
+    const attemptPath = join(
+      dataDir,
+      '2026-03-29',
+      'run-wrap',
+      'provider-attempts',
+      'mock-initial.json',
+    );
+    const attempt = JSON.parse(readFileSync(attemptPath, 'utf8')) as { parse_error: string | null };
+    expect(attempt.parse_error).toBeNull();
+  });
+
+  it('retries once when the initial provider response is invalid JSON', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'investment-provider-retry-'));
+    const registry = new ProviderRegistry();
+    let attempt = 0;
+    registry.register({
+      name: 'mock',
+      defaultTransportMode: 'cli_exec',
+      async execute() {
+        attempt += 1;
+        if (attempt === 1) {
+          return {
+            text: '{"summary":"partial"',
+            sessionId: 'provider-session',
+            durationMs: 120,
+            status: 'completed' as const,
+          };
+        }
+        return {
+          text: JSON.stringify({
+            summary: 'Recovered shortlist',
+            market_view: 'Neutral',
+            top_picks: [],
+            watch_candidates: [],
+            rejected_candidates: [],
+            coverage_gaps: [],
+            risks: [],
+            degraded: false,
+            degraded_reason: null,
+          }),
+          sessionId: 'provider-session',
+          durationMs: 120,
+          status: 'completed' as const,
+        };
+      },
+      async health() {
+        return true;
+      },
+      async probeHealth() {
+        return { available: true, ready_for_execution: true, status: 'healthy' as const };
+      },
+    });
+    const runner = new ProviderExecDecisionRunner(
+      registry,
+      new SessionStore(dataDir),
+      new ExecutionPolicyResolver(
+        {
+          defaults: {
+            triage: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
+            debate: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
+            verdict: { providers: ['mock'], modelProfile: 'premium', responseFormat: 'json' },
+            report: { providers: ['mock'], modelProfile: 'balanced', responseFormat: 'json' },
+            investment_decision: {
+              providers: ['mock'],
+              modelProfile: 'premium',
+              responseFormat: 'json',
+            },
+          },
+          agents: {},
+        },
+        {
+          providers: {
+            mock: {
+              cheap: 'mock-cheap',
+              balanced: 'mock-balanced',
+              premium: 'mock-premium',
+            },
+          },
+        },
+        ['mock'],
+      ),
+      { build: async () => 'prompt' } as unknown as InvestmentDecisionPromptBuilder,
+      5_000,
+    );
+
+    const artifact = await runner.run({
+      run: makeRunRecord(dataDir, 'run-retry'),
+      request: makeRequest('run-retry'),
+      requestMarkdown: '# request',
+    });
+
+    expect(attempt).toBe(2);
+    expect(artifact.summary).toContain('Recovered shortlist');
+    expect(artifact.degraded).toBe(true);
+    const initialAttemptPath = join(
+      dataDir,
+      '2026-03-29',
+      'run-retry',
+      'provider-attempts',
+      'mock-initial.json',
+    );
+    const repairAttemptPath = join(
+      dataDir,
+      '2026-03-29',
+      'run-retry',
+      'provider-attempts',
+      'mock-repair.json',
+    );
+    const initialAttempt = JSON.parse(readFileSync(initialAttemptPath, 'utf8')) as { parse_error: string | null };
+    const repairAttempt = JSON.parse(readFileSync(repairAttemptPath, 'utf8')) as { parse_error: string | null };
+    expect(initialAttempt.parse_error).toContain('raw={\"summary\":\"partial\"');
+    expect(repairAttempt.parse_error).toBeNull();
+  });
+
   it('accepts an external response.json artifact', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'investment-external-'));
     const run = makeRunRecord(dataDir, 'run-3');

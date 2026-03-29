@@ -66,6 +66,9 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
   request.json
   request.md
   status.json
+  provider-attempts/
+    <provider>-initial.json
+    <provider>-repair.json
   response.json
   response.md
   report.md
@@ -73,6 +76,7 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 
 규칙:
 - orchestrator는 항상 `request.json`과 `request.md`를 먼저 쓴다.
+- `provider_exec` 경로는 raw provider output과 parse error를 `provider-attempts/` 아래에 남긴다.
 - direct provider execution도 결과를 `response.json`으로 정규화한다.
 - external mode는 외부 프로세스가 `request.*`를 읽고 `response.json`을 쓴다.
 - Discord와 scheduled report는 `response.json` 기반 formatter만 사용한다.
@@ -238,9 +242,10 @@ flow:
 문제 확인 순서:
 1. `status.json`
 2. `request.json`
-3. `response.json`
-4. `report.md`
-5. 그 다음 provider health 또는 external writer 상태
+3. `provider-attempts/*.json`
+4. `response.json`
+5. `report.md`
+6. 그 다음 provider health 또는 external writer 상태
 
 ## Open Questions
 

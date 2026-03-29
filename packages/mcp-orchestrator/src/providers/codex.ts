@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import type {
   ProviderAdapter,
   ProviderExecutionRequest,
@@ -128,7 +129,7 @@ export class CodexProvider implements ProviderAdapter {
         this.buildExecuteArgs(request),
         undefined,
         request.timeoutMs,
-        request.workingDirectory,
+        undefined,
       );
       const parsed = extractCodexExecResult(output.stdout);
       return {
@@ -260,7 +261,7 @@ export class CodexProvider implements ProviderAdapter {
 
   private buildExecuteArgs(request: ProviderExecutionRequest): string[] {
     const model = request.model;
-    const workingDirectory = request.workingDirectory || '/tmp';
+    const workingDirectory = resolve(request.workingDirectory || '/tmp');
     const isResume = (request.turnCount ?? 0) > 0 && Boolean(request.sessionId);
 
     if (isResume) {

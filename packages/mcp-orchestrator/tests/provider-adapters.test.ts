@@ -70,7 +70,7 @@ warn line
         '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
         '',
       );
-      expect(options.cwd).toBe('/tmp/codex-session');
+      expect(options.cwd).toBeUndefined();
       expect(options.env?.HOME).toBeDefined();
       expect(options.env?.OPENAI_BASE_URL).toBeUndefined();
       expect(options.env?.OPENAI_API_KEY).toBeUndefined();
@@ -106,7 +106,7 @@ warn line
 
   it('resumes codex sessions with the provider session id on later turns', async () => {
     mockExecFile((_file, args, options, callback) => {
-      expect(options.cwd).toBe('/tmp/codex-session');
+      expect(options.cwd).toBeUndefined();
       expect(args).toEqual([
         'exec',
         'resume',
@@ -136,6 +136,40 @@ warn line
 
     expect(result.text).toBe('OK');
     expect(result.sessionId).toBe('thread-123');
+    expect(result.status).toBe('completed');
+  });
+
+  it('resolves codex workdirs to absolute paths for initial executions', async () => {
+    mockExecFile((_file, args, options, callback) => {
+      expect(options.cwd).toBeUndefined();
+      expect(args).toEqual([
+        'exec',
+        '--skip-git-repo-check',
+        '-C',
+        '/mnt/c/Users/ilmas/workspace/Agentic-World/data/provider-sessions/test',
+        '-s',
+        'read-only',
+        '--json',
+        'Reply with exactly OK',
+      ]);
+      callback(
+        null,
+        '{"type":"thread.started","thread_id":"thread-1"}\n{"type":"item.completed","item":{"type":"agent_message","text":"OK"}}\n{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}',
+        '',
+      );
+    });
+
+    const provider = new CodexProvider('codex', 30_000);
+    const result = await provider.execute({
+      prompt: 'Reply with exactly OK',
+      phase: 'investment_decision',
+      agentName: 'investment_decision',
+      modelProfile: 'premium',
+      responseFormat: 'json',
+      workingDirectory: 'data/provider-sessions/test',
+    });
+
+    expect(result.text).toBe('OK');
     expect(result.status).toBe('completed');
   });
 

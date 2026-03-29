@@ -234,6 +234,7 @@ curl 'http://127.0.0.1:5003/investment/decisions/runs/<run_id>/report?detail=sum
 의미:
 - run은 항상 artifact-first다. `request.json`과 `request.md`가 먼저 생성된다.
 - `INVESTMENT_DECISION_RUNNER=provider_exec`면 orchestrator가 직접 provider를 호출한다.
+- `provider_exec` 경로는 provider raw output과 parse error를 `provider-attempts/`에 남긴다.
 - `INVESTMENT_DECISION_RUNNER=external_artifact`면 외부 판단 주체가 `response.json`을 쓸 때까지 polling 한다.
 - 결정 결과와 Discord 리포트는 모두 `response.json`을 기준으로 생성된다.
 
@@ -244,6 +245,7 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
   request.json
   request.md
   status.json
+  provider-attempts/
   response.json
   response.md
   report.md

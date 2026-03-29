@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import type {
   InvestmentDecisionArtifact,
   InvestmentDecisionRecommendation,
@@ -19,6 +20,116 @@ function sleep(ms: number): Promise<void> {
 function stripMarkdownFences(text: string): string {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   return (fenced?.[1] ?? text).trim();
+}
+
+function buildRetryPrompt(originalPrompt: string): string {
+  return [
+    originalPrompt,
+    '---',
+    'Your previous reply was unreadable or invalid JSON.',
+    'Reply again with ONLY one valid JSON object.',
+    'Do not include markdown fences, prose, explanations, or trailing text.',
+  ].join('\n\n');
+}
+
+function summarizeParseError(error: unknown, text: string): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const snippet = text.trim().slice(0, 300).replace(/\s+/g, ' ');
+  if (!snippet) {
+    return `${message} (empty provider response)`;
+  }
+  return `${message} (raw=${snippet})`;
+}
+
+function extractBalancedJson(text: string): string | null {
+  const source = text.trim();
+  for (let start = 0; start < source.length; start += 1) {
+    const opener = source[start];
+    if (opener !== '{' && opener !== '[') {
+      continue;
+    }
+    const closer = opener === '{' ? '}' : ']';
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < source.length; index += 1) {
+      const char = source[index];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (char === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+      if (char === opener) {
+        depth += 1;
+        continue;
+      }
+      if (char === closer) {
+        depth -= 1;
+        if (depth === 0) {
+          return source.slice(start, index + 1);
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function parseDecisionArtifactText(text: string): unknown {
+  const trimmed = stripMarkdownFences(text);
+  if (!trimmed) {
+    throw new Error('Provider returned an empty response');
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch (error) {
+    const extracted = extractBalancedJson(trimmed);
+    if (extracted && extracted !== trimmed) {
+      return JSON.parse(extracted);
+    }
+    throw new Error(summarizeParseError(error, trimmed));
+  }
+}
+
+async function writeProviderAttemptArtifact(args: {
+  runDir: string;
+  provider: string;
+  stage: 'initial' | 'repair';
+  resultText: string;
+  resultStatus: string;
+  degradedMessage?: string | null;
+  parseError?: string | null;
+}): Promise<void> {
+  const attemptsDir = join(args.runDir, 'provider-attempts');
+  await mkdir(attemptsDir, { recursive: true });
+  await writeFile(
+    join(attemptsDir, `${args.provider}-${args.stage}.json`),
+    JSON.stringify(
+      {
+        provider: args.provider,
+        stage: args.stage,
+        status: args.resultStatus,
+        degraded_message: args.degradedMessage ?? null,
+        parse_error: args.parseError ?? null,
+        text: args.resultText,
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
 }
 
 function asRecommendation(value: unknown): InvestmentDecisionRecommendation {
@@ -237,6 +348,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
           model,
           modelProfile,
         });
+        const runDir = dirname(args.run.request_path);
         const result = await adapter.execute({
           prompt,
           sessionId: session.provider_session_id ?? undefined,
@@ -258,7 +370,66 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
           transportTarget: session.transport_target ?? null,
         });
 
-        const parsed = JSON.parse(stripMarkdownFences(result.text));
+        let parsed: unknown;
+        try {
+          parsed = parseDecisionArtifactText(result.text);
+          await writeProviderAttemptArtifact({
+            runDir,
+            provider: providerName,
+            stage: 'initial',
+            resultText: result.text,
+            resultStatus: result.status,
+            degradedMessage: result.degraded_message ?? null,
+          });
+        } catch (parseError) {
+          const parseMessage = parseError instanceof Error ? parseError.message : String(parseError);
+          await writeProviderAttemptArtifact({
+            runDir,
+            provider: providerName,
+            stage: 'initial',
+            resultText: result.text,
+            resultStatus: result.status,
+            degradedMessage: result.degraded_message ?? null,
+            parseError: parseMessage,
+          });
+
+          const retryResult = await adapter.execute({
+            prompt: buildRetryPrompt(prompt),
+            sessionId: result.sessionId ?? session.provider_session_id ?? undefined,
+            logicalSessionId: session.session_id,
+            workingDirectory: session.session_dir,
+            turnCount: session.turn_count,
+            transportMode,
+            transportTarget: session.transport_target ?? null,
+            model,
+            modelProfile,
+            phase: 'investment_decision',
+            agentName: 'investment_decision',
+            responseFormat: 'json',
+            timeoutMs: this.timeoutMs,
+          });
+          this.sessionStore.updateSessionActivity(session.session_id, {
+            providerSessionId: retryResult.sessionId,
+            transportMode,
+            transportTarget: session.transport_target ?? null,
+          });
+          parsed = parseDecisionArtifactText(retryResult.text);
+          await writeProviderAttemptArtifact({
+            runDir,
+            provider: providerName,
+            stage: 'repair',
+            resultText: retryResult.text,
+            resultStatus: retryResult.status,
+            degradedMessage: retryResult.degraded_message ?? null,
+          });
+          return normalizeArtifact(parsed, args.request, {
+            degraded: true,
+            degradedReason:
+              result.degraded_message ??
+              retryResult.degraded_message ??
+              `provider response required JSON repair retry: ${parseMessage}`,
+          });
+        }
         return normalizeArtifact(parsed, args.request, {
           degraded: result.status === 'degraded',
           degradedReason: result.degraded_message ?? null,

@@ -8,6 +8,9 @@
 - Discord `/report run`과 scheduled report는 더 이상 자체 판단을 만들지 않고 orchestrator decision artifact를 소비한다.
 - watchlist-prioritized universe와 curated equity mapping 입력 파일 경계가 추가됐다.
 - equity-map 조회/교체 API와 external worker 스크립트가 추가돼 운영 입력과 파일 기반 실행 경계가 실제로 동작한다.
+- `provider_exec` 경로는 provider raw output과 parse error를 `provider-attempts/` 아래에 남긴다.
+- `investment_decision`은 JSON parse 실패 시 같은 세션으로 한 번 더 엄격한 JSON-only repair prompt를 보낸다.
+- `codex` 초기 실행은 session workdir를 절대경로 `-C`로 넘기고, process `cwd`와 중복 전달하지 않는다.
 
 ## Why This Matters
 
@@ -21,6 +24,7 @@
 - equity mapping은 exact/curated 수준만 지원한다.
 - external artifact writer에 대한 운영 runbook은 추가됐지만 실제 worker는 아직 없다.
 - investment decision artifact 품질을 평가하는 replay/golden fixture는 더 보강할 수 있다.
+- provider session dir에는 아직 raw turn transcript가 남지 않는다. 현재 디버깅 기준 원문은 run dir의 `provider-attempts/`다.
 
 ## Next Likely Work
 
