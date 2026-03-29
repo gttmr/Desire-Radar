@@ -1,0 +1,14 @@
+{
+  "source_id": "similarweb_movers",
+  "kind": "pull",
+  "ingestion_mode": "raw",
+  "configured_tier": 2,
+  "enabled": true,
+  "adapter_name": "similarweb_movers",
+  "default_producer_ref": "similarweb_movers",
+  "description": "Public web domain ranking pull source backed by Tranco and Umbrella snapshots.",
+  "capabilities": ["demand", "ranking", "validation"],
+  "request_kinds_supported": ["run_source"],
+  "normalizer_key": "similarweb_movers",
+  "fetch_strategy": "full_snapshot"
+}

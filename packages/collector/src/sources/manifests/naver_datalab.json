@@ -1,0 +1,14 @@
+{
+  "source_id": "naver_datalab",
+  "kind": "pull",
+  "ingestion_mode": "raw",
+  "configured_tier": 1,
+  "enabled": false,
+  "adapter_name": "naver_datalab",
+  "default_producer_ref": "naver_datalab",
+  "description": "Naver DataLab pull source for shopping and search trend series. Requires Naver API credentials.",
+  "capabilities": ["demand", "ranking", "validation"],
+  "request_kinds_supported": ["run_source"],
+  "normalizer_key": "naver_datalab",
+  "fetch_strategy": "full_snapshot"
+}

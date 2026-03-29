@@ -15,25 +15,50 @@ class _Connector(BaseConnector):
 
 def test_build_default_sources_loads_checked_in_manifest_examples():
     connectors = {
+        "app_store_top_charts": _Connector("app_store_top_charts", 3600, 1),
         "google_trends": _Connector("google_trends", 3600, 2),
+        "naver_datalab": _Connector("naver_datalab", 43200, 1),
         "reddit_mentions": _Connector("reddit_mentions", 900, 2),
+        "similarweb_movers": _Connector("similarweb_movers", 3600, 2),
+        "steamdb_top_sellers": _Connector("steamdb_top_sellers", 3600, 2),
+        "tiktok_creative_center": _Connector("tiktok_creative_center", 3600, 2),
     }
 
     defaults = {source.source_id: source for source in build_default_sources(connectors)}
 
+    app_store = defaults["app_store_top_charts"]
     google_trends = defaults["google_trends"]
+    naver_datalab = defaults["naver_datalab"]
+    reddit_mentions = defaults["reddit_mentions"]
+    similarweb_movers = defaults["similarweb_movers"]
+    steamdb_top_sellers = defaults["steamdb_top_sellers"]
+    tiktok_creative_center = defaults["tiktok_creative_center"]
     agent_evidence = defaults["agent_evidence"]
 
     assert get_checked_in_source_manifest_dir().name == "manifests"
-    assert google_trends.capabilities == ["demand", "validation"]
+    assert app_store.capabilities == ["demand", "ranking", "validation"]
+    assert app_store.enabled is True
+    assert app_store.manifest_path is not None
+    assert google_trends.capabilities == ["demand", "ranking", "validation"]
     assert google_trends.request_kinds_supported == ["run_source"]
     assert google_trends.normalizer_key == "google_trends"
     assert google_trends.manifest_path is not None
+    assert google_trends.enabled is True
     assert google_trends.agent_enabled is True
     assert google_trends.agent_prompt_path is not None
     assert google_trends.agent_session_domain == "source-agent:google_trends"
     assert google_trends.cadence_seconds == 3600
     assert google_trends.runnable is True
+    assert naver_datalab.capabilities == ["demand", "ranking", "validation"]
+    assert naver_datalab.enabled is False
+    assert reddit_mentions.fetch_strategy == "incremental"
+    assert reddit_mentions.enabled is True
+    assert similarweb_movers.capabilities == ["demand", "ranking", "validation"]
+    assert similarweb_movers.enabled is True
+    assert steamdb_top_sellers.capabilities == ["demand", "ranking", "validation"]
+    assert steamdb_top_sellers.enabled is True
+    assert tiktok_creative_center.enabled is False
+    assert "disabled" in (tiktok_creative_center.description or "").lower()
     assert agent_evidence.capabilities == [
         "demand",
         "pricing",

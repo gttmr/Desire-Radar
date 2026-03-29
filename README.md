@@ -50,6 +50,9 @@ Discord human input / slash commands
 
 ### Collector
 - 공개 API, 사람 입력, agent push, pull connector를 모두 공통 ingestion pipeline으로 처리한다.
+- collector pull source 다양화는 `public-first` 원칙을 따른다.
+  - 기본 활성 세트: `app_store_top_charts`, `google_trends`, `steamdb_top_sellers`, `similarweb_movers`
+  - gating 세트: `reddit_mentions`(OAuth 필요), `naver_datalab`(Naver credential 필요), `tiktok_creative_center`(public endpoint 안정성 검증 전 기본 비활성)
 - `reddit_mentions`는 비공식 `.json` 스크래핑이 아니라 Reddit OAuth Data API를 기준 경로로 사용한다. `REDDIT_CLIENT_ID`와 `REDDIT_REFRESH_TOKEN` 또는 `REDDIT_USERNAME`/`REDDIT_PASSWORD`가 없으면 source는 warning과 함께 skip된다.
 - source registry가 각 source의 `kind`, `ingestion_mode`, `configured_tier`, `effective_tier`, validity 상태를 관리한다.
 - source별 `agent.md`를 통해 source submission 단위 요약과 파생 evidence를 만들 수 있다.
@@ -161,6 +164,7 @@ docker compose up --build
 - source enable/disable, tier 변경, source run, source-agent run, 최근 evidence/submission/candidate 조회를 한 화면에서 볼 수 있다.
 - source row에는 현재 stage, 마지막 outcome, payload/evidence counters, warning/failure, source-agent status/error가 함께 보여서 “fetch가 느린지 / 부분 실패인지 / source-agent 후처리만 남았는지”를 구분할 수 있다.
 - source row에는 `readiness_status`, `fetch_strategy`, `freshness_lag_seconds`, `quality_status`, 최근 run 요약도 같이 보여서 “지금 queue 가능한지 / checkpoint가 있는지 / 최근 품질이 무너졌는지”를 함께 해석할 수 있다.
+- `collect/run` 기본 호출은 현재 활성화된 public-first source를 먼저 queue하고, credential 또는 endpoint gating이 있는 source는 `skipped_sources`에 이유와 함께 남긴다.
 - source별 `packages/collector/src/agents/sources/*.md` 프롬프트를 대시보드에서 수정할 수 있다.
 - allowlist 된 일부 collector `.env` 값도 편집할 수 있다.
 - `.env` 저장 후 collector 재기동 전까지는 startup-time 설정이 즉시 반영되지 않는다.

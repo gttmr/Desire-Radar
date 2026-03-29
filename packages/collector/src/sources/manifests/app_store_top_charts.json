@@ -1,0 +1,14 @@
+{
+  "source_id": "app_store_top_charts",
+  "kind": "pull",
+  "ingestion_mode": "raw",
+  "configured_tier": 1,
+  "enabled": true,
+  "adapter_name": "app_store_top_charts",
+  "default_producer_ref": "app_store_top_charts",
+  "description": "Apple App Store top chart pull source for consumer app ranking shifts in Korea.",
+  "capabilities": ["demand", "ranking", "validation"],
+  "request_kinds_supported": ["run_source"],
+  "normalizer_key": "app_store_top_charts",
+  "fetch_strategy": "full_snapshot"
+}

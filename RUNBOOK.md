@@ -141,6 +141,17 @@ collector source gate 해석:
 - `readiness_status!=ready`: 지금 queue에 넣지 않는 것이 맞는 상태
   - 예: `missing_credentials`, `rate_limited`, `dependency_missing`
 
+현재 기본 public-first pull 세트:
+- `app_store_top_charts`
+- `google_trends`
+- `steamdb_top_sellers`
+- `similarweb_movers`
+
+기본 gating pull 세트:
+- `reddit_mentions`: Reddit OAuth credential 필요
+- `naver_datalab`: Naver API credential 준비 후 enable
+- `tiktok_creative_center`: public endpoint 안정성 검증 전 기본 disabled
+
 `reddit_mentions`는 Reddit OAuth Data API를 전제로 한다. 아래 중 하나가 없으면 source는 `auth_not_configured` warning과 함께 skip된다.
 
 - `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` + `REDDIT_REFRESH_TOKEN`

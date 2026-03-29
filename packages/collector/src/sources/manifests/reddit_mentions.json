@@ -1,0 +1,14 @@
+{
+  "source_id": "reddit_mentions",
+  "kind": "pull",
+  "ingestion_mode": "raw",
+  "configured_tier": 2,
+  "enabled": true,
+  "adapter_name": "reddit_mentions",
+  "default_producer_ref": "reddit_mentions",
+  "description": "Reddit OAuth pull source for subreddit discussion velocity and entity co-mentions.",
+  "capabilities": ["demand", "validation"],
+  "request_kinds_supported": ["run_source"],
+  "normalizer_key": "reddit_mentions",
+  "fetch_strategy": "incremental"
+}

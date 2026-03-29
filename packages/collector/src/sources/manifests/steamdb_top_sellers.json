@@ -1,0 +1,14 @@
+{
+  "source_id": "steamdb_top_sellers",
+  "kind": "pull",
+  "ingestion_mode": "raw",
+  "configured_tier": 2,
+  "enabled": true,
+  "adapter_name": "steamdb_top_sellers",
+  "default_producer_ref": "steamdb_top_sellers",
+  "description": "Steam top sellers and most played pull source for PC gaming demand and ranking shifts.",
+  "capabilities": ["demand", "ranking", "validation"],
+  "request_kinds_supported": ["run_source"],
+  "normalizer_key": "steamdb_top_sellers",
+  "fetch_strategy": "full_snapshot"
+}

@@ -47,6 +47,11 @@
 이유:
 - collector의 소비자들이 raw lexical noise가 아니라 cluster/event를 기본으로 읽게 해야 함
 
+### 6. Source diversification 단계적 확대
+이유:
+- public-first source를 기본 활성 세트로 명시하고, credential 또는 endpoint 변동성이 큰 source는 gating 상태로 구분해야 함
+- 다양화는 새 source 추가보다 기존 source의 운영 가능성 검증이 먼저임
+
 ## 참고 사항
 - APScheduler는 당장 충분하다
 - 새 infra 도입보다 source 운영 계약을 먼저 다듬는 것이 맞다
@@ -70,5 +75,7 @@
 - [x] run ledger store
 - [x] quality_status metadata
 - [x] freshness lag metric
+- [x] public-first source diversification plan 문서화
 - [ ] dashboard recent run trend
 - [ ] cluster/event output contract 문서화
+- [ ] source set 별 운영 레이블 및 trend panel

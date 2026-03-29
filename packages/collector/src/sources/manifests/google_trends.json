@@ -3,10 +3,12 @@
   "kind": "pull",
   "ingestion_mode": "raw",
   "configured_tier": 2,
+  "enabled": true,
   "adapter_name": "google_trends",
   "default_producer_ref": "google_trends",
   "description": "Google Trends pull source for search demand spikes",
-  "capabilities": ["demand", "validation"],
+  "capabilities": ["demand", "ranking", "validation"],
   "request_kinds_supported": ["run_source"],
-  "normalizer_key": "google_trends"
+  "normalizer_key": "google_trends",
+  "fetch_strategy": "full_snapshot"
 }

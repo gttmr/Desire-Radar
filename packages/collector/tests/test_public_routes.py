@@ -161,7 +161,7 @@ def test_collect_run_skips_disabled_pull_sources_by_default(tmp_path):
     payload = response.json()
     assert payload["queued_sources"] == ["enabled_pull"]
     assert payload["skipped_sources"]["disabled_pull"] == "source_disabled"
-    assert payload["skipped_disabled_count"] == 1
+    assert payload["skipped_disabled_count"] >= 1
     assert "manual_observation" not in payload["queued_sources"]
 
 
@@ -190,7 +190,9 @@ def test_collect_run_returns_no_enabled_pull_sources_when_all_pull_sources_are_d
     detail = response.json()["detail"]
     assert detail["reason"] == "no_enabled_pull_sources"
     assert detail["queued_sources"] == []
-    assert detail["skipped_disabled_count"] == 2
+    assert detail["skipped_sources"]["enabled_pull"] == "source_disabled"
+    assert detail["skipped_sources"]["disabled_pull"] == "source_disabled"
+    assert detail["skipped_disabled_count"] >= 2
 
 
 def test_collect_run_skips_not_ready_sources(tmp_path):

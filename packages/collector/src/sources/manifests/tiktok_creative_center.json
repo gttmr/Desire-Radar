@@ -1,0 +1,14 @@
+{
+  "source_id": "tiktok_creative_center",
+  "kind": "pull",
+  "ingestion_mode": "raw",
+  "configured_tier": 2,
+  "enabled": false,
+  "adapter_name": "tiktok_creative_center",
+  "default_producer_ref": "tiktok_creative_center",
+  "description": "TikTok discover and creative-center pull source for creator and keyword trends. Kept disabled until public endpoint stability improves.",
+  "capabilities": ["demand", "ranking", "validation"],
+  "request_kinds_supported": ["run_source"],
+  "normalizer_key": "tiktok_creative_center",
+  "fetch_strategy": "full_snapshot"
+}

@@ -27,6 +27,7 @@ Operational assumption:
 Collector owns:
 - ingestion from pull, push, human, agent, and derived sources
 - source provenance, source tier, and source validity state
+- public-first pull source diversification with readiness/gating separation for credentialed or unstable sources
 - submission tracking and human follow-up queues
 - normalized evidence and candidate construction
 - candidate construction uses canonical entity clusters with optional event/theme/graph facets instead of exposing raw lexical token lists as the primary operator view
