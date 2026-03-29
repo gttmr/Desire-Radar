@@ -27,6 +27,9 @@ import type {
   GetInvestmentDecisionRunResponse,
   GetLatestInvestmentDecisionResponse,
   InvestmentDecisionReportResponse,
+  GetInvestmentEquityMapResponse,
+  PutInvestmentEquityMapRequest,
+  PutInvestmentEquityMapResponse,
 } from '@agentic/shared-types';
 
 export class OrchestratorClient {
@@ -129,6 +132,16 @@ export class OrchestratorClient {
     );
   }
 
+  async getInvestmentEquityMap(): Promise<GetInvestmentEquityMapResponse> {
+    return this.get('/investment/equity-map');
+  }
+
+  async replaceInvestmentEquityMap(
+    req: PutInvestmentEquityMapRequest,
+  ): Promise<PutInvestmentEquityMapResponse> {
+    return this.put('/investment/equity-map', req);
+  }
+
   async listSessions(agentName?: string): Promise<ListSessionsResponse> {
     const query = agentName ? `?agent_name=${encodeURIComponent(agentName)}` : '';
     return this.get(`/sessions${query}`);
@@ -150,6 +163,19 @@ export class OrchestratorClient {
   private async post<T>(path: string, body: unknown): Promise<T> {
     const response = await this.fetchImpl(new URL(path, this.baseUrl), {
       method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Orchestrator request failed (${response.status}): ${text}`);
+    }
+    return (await response.json()) as T;
+  }
+
+  private async put<T>(path: string, body: unknown): Promise<T> {
+    const response = await this.fetchImpl(new URL(path, this.baseUrl), {
+      method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body)
     });

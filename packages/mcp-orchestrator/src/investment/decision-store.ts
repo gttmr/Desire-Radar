@@ -96,12 +96,39 @@ export class InvestmentDecisionStore {
     return index.runs[runId] ?? null;
   }
 
+  async listRuns(): Promise<InvestmentDecisionRunRecord[]> {
+    const index = await this.readIndex();
+    return Object.values(index.runs).sort((left, right) =>
+      left.created_at.localeCompare(right.created_at),
+    );
+  }
+
+  async listPendingExternalRuns(limit = 20): Promise<InvestmentDecisionRunRecord[]> {
+    const runs = await this.listRuns();
+    return runs
+      .filter(
+        (run) =>
+          run.runner === 'external_artifact' &&
+          (run.status === 'queued' || run.status === 'running') &&
+          (!run.response_path || !existsSync(run.response_path)),
+      )
+      .slice(0, limit);
+  }
+
   async getRequest(runId: string): Promise<InvestmentDecisionRequest | null> {
     const record = await this.getRun(runId);
     if (!record || !existsSync(record.request_path)) {
       return null;
     }
     return JSON.parse(await readFile(record.request_path, 'utf8')) as InvestmentDecisionRequest;
+  }
+
+  async getRequestMarkdown(runId: string): Promise<string | null> {
+    const record = await this.getRun(runId);
+    if (!record || !existsSync(record.request_markdown_path)) {
+      return null;
+    }
+    return readFile(record.request_markdown_path, 'utf8');
   }
 
   async getArtifact(runId: string): Promise<InvestmentDecisionArtifact | null> {

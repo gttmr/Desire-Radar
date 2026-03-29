@@ -251,6 +251,37 @@ data/investment-module/equity-map.json
 
 이 파일은 exact alias/ticker/company_name 매칭만 다루는 저위험 매핑 입력이다.
 
+equity-map 조회/교체:
+
+```bash
+curl http://127.0.0.1:5003/investment/equity-map
+
+curl -X PUT http://127.0.0.1:5003/investment/equity-map \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "equities": [
+      {
+        "asset_key": "stock:KRX:005930",
+        "ticker": "005930",
+        "company_name": "삼성전자",
+        "aliases": ["Samsung Electronics", "005930.KS"]
+      }
+    ]
+  }'
+```
+
+external artifact worker:
+
+```bash
+npm --prefix packages/mcp-orchestrator run build
+npm --prefix packages/mcp-orchestrator run worker:investment-decisions -- --watch
+```
+
+의미:
+- 이 worker는 pending `external_artifact` run의 `request.*`를 읽고 `response.json`을 쓴다.
+- worker를 따로 안 띄우면 `external_artifact` 모드는 timeout이 나는 것이 정상이다.
+- provider CLI 직접 호출 대신 외부 협업 프로세스로 전환하고 싶을 때도 이 worker contract를 기준으로 맞추면 된다.
+
 ### Discord Bot
 
 ```bash

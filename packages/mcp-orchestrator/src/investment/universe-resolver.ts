@@ -1,11 +1,12 @@
 import type {
   InvestmentCandidateCluster,
   InvestmentCoverageGap,
+  InvestmentEquityMapEntry,
   ResolvedEquityCandidate,
 } from '@agentic/shared-types';
 import type { CollectorCandidate } from '../collector/client.js';
 import type { InvestmentContextProvider } from './context-provider.js';
-import { EquityMapStore, type EquityMapEntry } from './equity-map.js';
+import { EquityMapStore } from './equity-map.js';
 
 type ResolutionState = {
   equities: Map<string, ResolvedEquityCandidate>;
@@ -112,7 +113,7 @@ export class InvestableUniverseResolver {
     };
   }
 
-  private async resolveWatchlistTicker(ticker: string): Promise<EquityMapEntry> {
+  private async resolveWatchlistTicker(ticker: string): Promise<InvestmentEquityMapEntry> {
     const normalized = ticker.trim().toUpperCase();
     const mapped = await this.equityMap.resolveByTicker(normalized);
     if (mapped) {
@@ -129,7 +130,7 @@ export class InvestableUniverseResolver {
 
   private mergeResolved(
     state: ResolutionState,
-    mapped: EquityMapEntry,
+    mapped: InvestmentEquityMapEntry,
     options: {
       linkedCluster: string | null;
       watchlistMember: boolean;

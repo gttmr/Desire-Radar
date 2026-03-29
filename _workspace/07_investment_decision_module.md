@@ -7,6 +7,7 @@
 - 실행 모드는 `provider_exec`와 `external_artifact` 두 가지다.
 - Discord `/report run`과 scheduled report는 더 이상 자체 판단을 만들지 않고 orchestrator decision artifact를 소비한다.
 - watchlist-prioritized universe와 curated equity mapping 입력 파일 경계가 추가됐다.
+- equity-map 조회/교체 API와 external worker 스크립트가 추가돼 운영 입력과 파일 기반 실행 경계가 실제로 동작한다.
 
 ## Why This Matters
 
@@ -26,4 +27,4 @@
 1. decision artifact를 daily report 외의 operator UI에서도 읽게 하기
 2. curated equity mapping 관리 UX 정리
 3. beneficiary mapping과 decision request 연결 강화
-4. external artifact writer 협업 절차와 예시 구현 추가
+4. external artifact writer를 실제 외부 협업 프로세스와 연결하는 예시 구현 추가

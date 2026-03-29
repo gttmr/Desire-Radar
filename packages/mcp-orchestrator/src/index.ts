@@ -15,6 +15,7 @@ import {
   ProviderExecDecisionRunner,
 } from './investment/decision-runner.js';
 import { EquityMapStore } from './investment/equity-map.js';
+import { InvestmentEquityMapService } from './investment/equity-map-service.js';
 import { InvestmentDecisionService } from './investment/decision-service.js';
 import { AgentExecutor } from './orchestrator/agent-executor.js';
 import { RunContextStore } from './orchestrator/run-context-store.js';
@@ -161,6 +162,7 @@ async function main(): Promise<void> {
     equityMapStore,
     investmentContextProvider,
   );
+  const investmentEquityMapService = new InvestmentEquityMapService(equityMapStore);
   const investmentSignalAssembler = new InvestmentSignalAssembler(
     candidateService,
     investmentContextProvider,
@@ -213,6 +215,7 @@ async function main(): Promise<void> {
       providerHealthMonitor,
       investmentIntakeService,
       investmentDecisionService,
+      investmentEquityMapService,
     ),
   );
 

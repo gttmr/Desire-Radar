@@ -12,6 +12,7 @@ import { listSessions } from '../tools/list-sessions.js';
 import { resetSession } from '../tools/reset-session.js';
 import type { InvestmentIntakeService } from '../investment/intake-service.js';
 import type { InvestmentDecisionService } from '../investment/decision-service.js';
+import type { InvestmentEquityMapService } from '../investment/equity-map-service.js';
 
 export function createRoutes(
   orchestrator: RunOrchestrator,
@@ -20,6 +21,7 @@ export function createRoutes(
   providerHealthMonitor?: ProviderHealthMonitor,
   investmentIntakeService?: InvestmentIntakeService,
   investmentDecisionService?: InvestmentDecisionService,
+  investmentEquityMapService?: InvestmentEquityMapService,
 ): Router {
   const router = Router();
 
@@ -321,6 +323,36 @@ export function createRoutes(
         return;
       }
       res.json(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  router.get('/investment/equity-map', async (_req, res) => {
+    if (!investmentEquityMapService) {
+      res.status(404).json({ error: 'investment equity map service not configured' });
+      return;
+    }
+    try {
+      res.json(await investmentEquityMapService.get());
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(500).json({ error: message });
+    }
+  });
+
+  router.put('/investment/equity-map', async (req, res) => {
+    if (!investmentEquityMapService) {
+      res.status(404).json({ error: 'investment equity map service not configured' });
+      return;
+    }
+    try {
+      res.json(
+        await investmentEquityMapService.replace({
+          equities: Array.isArray(req.body.equities) ? req.body.equities : [],
+        }),
+      );
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       res.status(400).json({ error: message });

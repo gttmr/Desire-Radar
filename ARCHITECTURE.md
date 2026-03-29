@@ -267,7 +267,7 @@ Key idea:
 - asset dossiers provide a stable future hook for verdict/report context
 - this module is an interface and archive layer first, not a second verdict engine
 
-#### InvestmentSignalAssembler, InvestableUniverseResolver, InvestmentDecisionRunner, InvestmentDecisionStore, InvestmentReportFormatter
+#### InvestmentSignalAssembler, InvestableUniverseResolver, InvestmentDecisionRunner, InvestmentDecisionStore, InvestmentReportFormatter, InvestmentEquityMapService
 `packages/mcp-orchestrator/src/investment/`
 
 These components own the daily shortlist path separately from the debate/verdict pipeline.
@@ -278,6 +278,7 @@ Key idea:
 - `InvestmentDecisionRunner` can execute directly through providers or wait for an external artifact writer without changing downstream contracts
 - `InvestmentDecisionStore` is the canonical run directory owner
 - `InvestmentReportFormatter` renders the final operator-facing text deterministically from `response.json`
+- `InvestmentEquityMapService` is the operational input boundary for curated exact alias/ticker/company_name mappings
 
 This keeps provider transport decisions, artifact storage, and report generation decoupled.
 

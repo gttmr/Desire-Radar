@@ -94,6 +94,14 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 - 외부 판단 주체가 `response.json`을 떨어뜨리면 orchestrator가 검증하고 완료 처리한다.
 - stdout을 직접 못 받는 bridge나 파일 기반 협업 프로세스와 잘 맞는다.
 
+기본 worker 스크립트:
+
+```bash
+npm --prefix packages/mcp-orchestrator run worker:investment-decisions -- --watch
+```
+
+이 worker는 pending external run의 `request.*`를 읽고 canonical `response.json`과 `report.md`를 쓴다.
+
 검증 실패 예:
 - `response.json` 누락
 - schema mismatch
@@ -198,6 +206,10 @@ data/investment-module/equity-map.json
 ```
 
 이 파일은 저위험 exact alias 매핑만 다루고, fuzzy matching 사전처럼 비대하게 키우지 않는 편이 좋다.
+
+운영 API:
+- `GET /investment/equity-map`
+- `PUT /investment/equity-map`
 
 ## Discord Report Flow
 

@@ -8,6 +8,7 @@
     "start": "node dist/mcp-orchestrator/src/index.js",
     "smoke:providers": "node dist/mcp-orchestrator/src/tools/provider-smoke.js",
     "smoke:end-to-end": "node dist/mcp-orchestrator/src/tools/end-to-end-smoke.js",
+    "worker:investment-decisions": "node dist/mcp-orchestrator/src/tools/investment-decision-worker.js",
     "dev": "tsx watch src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest"

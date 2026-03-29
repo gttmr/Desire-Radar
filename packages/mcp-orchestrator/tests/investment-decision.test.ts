@@ -12,7 +12,9 @@ import {
   ProviderExecDecisionRunner,
 } from '../src/investment/decision-runner.js';
 import { EquityMapStore } from '../src/investment/equity-map.js';
+import { InvestmentEquityMapService } from '../src/investment/equity-map-service.js';
 import { InvestmentDecisionService } from '../src/investment/decision-service.js';
+import { ExternalInvestmentDecisionWorker } from '../src/investment/external-worker.js';
 import { InvestmentMarkdownStore } from '../src/investment/markdown-store.js';
 import { InvestmentDecisionPromptBuilder } from '../src/investment/prompt-builder.js';
 import { InvestmentReportFormatter } from '../src/investment/report-formatter.js';
@@ -298,11 +300,60 @@ describe('investment decision module', () => {
     expect(artifact.summary).toContain('External response');
   });
 
+  it('processes pending external_artifact runs through a separate worker', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'investment-worker-'));
+    const store = new InvestmentDecisionStore(join(dataDir, 'investment-decisions', 'runs'));
+    const formatter = new InvestmentReportFormatter();
+    const request = makeRequest('run-4');
+    const created = await store.createRun({
+      runId: 'run-4',
+      mode: 'manual',
+      runner: 'external_artifact',
+      request,
+      requestMarkdown: formatter.renderRequestMarkdown(request),
+    });
+    await store.markRunning(created.run_id);
+
+    const worker = new ExternalInvestmentDecisionWorker(
+      store,
+      {
+        async run() {
+          return {
+            run_id: 'run-4',
+            status: 'completed',
+            generated_at: new Date().toISOString(),
+            summary: 'Worker-completed shortlist',
+            market_view: 'Constructive',
+            top_picks: [],
+            watch_candidates: [],
+            rejected_candidates: [],
+            coverage_gaps: [],
+            risks: [],
+            degraded: false,
+            degraded_reason: null,
+            schema_version: 1,
+          };
+        },
+      },
+      formatter,
+    );
+
+    const summary = await worker.processPending();
+    const run = await store.getRun('run-4');
+    const artifact = await store.getArtifact('run-4');
+    const report = await store.getReportMarkdown('run-4');
+
+    expect(summary.completed).toBe(1);
+    expect(run?.status).toBe('completed');
+    expect(artifact?.summary).toContain('Worker-completed shortlist');
+    expect(report).toContain('Worker-completed shortlist');
+  });
+
   it('exposes the investment decision routes', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'investment-routes-'));
-    const equityMapPath = join(dataDir, 'investment-module', 'equity-map.json');
-    mkdirSync(join(dataDir, 'investment-module'), { recursive: true });
-    writeFileSync(equityMapPath, JSON.stringify({ version: 1, equities: [] }, null, 2), 'utf8');
+    const equityMapStore = new EquityMapStore(join(dataDir, 'investment-module', 'equity-map.json'));
+    await equityMapStore.ensureExists();
+    const equityMapService = new InvestmentEquityMapService(equityMapStore);
 
     const service = new InvestmentDecisionService(
       new InvestmentDecisionStore(join(dataDir, 'investment-decisions', 'runs')),
@@ -317,7 +368,7 @@ describe('investment decision module', () => {
         } as unknown as CandidateService,
         new InvestmentContextProvider(new InvestmentMarkdownStore(dataDir)),
         new InvestableUniverseResolver(
-          new EquityMapStore(equityMapPath),
+          equityMapStore,
           new InvestmentContextProvider(new InvestmentMarkdownStore(dataDir)),
         ),
       ),
@@ -407,6 +458,7 @@ describe('investment decision module', () => {
         undefined,
         undefined,
         service,
+        equityMapService,
       ),
     );
     server = app.listen(0);
@@ -437,5 +489,31 @@ describe('investment decision module', () => {
       `http://127.0.0.1:${address.port}/investment/decisions/latest?detail=summary`,
     );
     expect(latestResponse.status).toBe(200);
+
+    const putMapResponse = await fetch(
+      `http://127.0.0.1:${address.port}/investment/equity-map`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          equities: [
+            {
+              asset_key: 'stock:MSFT',
+              ticker: 'MSFT',
+              company_name: 'Microsoft',
+              aliases: ['microsoft'],
+            },
+          ],
+        }),
+      },
+    );
+    expect(putMapResponse.status).toBe(200);
+
+    const getMapResponse = await fetch(
+      `http://127.0.0.1:${address.port}/investment/equity-map`,
+    );
+    expect(getMapResponse.status).toBe(200);
+    const mapPayload = (await getMapResponse.json()) as { equities: Array<{ ticker: string }> };
+    expect(mapPayload.equities[0]?.ticker).toBe('MSFT');
   });
 });

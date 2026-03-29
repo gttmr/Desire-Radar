@@ -378,6 +378,13 @@ export type ResolvedEquityCandidate = {
   watchlist_member: boolean;
 };
 
+export type InvestmentEquityMapEntry = {
+  asset_key: string;
+  ticker: string;
+  company_name: string;
+  aliases: string[];
+};
+
 export type InvestmentDecisionNote = {
   intake_id: string;
   asset_key?: string | null;

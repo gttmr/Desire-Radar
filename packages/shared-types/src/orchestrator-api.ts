@@ -6,6 +6,7 @@ import type {
   AgentTurn,
   DailyReport,
   InvestmentDecisionArtifact,
+  InvestmentEquityMapEntry,
   InvestmentDecisionRequest,
   InvestmentDecisionRunRecord,
   Run,
@@ -285,4 +286,19 @@ export type GetInvestmentDecisionRunResponse = {
 
 export type GetLatestInvestmentDecisionResponse = {
   latest: GetInvestmentDecisionRunResponse | null;
+};
+
+export type GetInvestmentEquityMapResponse = {
+  path: string;
+  equities: InvestmentEquityMapEntry[];
+};
+
+export type PutInvestmentEquityMapRequest = {
+  equities: InvestmentEquityMapEntry[];
+};
+
+export type PutInvestmentEquityMapResponse = {
+  path: string;
+  equities: InvestmentEquityMapEntry[];
+  updated_at: string;
 };

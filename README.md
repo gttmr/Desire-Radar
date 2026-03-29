@@ -254,6 +254,8 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 - collector cluster, beneficiary mapping, investment dossier는 보조 입력으로만 들어간다.
 - exact alias/ticker/company_name 매칭이 안 되는 신규 후보는 `coverage_gaps`로 남긴다.
 - curated equity mapping 파일 기본 경로는 `data/investment-module/equity-map.json`이다.
+- orchestrator는 `GET /investment/equity-map`, `PUT /investment/equity-map`로 이 매핑 파일을 읽고 교체할 수 있다.
+- `external_artifact` 모드를 실제로 처리하려면 별도 worker를 실행한다. 기본 스크립트는 `npm --prefix packages/mcp-orchestrator run worker:investment-decisions -- --watch`다.
 
 ## Session And Graph Strategy
 
@@ -319,6 +321,8 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 - `POST /investment/intake`
 - `GET /investment/intakes/:intake_id`
 - `GET /investment/assets/:asset_key`
+- `GET /investment/equity-map`
+- `PUT /investment/equity-map`
 - `POST /investment/decisions/runs`
 - `GET /investment/decisions/runs/:run_id`
 - `GET /investment/decisions/runs/:run_id/report`
@@ -386,6 +390,9 @@ npm --prefix packages/mcp-orchestrator run smoke:providers
 
 # orchestrator + collector end-to-end smoke (requires both services running)
 npm --prefix packages/mcp-orchestrator run smoke:end-to-end
+
+# external_artifact decision worker
+npm --prefix packages/mcp-orchestrator run worker:investment-decisions -- --watch
 
 # collector tests
 cd packages/collector && pytest
