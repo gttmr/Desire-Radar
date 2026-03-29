@@ -47,6 +47,16 @@
 - 전처리 단계는 `INVESTMENT_DECISION_PREPROCESS_TOOL_POLICY=none`을 기본으로 두고, 최종 판단 단계는 별도 tool policy를 가질 수 있게 분리했다.
 - 전처리 실패 시 run 전체를 버리지 않고 deterministic fallback briefing을 생성한 뒤 final decision을 계속 진행한다.
 
+## 2026-03-30 Structured Output Update
+
+- `prepare` 단계는 이제 공통 structured-output 모듈을 사용한다.
+- 기본 계약은 `<structured_json>...</structured_json>` tagged block이며, parser는 tagged JSON를 우선 읽는다.
+- provider가 reasoning/preamble을 먼저 내더라도 parser는 fenced JSON와 balanced JSON까지 순차적으로 복구를 시도한다.
+- `provider-attempts/*.json`에는 `parse_strategy`가 같이 남는다. 즉 실제로 `tagged`, `balanced`, `repair` 중 어떤 경로로 회수됐는지 사후 점검 가능하다.
+- Codex adapter는 `agent_message` 외 stream shape에서도 텍스트를 회수하도록 완화했다.
+- Gemini adapter는 `{"response":"..."}` wrapper뿐 아니라 model이 직접 뱉은 JSON object도 유효 응답으로 인정한다.
+- 목적은 프롬프트 튜닝만으로 버티는 것이 아니라, provider 출력 습관이 조금 변해도 `prepared_request.json`과 최종 `response.json` 계약이 유지되게 만드는 것이다.
+
 ## Current Gaps
 
 - verdict pipeline과 investment decision의 연결은 아직 느슨하다.
@@ -55,6 +65,7 @@
 - investment decision artifact 품질을 평가하는 replay/golden fixture는 더 보강할 수 있다.
 - provider session dir에는 아직 raw turn transcript가 남지 않는다. 현재 디버깅 기준 원문은 run dir의 `provider-attempts/`다.
 - preprocessing provider와 final provider를 phase가 아니라 agent 단위로 더 세밀하게 policy 관리할 여지는 있다.
+- preprocess prompt를 다른 agent에도 그대로 재사용할지, 아니면 `investment decision` 전용 contract로 계속 둘지는 후속 판단이 필요하다.
 
 ## Next Likely Work
 

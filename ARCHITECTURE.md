@@ -127,6 +127,7 @@ Important property:
 - downstream consumers depend on the request/response/report artifact contract, not on how the LLM was invoked.
 - preprocessing is an internal compression step, not a second source of truth
 - preprocessing와 final decision은 provider/model/tool policy를 각각 따로 가질 수 있다
+- structured output parsing is mandatory at this boundary; the system prefers tagged JSON and then falls back to fenced/balanced JSON recovery so provider-specific reasoning preambles do not break the artifact contract
 
 ## Core Abstractions
 

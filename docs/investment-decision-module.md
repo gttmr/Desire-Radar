@@ -82,7 +82,7 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 규칙:
 - orchestrator는 항상 `request.json`과 `request.md`를 먼저 쓴다.
 - preprocessing step이 켜져 있으면 `prepared_request.*`를 내부 artifact로 추가 생성한다.
-- `provider_exec` 경로는 raw provider output과 parse error를 `provider-attempts/` 아래에 남긴다.
+- `provider_exec` 경로는 raw provider output, parse error, parse strategy를 `provider-attempts/` 아래에 남긴다.
 - direct provider execution도 결과를 `response.json`으로 정규화한다.
 - external mode는 외부 프로세스가 `request.*`를 읽고 `response.json`을 쓴다.
 - Discord와 scheduled report는 `response.json` 기반 formatter만 사용한다.
@@ -99,6 +99,10 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 - 내부적으로는 `prepare -> final decision` 2단 실행을 지원한다.
 - `prepare`는 정보 압축과 재구성만 맡고, canonical final artifact는 항상 final decision step이 만든다.
 - direct provider output은 내부적으로 파싱한 뒤 canonical artifact로 정규화한다.
+- structured output contract는 tagged JSON를 기본으로 한다.
+  - 우선 계약은 `<structured_json>...</structured_json>` 블록이다.
+  - parser는 tagged block, fenced JSON, balanced JSON 순으로 복구를 시도한다.
+  - provider가 reasoning이나 짧은 preamble을 섞어도 downstream artifact 계약은 유지된다.
 
 ### `external_artifact`
 
@@ -210,6 +214,9 @@ bootstrap 규칙:
 - preprocessing 단계는 “도구 사용 금지, 요약/압축 전용”으로 prompt 계약을 고정한다.
 - 기본 권장값은 `prepare=cheap`, `final=premium`이다. 예를 들어 `prepare=codex(gpt-5.4-mini)`, `final=codex(gpt-5.4)` 같은 구성이 가능하다.
 - preprocessing provider와 final provider는 env로 따로 바꿀 수 있다. 즉 전처리 provider가 Gemini일 필요는 없다.
+- Codex와 Gemini는 모두 “reasoning 후 결과” 형태를 낼 수 있으므로, `prepare` 단계는 prompt 지시만으로 신뢰하지 않고 parser를 함께 둔다.
+  - Codex adapter는 `agent_message`가 아닌 stream frame에서도 텍스트를 회수하도록 완화한다.
+  - Gemini adapter는 wrapper 없는 direct JSON object도 유효 응답으로 인정한다.
 - Gemini readiness probe도 `gemini-2.5-flash`를 명시적으로 사용한다. health가 phase와 다른 default model 상태에 끌려가면 안 되기 때문이다.
 - stale `running` run은 timeout budget을 넘기면 자동으로 `failed`로 정리한다. 오래된 status가 영구히 `running`으로 남아 dashboard나 latest API를 오염시키면 안 된다.
 

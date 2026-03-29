@@ -5,40 +5,47 @@ import type {
 } from '@agentic/shared-types';
 import type { PromptLoader } from '../prompt/loader.js';
 import type { ToolPolicy } from '../providers/base.js';
+import { renderStructuredJsonContract } from './structured-output.js';
 
 function buildPreparationRuntimeInstructions(toolPolicy: ToolPolicy): string {
   const toolRule =
     toolPolicy === 'none'
-      ? '4. Do not inspect the workspace, run tools, browse, or search for extra context.'
-      : '4. Prefer not to use tools. Only use them if they are strictly necessary, and never use them to replace simple restructuring of the provided request.';
+      ? '5. Do not inspect the workspace, run tools, browse, or search for extra context.'
+      : '5. Prefer not to use tools. Only use them if they are strictly necessary, and never use them to replace simple restructuring of the provided request.';
   return `You are executing the investment_decision preparation step.
 
 Rules:
-1. Respond ONLY with valid JSON.
+1. Follow the structured output contract exactly.
 2. Preserve important facts, names, tickers, coverage gaps, and source health warnings from the provided request.
 3. Do not invent companies, tickers, evidence ids, or new facts.
+4. Do not narrate what you are about to do before the JSON block.
 ${toolRule}
-5. This step is only for restructuring and compressing the provided request into a cleaner briefing for a downstream final decision model.
-6. If coverage is incomplete, keep the gap in coverage_gaps instead of pretending it is resolved.
-7. Keep the output concise and loss-aware. Summarize without dropping material investment signals.
+6. This step is only for restructuring and compressing the provided request into a cleaner briefing for a downstream final decision model.
+7. If coverage is incomplete, keep the gap in coverage_gaps instead of pretending it is resolved.
+8. Keep the output concise and loss-aware. Summarize without dropping material investment signals.
+
+${renderStructuredJsonContract()}
 `;
 }
 
 function buildDecisionRuntimeInstructions(toolPolicy: ToolPolicy): string {
   const toolRule =
     toolPolicy === 'none'
-      ? '6. Do not inspect the workspace, run tools, or search for extra context. Use only the provided request and prepared briefing.'
-      : '6. Prefer to use only the provided request and prepared briefing. Tool use is optional, and should be reserved for cases where the supplied artifacts are genuinely insufficient.';
+      ? '7. Do not inspect the workspace, run tools, or search for extra context. Use only the provided request and prepared briefing.'
+      : '7. Prefer to use only the provided request and prepared briefing. Tool use is optional, and should be reserved for cases where the supplied artifacts are genuinely insufficient.';
   return `You are executing the investment_decision final decision step.
 
 Rules:
-1. Respond ONLY with valid JSON.
+1. Follow the structured output contract exactly.
 2. Do not invent tickers, companies, or evidence ids.
 3. If coverage is incomplete, keep the gap in coverage_gaps instead of guessing.
 4. Treat watchlist names as the default scope and be conservative with non-watchlist additions.
 5. The downstream report formatter is deterministic. Your output must already be final structured content.
+6. Do not narrate what you are about to do before the JSON block.
 ${toolRule}
-7. Do not ask follow-up questions. Produce the best final decision you can from the provided request now.
+8. Do not ask follow-up questions. Produce the best final decision you can from the provided request now.
+
+${renderStructuredJsonContract()}
 `;
 }
 

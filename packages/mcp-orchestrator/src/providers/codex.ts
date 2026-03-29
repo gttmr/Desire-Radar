@@ -44,14 +44,46 @@ type CodexProviderOptions = {
   defaultTransportMode?: ProviderTransportMode;
 };
 
+function extractCodexTextFragments(value: unknown): string[] {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => extractCodexTextFragments(item));
+  }
+  if (!value || typeof value !== 'object') {
+    return [];
+  }
+
+  const raw = value as Record<string, unknown>;
+  const fields: unknown[] = [
+    raw.text,
+    raw.output_text,
+    raw.content,
+    raw.message,
+    raw.item,
+    raw.delta,
+    raw.response,
+    raw.result,
+  ];
+
+  return fields.flatMap((field) => extractCodexTextFragments(field));
+}
+
 export function extractCodexExecResult(stdout: string): CodexExecResult {
   let messageText: string | undefined;
   let threadId: string | undefined;
   let usage: CodexUsage | undefined;
+  const plainTextLines: string[] = [];
 
   for (const rawLine of stdout.split(/\r?\n/)) {
     const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
     if (!line.startsWith('{')) {
+      plainTextLines.push(line);
       continue;
     }
 
@@ -67,6 +99,10 @@ export function extractCodexExecResult(stdout: string): CodexExecResult {
       continue;
     }
 
+    if (typeof payload.type === 'string' && payload.type === 'error') {
+      continue;
+    }
+
     if (payload.type === 'item.completed') {
       const item =
         payload.item && typeof payload.item === 'object'
@@ -74,8 +110,8 @@ export function extractCodexExecResult(stdout: string): CodexExecResult {
           : undefined;
       if (item?.type === 'agent_message' && typeof item.text === 'string') {
         messageText = item.text;
+        continue;
       }
-      continue;
     }
 
     if (payload.type === 'turn.completed') {
@@ -102,7 +138,21 @@ export function extractCodexExecResult(stdout: string): CodexExecResult {
               : undefined,
         };
       }
+      continue;
     }
+
+    if (typeof payload.type === 'string' && /thread\.started|turn\.started/i.test(payload.type)) {
+      continue;
+    }
+
+    const fragments = extractCodexTextFragments(payload);
+    if (fragments.length > 0) {
+      messageText = fragments.join('\n').trim();
+    }
+  }
+
+  if (!messageText && plainTextLines.length > 0) {
+    messageText = plainTextLines.join('\n').trim();
   }
 
   if (!messageText) {

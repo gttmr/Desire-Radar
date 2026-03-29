@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ExecFileOptions } from 'node:child_process';
+import { resolve } from 'node:path';
 import { CodexProvider, extractCodexExecResult } from '../src/providers/codex.js';
 import {
   ClaudeProvider,
@@ -61,6 +62,17 @@ warn line
       outputTokens: 4,
       uncachedInputTokens: 75,
     });
+  });
+
+  it('extracts codex text from non-agent_message payloads when the stream shape changes', () => {
+    const parsed = extractCodexExecResult(`
+{"type":"thread.started","thread_id":"thread-456"}
+{"type":"response.completed","response":{"content":[{"text":"<structured_json>{\\\"executive_summary\\\":\\\"ok\\\"}</structured_json>"}]}}
+{"type":"turn.completed","usage":{"input_tokens":12,"cached_input_tokens":0,"output_tokens":8}}
+`);
+
+    expect(parsed.messageText).toBe('<structured_json>{"executive_summary":"ok"}</structured_json>');
+    expect(parsed.threadId).toBe('thread-456');
   });
 
   it('uses the current codex exec JSON flow instead of deprecated --quiet', async () => {
@@ -146,7 +158,7 @@ warn line
         'exec',
         '--skip-git-repo-check',
         '-C',
-        '/mnt/c/Users/ilmas/workspace/Agentic-World/data/provider-sessions/test',
+        resolve('data/provider-sessions/test'),
         '-s',
         'read-only',
         '--json',
@@ -536,6 +548,14 @@ warn line
     expect(() => extractGeminiPromptResult('{"response":""}')).toThrow(
       'Gemini CLI returned empty response payload',
     );
+    expect(
+      extractGeminiPromptResult('{"executive_summary":"prepared","market_context":"tight"}'),
+    ).toBe('{"executive_summary":"prepared","market_context":"tight"}');
+    expect(
+      extractGeminiPromptResult(
+        '{"candidates":[{"content":{"parts":[{"text":"<structured_json>{\\"summary\\":\\"OK\\"}</structured_json>"}]}}]}',
+      ),
+    ).toBe('<structured_json>{"summary":"OK"}</structured_json>');
   });
 
   it('surfaces gemini probe failures with classified errors', async () => {
