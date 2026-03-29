@@ -8,6 +8,10 @@ export class CandidateService {
     return this.client.getNextCandidates(onlyNeedsAnalysis);
   }
 
+  getEmergingCandidates(): Promise<CollectorCandidate[]> {
+    return this.client.getEmergingCandidates();
+  }
+
   buildBundle(entity: string, maxEvidence?: number): Promise<EvidenceBundle> {
     return this.client.buildBundle(entity, maxEvidence);
   }

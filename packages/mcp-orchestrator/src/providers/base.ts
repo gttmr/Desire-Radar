@@ -1,5 +1,10 @@
 export type ModelProfile = 'cheap' | 'balanced' | 'premium';
-export type ExecutionPhase = 'triage' | 'debate' | 'verdict' | 'report';
+export type ExecutionPhase =
+  | 'triage'
+  | 'debate'
+  | 'verdict'
+  | 'report'
+  | 'investment_decision';
 export type ResponseFormat = 'json' | 'text';
 export type ProviderTransportMode = 'cli_exec' | 'cli_resume' | 'external_injection';
 export type ProviderFailureKind =

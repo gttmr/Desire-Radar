@@ -212,6 +212,11 @@ describe('beneficiary mapping / verdict / report / evaluation', () => {
           debate: { providers: ['scenario'], modelProfile: 'cheap', responseFormat: 'json' },
           verdict: { providers: ['scenario'], modelProfile: 'premium', responseFormat: 'json' },
           report: { providers: ['scenario'], modelProfile: 'balanced', responseFormat: 'json' },
+          investment_decision: {
+            providers: ['scenario'],
+            modelProfile: 'premium',
+            responseFormat: 'json',
+          },
         },
         agents: {},
       },
@@ -396,6 +401,11 @@ describe('beneficiary mapping / verdict / report / evaluation', () => {
           debate: { providers: ['scenario'], modelProfile: 'cheap', responseFormat: 'json' },
           verdict: { providers: ['scenario'], modelProfile: 'premium', responseFormat: 'json' },
           report: { providers: ['scenario'], modelProfile: 'balanced', responseFormat: 'json' },
+          investment_decision: {
+            providers: ['scenario'],
+            modelProfile: 'premium',
+            responseFormat: 'json',
+          },
         },
         agents: {},
       },

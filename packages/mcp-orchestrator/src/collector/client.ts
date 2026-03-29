@@ -4,30 +4,10 @@ import type {
   BundleGraphNode,
   Evidence,
   EvidenceBundle,
+  SignalCandidate,
 } from '@agentic/shared-types';
 
-export type CollectorCandidate = {
-  entity: string;
-  status: 'emerging' | 'preheat' | 'spreading';
-  emergence_score: number;
-  velocity_score: number;
-  source_count: number;
-  evidence_ids: string[];
-  sources: string[];
-  first_seen: string;
-  last_seen: string;
-  desire_types?: string[];
-  behavioral_signals?: string[];
-  avg_intensity?: number | null;
-  demographic_hints?: string[];
-  desire_summary?: string | null;
-  analysis_status?: string | null;
-  analysis_summary?: string | null;
-  analysis_confidence?: number | null;
-  analysis_reason?: string | null;
-  last_analyzed_at?: string | null;
-  analysis_session_domain?: string | null;
-};
+export type CollectorCandidate = SignalCandidate;
 
 export type CollectorSourceStatus = {
   kind?: 'pull' | 'push' | 'agent' | 'human' | 'derived';
@@ -49,6 +29,15 @@ export type CollectorSourceStatus = {
   request_kinds_supported?: string[];
   normalizer_key?: string | null;
   manifest_path?: string | null;
+  readiness_status?: string | null;
+  readiness_reason?: string | null;
+  fetch_strategy?: 'full_snapshot' | 'incremental';
+  freshness_lag_seconds?: number | null;
+  last_attempt_at?: string | null;
+  last_success_at?: string | null;
+  cooldown_until?: string | null;
+  last_cursor?: string | null;
+  last_rate_limit_reset_at?: string | null;
   pending_submissions?: number;
   failure_count?: number;
   partial_failure_count?: number;
@@ -71,6 +60,27 @@ export type CollectorSourceStatus = {
   default_producer_ref?: string | null;
   tier_override_reason?: string | null;
   description?: string | null;
+  current_stage?: string | null;
+  current_stage_message?: string | null;
+  last_progress_at?: string | null;
+  payload_total?: number;
+  payloads_processed?: number;
+  snapshot_total?: number;
+  evidence_total?: number;
+  resolve_success_total?: number;
+  resolve_miss_total?: number;
+  last_warning_targets?: string[];
+  source_agent_status?: string | null;
+  source_agent_artifact_id?: string | null;
+  source_agent_error?: string | null;
+  derived_evidence_total?: number;
+  quality_status?: string | null;
+  quality_warnings?: string[];
+  watermark_ref?: string | null;
+  recent_runs?: Array<Record<string, unknown>>;
+  recent_warning_kinds?: string[];
+  recent_failure_count?: number;
+  median_duration_ms?: number | null;
 };
 
 export type CollectorBuildBundleResponse = {
@@ -111,6 +121,13 @@ export class CollectorClient {
     const query = onlyNeedsAnalysis ? '?only_needs_analysis=true' : '';
     const response = await this.get<{ candidates: CollectorCandidate[] }>(
       `/internal/next-candidates${query}`,
+    );
+    return response.candidates ?? [];
+  }
+
+  async getEmergingCandidates(): Promise<CollectorCandidate[]> {
+    const response = await this.get<{ candidates: CollectorCandidate[] }>(
+      '/candidates/emerging',
     );
     return response.candidates ?? [];
   }

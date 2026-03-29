@@ -5,6 +5,9 @@
 import type {
   AgentTurn,
   DailyReport,
+  InvestmentDecisionArtifact,
+  InvestmentDecisionRequest,
+  InvestmentDecisionRunRecord,
   Run,
   ProviderSession,
   ProviderHealth,
@@ -24,6 +27,7 @@ import type {
   InvestmentNoteDraft,
 } from './collector-api.js';
 import type { EvidenceBundle } from './evidence.js';
+import type { ReportDetailLevel, ReportRunMode } from './bot.js';
 
 // POST /runs/submit-evidence
 export type SubmitEvidenceRequest = {
@@ -248,4 +252,37 @@ export type GetInvestmentIntakeResponse = {
 export type GetInvestmentAssetResponse = {
   asset: InvestmentAssetDossier;
   markdown: string;
+};
+
+export type CreateInvestmentDecisionRunRequest = {
+  watchlist: string[];
+  mode?: ReportRunMode;
+  detail?: ReportDetailLevel;
+  as_of_date?: string;
+  window_days?: number;
+};
+
+export type InvestmentDecisionReportResponse = {
+  run_id: string;
+  detail: ReportDetailLevel;
+  markdown: string;
+  generated_at: string;
+};
+
+export type CreateInvestmentDecisionRunResponse = {
+  run: InvestmentDecisionRunRecord;
+  request: InvestmentDecisionRequest;
+  artifact: InvestmentDecisionArtifact;
+  report: InvestmentDecisionReportResponse;
+};
+
+export type GetInvestmentDecisionRunResponse = {
+  run: InvestmentDecisionRunRecord;
+  request: InvestmentDecisionRequest;
+  artifact?: InvestmentDecisionArtifact | null;
+  report?: InvestmentDecisionReportResponse | null;
+};
+
+export type GetLatestInvestmentDecisionResponse = {
+  latest: GetInvestmentDecisionRunResponse | null;
 };

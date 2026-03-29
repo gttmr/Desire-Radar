@@ -2,6 +2,8 @@
 
 This document is the living design note for free-form human investment input and the orchestrator-side investment module.
 
+Daily shortlist 판단과 report artifact 계약은 [docs/investment-decision-module.md](investment-decision-module.md)에서 별도로 관리한다.
+
 Use it for:
 - recording how free-form human input is interpreted
 - keeping collector, discord-bot, and orchestrator boundaries clear

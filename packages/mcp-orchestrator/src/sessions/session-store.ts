@@ -105,19 +105,34 @@ export class SessionStore {
   ): void {
     const session = this.data.sessions.find((s) => s.session_id === sessionId);
     if (session) {
-      session.last_active_at = new Date().toISOString();
-      session.turn_count += 1;
-      if (patch?.providerSessionId) {
-        session.provider_session_id = patch.providerSessionId;
-      }
-      if (patch?.transportMode) {
-        session.transport_mode = patch.transportMode;
-      }
-      if (patch?.transportTarget !== undefined) {
-        session.transport_target = patch.transportTarget;
-      }
-      this.save();
+      this.updateSessionActivity(sessionId, patch);
     }
+  }
+
+  updateSessionActivity(
+    sessionId: string,
+    patch?: {
+      providerSessionId?: string;
+      transportMode?: ProviderTransportMode;
+      transportTarget?: string | null;
+    },
+  ): void {
+    const session = this.data.sessions.find((s) => s.session_id === sessionId);
+    if (!session) {
+      return;
+    }
+    session.last_active_at = new Date().toISOString();
+    session.turn_count += 1;
+    if (patch?.providerSessionId) {
+      session.provider_session_id = patch.providerSessionId;
+    }
+    if (patch?.transportMode) {
+      session.transport_mode = patch.transportMode;
+    }
+    if (patch?.transportTarget !== undefined) {
+      session.transport_target = patch.transportTarget;
+    }
+    this.save();
   }
 
   resetSession(agentName: string, provider: string): void {

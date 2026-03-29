@@ -8,10 +8,22 @@ import { CandidateService } from './collector/candidate-service.js';
 import { CollectorClient } from './collector/client.js';
 import { ResearchService } from './collector/research-service.js';
 import { SubmissionPoller } from './collector/submission-poller.js';
+import { InvestmentContextProvider } from './investment/context-provider.js';
+import { InvestmentDecisionStore } from './investment/decision-store.js';
+import {
+  ExternalArtifactDecisionRunner,
+  ProviderExecDecisionRunner,
+} from './investment/decision-runner.js';
+import { EquityMapStore } from './investment/equity-map.js';
+import { InvestmentDecisionService } from './investment/decision-service.js';
 import { AgentExecutor } from './orchestrator/agent-executor.js';
 import { RunContextStore } from './orchestrator/run-context-store.js';
 import { RunOrchestrator } from './orchestrator/run-orchestrator.js';
 import { RunStore } from './orchestrator/run-store.js';
+import { InvestmentDecisionPromptBuilder } from './investment/prompt-builder.js';
+import { InvestmentReportFormatter } from './investment/report-formatter.js';
+import { InvestmentSignalAssembler } from './investment/signal-assembler.js';
+import { InvestableUniverseResolver } from './investment/universe-resolver.js';
 import { DebateService } from './pipeline/debate.js';
 import { ReportService } from './pipeline/report.js';
 import { ResearchLoopService } from './pipeline/research-loop.js';
@@ -142,6 +154,43 @@ async function main(): Promise<void> {
   const reportService = new ReportService(agentExecutor, contextStore, runStore);
   const investmentMarkdownStore = new InvestmentMarkdownStore(config.runtime.DATA_DIR);
   const investmentIntakeService = new InvestmentIntakeService(investmentMarkdownStore);
+  const investmentContextProvider = new InvestmentContextProvider(investmentMarkdownStore);
+  const equityMapStore = new EquityMapStore(config.investmentDecision.equityMapPath);
+  await equityMapStore.ensureExists();
+  const investmentUniverseResolver = new InvestableUniverseResolver(
+    equityMapStore,
+    investmentContextProvider,
+  );
+  const investmentSignalAssembler = new InvestmentSignalAssembler(
+    candidateService,
+    investmentContextProvider,
+    investmentUniverseResolver,
+  );
+  const investmentDecisionStore = new InvestmentDecisionStore(
+    config.investmentDecision.runRootDir,
+  );
+  const investmentReportFormatter = new InvestmentReportFormatter();
+  const investmentPromptBuilder = new InvestmentDecisionPromptBuilder(promptLoader);
+  const investmentDecisionRunner =
+    config.investmentDecision.INVESTMENT_DECISION_RUNNER === 'external_artifact'
+      ? new ExternalArtifactDecisionRunner(
+          config.investmentDecision.INVESTMENT_DECISION_TIMEOUT_MS,
+          config.investmentDecision.INVESTMENT_DECISION_POLL_INTERVAL_MS,
+        )
+      : new ProviderExecDecisionRunner(
+          registry,
+          sessionStore,
+          executionPolicy,
+          investmentPromptBuilder,
+          config.investmentDecision.INVESTMENT_DECISION_TIMEOUT_MS,
+        );
+  const investmentDecisionService = new InvestmentDecisionService(
+    investmentDecisionStore,
+    investmentSignalAssembler,
+    investmentDecisionRunner,
+    investmentReportFormatter,
+    config.investmentDecision.INVESTMENT_DECISION_RUNNER,
+  );
 
   const orchestrator = new RunOrchestrator(agentExecutor, runStore, config.providers.defaultProviders, {
     sessionStore,
@@ -163,6 +212,7 @@ async function main(): Promise<void> {
       registry,
       providerHealthMonitor,
       investmentIntakeService,
+      investmentDecisionService,
     ),
   );
 
@@ -176,6 +226,9 @@ async function main(): Promise<void> {
     console.log(`Data dir: ${config.runtime.DATA_DIR}`);
     console.log(`Collector base URL: ${config.collector.COLLECTOR_BASE_URL}`);
     console.log(`Policy dir: ${config.policies.policyDir}`);
+    console.log(
+      `Investment decision runner: ${config.investmentDecision.INVESTMENT_DECISION_RUNNER}`,
+    );
   });
 }
 

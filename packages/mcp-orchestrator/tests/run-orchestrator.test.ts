@@ -140,6 +140,11 @@ describe('RunOrchestrator', () => {
           debate: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
           verdict: { providers: ['mock'], modelProfile: 'premium', responseFormat: 'json' },
           report: { providers: ['mock'], modelProfile: 'balanced', responseFormat: 'json' },
+          investment_decision: {
+            providers: ['mock'],
+            modelProfile: 'premium',
+            responseFormat: 'json',
+          },
         },
         agents: {},
       },

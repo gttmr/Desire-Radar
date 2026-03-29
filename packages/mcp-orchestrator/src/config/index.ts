@@ -5,6 +5,10 @@ import { z } from 'zod';
 import 'dotenv/config';
 import { loadCollectorConfig, type CollectorConfig } from './collector.js';
 import {
+  loadInvestmentDecisionConfig,
+  type InvestmentDecisionConfig,
+} from './investment-decision.js';
+import {
   loadProviderHealthConfig,
   type ProviderHealthConfig,
 } from './provider-health.js';
@@ -36,10 +40,11 @@ const agentExecutionSchema = z.object({
     debate: phasePolicySchema,
     verdict: phasePolicySchema,
     report: phasePolicySchema,
+    investment_decision: phasePolicySchema,
   }),
   agents: z.record(
     z.object({
-      phase: z.enum(['triage', 'debate', 'verdict', 'report']),
+      phase: z.enum(['triage', 'debate', 'verdict', 'report', 'investment_decision']),
       providers: z.array(z.string()).default([]),
       modelProfile: z.enum(['cheap', 'balanced', 'premium']),
       responseFormat: z.enum(['json', 'text']).default('json'),
@@ -77,7 +82,7 @@ const researchPolicySchema = z.object({
 export type ModelProfilesPolicy = z.infer<typeof modelProfilesSchema>;
 export type AgentExecutionPolicy = {
   defaults: Record<
-    'triage' | 'debate' | 'verdict' | 'report',
+    'triage' | 'debate' | 'verdict' | 'report' | 'investment_decision',
     {
       providers: string[];
       modelProfile: 'cheap' | 'balanced' | 'premium';
@@ -87,7 +92,7 @@ export type AgentExecutionPolicy = {
   agents: Record<
     string,
     {
-      phase: 'triage' | 'debate' | 'verdict' | 'report';
+      phase: 'triage' | 'debate' | 'verdict' | 'report' | 'investment_decision';
       providers: string[];
       modelProfile: 'cheap' | 'balanced' | 'premium';
       responseFormat: 'json' | 'text';
@@ -131,6 +136,7 @@ export type OrchestratorPolicies = {
 export type Config = {
   runtime: RuntimeConfig;
   collector: CollectorConfig;
+  investmentDecision: InvestmentDecisionConfig;
   providers: ProvidersConfig;
   providerHealth: ProviderHealthConfig;
   policies: OrchestratorPolicies;
@@ -164,6 +170,7 @@ export function loadConfig(): Config {
   return {
     runtime,
     collector: loadCollectorConfig(process.env),
+    investmentDecision: loadInvestmentDecisionConfig(process.env, runtime.DATA_DIR),
     providers: loadProvidersConfig(process.env, runtime.DATA_DIR),
     providerHealth: loadProviderHealthConfig(process.env),
     policies: {

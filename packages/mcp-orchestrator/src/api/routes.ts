@@ -11,6 +11,7 @@ import { getRunState } from '../tools/get-run-state.js';
 import { listSessions } from '../tools/list-sessions.js';
 import { resetSession } from '../tools/reset-session.js';
 import type { InvestmentIntakeService } from '../investment/intake-service.js';
+import type { InvestmentDecisionService } from '../investment/decision-service.js';
 
 export function createRoutes(
   orchestrator: RunOrchestrator,
@@ -18,6 +19,7 @@ export function createRoutes(
   registry: ProviderRegistry,
   providerHealthMonitor?: ProviderHealthMonitor,
   investmentIntakeService?: InvestmentIntakeService,
+  investmentDecisionService?: InvestmentDecisionService,
 ): Router {
   const router = Router();
 
@@ -318,6 +320,83 @@ export function createRoutes(
         res.status(404).json({ error: 'investment asset not found' });
         return;
       }
+      res.json(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  router.post('/investment/decisions/runs', async (req, res) => {
+    if (!investmentDecisionService) {
+      res.status(404).json({ error: 'investment decision service not configured' });
+      return;
+    }
+    try {
+      const result = await investmentDecisionService.run({
+        watchlist: Array.isArray(req.body.watchlist)
+          ? req.body.watchlist.map((item: unknown) => String(item)).filter(Boolean)
+          : [],
+        mode: req.body.mode,
+        detail: req.body.detail,
+        as_of_date:
+          typeof req.body.as_of_date === 'string' ? req.body.as_of_date : undefined,
+        window_days:
+          typeof req.body.window_days === 'number' ? req.body.window_days : undefined,
+      });
+      res.json(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  router.get('/investment/decisions/runs/:runId', async (req, res) => {
+    if (!investmentDecisionService) {
+      res.status(404).json({ error: 'investment decision service not configured' });
+      return;
+    }
+    try {
+      const detail = req.query.detail === 'summary' ? 'summary' : 'full';
+      const result = await investmentDecisionService.getRun(req.params.runId, detail);
+      if (!result) {
+        res.status(404).json({ error: 'investment decision run not found' });
+        return;
+      }
+      res.json(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  router.get('/investment/decisions/runs/:runId/report', async (req, res) => {
+    if (!investmentDecisionService) {
+      res.status(404).json({ error: 'investment decision service not configured' });
+      return;
+    }
+    try {
+      const detail = req.query.detail === 'summary' ? 'summary' : 'full';
+      const result = await investmentDecisionService.getReport(req.params.runId, detail);
+      if (!result) {
+        res.status(404).json({ error: 'investment decision report not found' });
+        return;
+      }
+      res.json(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  router.get('/investment/decisions/latest', async (req, res) => {
+    if (!investmentDecisionService) {
+      res.status(404).json({ error: 'investment decision service not configured' });
+      return;
+    }
+    try {
+      const detail = req.query.detail === 'summary' ? 'summary' : 'full';
+      const result = await investmentDecisionService.getLatest(detail);
       res.json(result);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';

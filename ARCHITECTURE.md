@@ -48,6 +48,9 @@ Orchestrator owns:
 - provider selection and model policy
 - provider session orchestration and transport dispatch
 - investment-note intake and asset dossier storage
+- watchlist-prioritized investable universe assembly
+- artifact-first investment decision runs
+- deterministic report rendering from decision artifacts
 - final verdict generation
 - report synthesis
 
@@ -115,6 +118,12 @@ Important property:
 
 Important property:
 - auth health, execute readiness, repair, and alerting are separate concerns.
+
+### 7. Daily Investment Decision
+`watchlist + collector clusters + investment notes + source health -> investment decision request artifact -> provider or external runner -> response artifact -> deterministic report -> Discord`
+
+Important property:
+- downstream consumers depend on the request/response/report artifact contract, not on how the LLM was invoked.
 
 ## Core Abstractions
 
@@ -258,6 +267,20 @@ Key idea:
 - asset dossiers provide a stable future hook for verdict/report context
 - this module is an interface and archive layer first, not a second verdict engine
 
+#### InvestmentSignalAssembler, InvestableUniverseResolver, InvestmentDecisionRunner, InvestmentDecisionStore, InvestmentReportFormatter
+`packages/mcp-orchestrator/src/investment/`
+
+These components own the daily shortlist path separately from the debate/verdict pipeline.
+
+Key idea:
+- `InvestmentSignalAssembler` builds a canonical request bundle from watchlist state, collector clusters, source health, and investment notes
+- `InvestableUniverseResolver` keeps the universe watchlist-prioritized and only admits exact or curated equity mappings
+- `InvestmentDecisionRunner` can execute directly through providers or wait for an external artifact writer without changing downstream contracts
+- `InvestmentDecisionStore` is the canonical run directory owner
+- `InvestmentReportFormatter` renders the final operator-facing text deterministically from `response.json`
+
+This keeps provider transport decisions, artifact storage, and report generation decoupled.
+
 #### ProviderHealthMonitor
 `packages/mcp-orchestrator/src/providers/providerHealthMonitor.ts`
 
@@ -328,6 +351,10 @@ These rules apply both to orchestrator debate/verdict transports and to collecto
 - Alerts and UIs should not need to reverse-engineer raw stderr.
 - Keep transport health separate from auth/execute health when an external injection bridge is involved.
 
+The same rule applies to investment decision runs:
+- if a direct provider execution fails, normalize the failure into the decision artifact
+- if an external artifact writer times out or writes an invalid response, surface that as a degraded or failed run instead of inventing a fake report
+
 ## Graph Position
 
 The system should not think in terms of isolated keywords only.
@@ -353,6 +380,11 @@ The system should not think in terms of isolated keywords only.
 - Provider choice, model tiering, retry rules, and escalation rules belong in policy/config layers.
 - HTTP clients and CLI adapters should stay transport-focused.
 
+### Artifact-First Decision Contracts
+- investment decision request and response artifacts are the canonical interface
+- `provider_exec` and `external_artifact` are interchangeable execution modes behind that contract
+- Discord and scheduled reports should consume `response.json`, not re-run LLM formatting
+
 ### Keep Human Input Thin At The Edge
 - The Discord bot should forward envelopes.
 - Collector should decide how free-form human input is routed and stored.
@@ -361,6 +393,8 @@ The system should not think in terms of isolated keywords only.
 - [AGENTS.md](AGENTS.md): Codex workflow, WSL assumptions, contributor rules
 - [README.md](README.md): operator-facing runtime overview and environment setup
 - [RUNBOOK.md](RUNBOOK.md): rebuild, health checks, provider checks, live troubleshooting
+- [docs/investment-module.md](docs/investment-module.md): free-form human research intake and dossier archive
+- [docs/investment-decision-module.md](docs/investment-decision-module.md): daily shortlist decision contract and report flow
 
 ### Optimize For Traceability
 - Given a report or verdict, it should be possible to trace:

@@ -213,6 +213,44 @@ curl http://127.0.0.1:5003/health
   - 예: `ENABLED_PROVIDERS=claude,gemini`
   - `DEFAULT_PROVIDERS`는 등록된 provider 안에서만 우선순위를 정한다.
 
+investment decision run 확인:
+
+```bash
+curl -X POST http://127.0.0.1:5003/investment/decisions/runs \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"manual","detail":"summary"}'
+
+curl http://127.0.0.1:5003/investment/decisions/latest
+curl http://127.0.0.1:5003/investment/decisions/runs/<run_id>
+curl 'http://127.0.0.1:5003/investment/decisions/runs/<run_id>/report?detail=summary'
+```
+
+의미:
+- run은 항상 artifact-first다. `request.json`과 `request.md`가 먼저 생성된다.
+- `INVESTMENT_DECISION_RUNNER=provider_exec`면 orchestrator가 직접 provider를 호출한다.
+- `INVESTMENT_DECISION_RUNNER=external_artifact`면 외부 판단 주체가 `response.json`을 쓸 때까지 polling 한다.
+- 결정 결과와 Discord 리포트는 모두 `response.json`을 기준으로 생성된다.
+
+artifact 경로 기본값:
+
+```text
+data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
+  request.json
+  request.md
+  status.json
+  response.json
+  response.md
+  report.md
+```
+
+curated equity mapping 기본 경로:
+
+```text
+data/investment-module/equity-map.json
+```
+
+이 파일은 exact alias/ticker/company_name 매칭만 다루는 저위험 매핑 입력이다.
+
 ### Discord Bot
 
 ```bash
@@ -353,7 +391,9 @@ collector가 이를 해석해서:
 - slash command 응답은 기본적으로 ephemeral이다.
 - `/queue human`은 `DISCORD_HUMAN_QUEUE_CHANNEL_IDS`가 설정된 경우 해당 채널에서만 허용된다.
 - `/ops health`, `/ops providers`는 `DISCORD_STATUS_CHANNEL_IDS` 또는 `DISCORD_PROVIDER_ALERT_CHANNEL_IDS`에 포함된 채널에서 허용된다.
+- `/report run`은 orchestrator investment decision run을 실행한다.
 - `/report run`은 ephemeral ack를 반환하고 실제 리포트 본문은 `DISCORD_DAILY_REPORT_CHANNEL_ID` 또는 guild 기본 보고 채널로 전송된다.
+- 봇은 investment decision 결과 artifact를 그대로 렌더링하므로, report formatting 문제를 볼 때는 Discord보다 먼저 orchestrator `response.json`과 `report.md`를 확인하는 편이 빠르다.
 
 필수 env:
 - `DISCORD_TOKEN`
@@ -400,6 +440,7 @@ curl http://127.0.0.1:5003/health
 - `gemini`: 별도 status 명령이 불안정하면 headless prompt probe 기준
 - 실제 readiness 판단은 auth probe가 아니라 execute probe까지 통과했는지로 본다.
 - external injection transport를 쓰는 경우에는 provider stdout이 아니라 session directory의 `inbox/`, `outbox/`, `artifacts/`를 같이 본다.
+- investment decision에서 `external_artifact` 모드를 쓸 때도 같은 원칙을 따른다. provider CLI stdout이 아니라 investment decision run dir의 `response.json`이 canonical output이다.
 
 session artifact 위치 예시:
 

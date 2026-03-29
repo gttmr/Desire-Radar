@@ -23,7 +23,23 @@ export type HighLevelRunStatus =
   | 'consensus'
   | 'max_rounds_reached';
 export type ModelProfile = 'cheap' | 'balanced' | 'premium';
-export type ExecutionPhase = 'triage' | 'debate' | 'verdict' | 'report';
+export type ExecutionPhase =
+  | 'triage'
+  | 'debate'
+  | 'verdict'
+  | 'report'
+  | 'investment_decision';
+export type InvestmentDecisionRunStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'degraded'
+  | 'failed';
+export type InvestmentDecisionRecommendation =
+  | 'buy_now'
+  | 'accumulate'
+  | 'watch'
+  | 'pass';
 
 /** A single run of the orchestrator pipeline */
 export type Run = {
@@ -333,4 +349,126 @@ export type ProviderHealth = {
   repair_command_preview?: string;
   last_repair_at?: string;
   last_repair_summary?: string;
+};
+
+export type InvestmentCandidateCluster = {
+  cluster_id?: string | null;
+  display_label: string;
+  candidate_kind: 'entity_cluster';
+  primary_entity?: string | null;
+  aliases: string[];
+  supporting_sources: string[];
+  supporting_terms: string[];
+  theme_tags: string[];
+  event_summary?: string | null;
+  graph_summary?: string | null;
+  evidence_ids: string[];
+  emergence_score: number;
+  velocity_score: number;
+  status: string;
+};
+
+export type ResolvedEquityCandidate = {
+  asset_key: string;
+  ticker: string;
+  company_name: string;
+  why_in_scope: string;
+  linked_clusters: string[];
+  linked_notes: string[];
+  watchlist_member: boolean;
+};
+
+export type InvestmentDecisionNote = {
+  intake_id: string;
+  asset_key?: string | null;
+  title: string;
+  summary: string;
+  why_it_might_matter: string;
+  open_questions: string[];
+  source_submission_id: string;
+  created_at: string;
+};
+
+export type InvestmentSourceHealth = {
+  source_id: string;
+  readiness_status?: string | null;
+  readiness_reason?: string | null;
+  quality_status?: string | null;
+  freshness_lag_seconds?: number | null;
+  last_success_at?: string | null;
+  last_failure_kind?: string | null;
+};
+
+export type InvestmentCoverageGap = {
+  label: string;
+  reason: string;
+  linked_cluster_id?: string | null;
+  linked_note_ids?: string[];
+};
+
+export type InvestmentDecisionRequest = {
+  run_id: string;
+  created_at: string;
+  mode: 'scheduled' | 'manual' | 'api';
+  window: {
+    label: string;
+    start: string;
+    end: string;
+  };
+  watchlist: string[];
+  resolved_equities: ResolvedEquityCandidate[];
+  candidate_clusters: InvestmentCandidateCluster[];
+  supporting_evidence_refs: string[];
+  investment_notes: InvestmentDecisionNote[];
+  source_health_summary: InvestmentSourceHealth[];
+  coverage_gaps: InvestmentCoverageGap[];
+  schema_version: 1;
+};
+
+export type InvestmentDecisionRecommendationItem = {
+  asset_key: string;
+  ticker: string;
+  company_name: string;
+  recommendation: InvestmentDecisionRecommendation;
+  confidence: number;
+  why_now: string;
+  thesis: string;
+  beneficiary_path: string;
+  linked_clusters: string[];
+  linked_evidence_refs: string[];
+  risks: string[];
+  missing_information: string[];
+};
+
+export type InvestmentDecisionArtifact = {
+  run_id: string;
+  status: Exclude<InvestmentDecisionRunStatus, 'queued' | 'running'>;
+  generated_at: string;
+  summary: string;
+  market_view: string;
+  top_picks: InvestmentDecisionRecommendationItem[];
+  watch_candidates: InvestmentDecisionRecommendationItem[];
+  rejected_candidates: InvestmentDecisionRecommendationItem[];
+  coverage_gaps: InvestmentCoverageGap[];
+  risks: string[];
+  degraded: boolean;
+  degraded_reason?: string | null;
+  schema_version: 1;
+};
+
+export type InvestmentDecisionRunRecord = {
+  run_id: string;
+  status: InvestmentDecisionRunStatus;
+  mode: 'scheduled' | 'manual' | 'api';
+  runner: 'provider_exec' | 'external_artifact';
+  created_at: string;
+  updated_at: string;
+  request_path: string;
+  request_markdown_path: string;
+  status_path: string;
+  response_path?: string | null;
+  response_markdown_path?: string | null;
+  report_path?: string | null;
+  degraded_reason?: string | null;
+  error?: string | null;
 };

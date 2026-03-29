@@ -11,6 +11,7 @@
 - [RUNBOOK.md](RUNBOOK.md): WSL 기준 로컬 런타임, 네이티브 실행, 재기동, health, smoke, 장애 대응 절차
 - [docs/collector-source-agents.md](docs/collector-source-agents.md): collector source-agent living design
 - [docs/investment-module.md](docs/investment-module.md): free-form human input와 orchestrator investment module living design
+- [docs/investment-decision-module.md](docs/investment-decision-module.md): watchlist-prioritized daily shortlist와 artifact-first decision contract
 - `packages/mcp-orchestrator/src/agents/*.md`: 오케스트레이터 분석 에이전트 프롬프트
 
 ## 아키텍처
@@ -19,7 +20,7 @@
 |--------|------|------|------|
 | `discord-bot` | `packages/discord-bot/` | TypeScript | Discord 명령, 스케줄 리포트, 단일 human input 채널 수집 |
 | `collector` | `packages/collector/` | Python | 다중 소스 ingestion, source registry, submission tracking, cluster/event 기반 candidate 생성, collector-side CLI 분석, evidence graph snapshot |
-| `mcp-orchestrator` | `packages/mcp-orchestrator/` | TypeScript | `triage -> debate -> research-loop -> verdict -> report` 투자 판단 파이프라인과 provider session orchestration |
+| `mcp-orchestrator` | `packages/mcp-orchestrator/` | TypeScript | `triage -> debate -> research-loop -> verdict`와 별개로 `investment decision -> deterministic report`를 담당하는 투자 판단 엔진 |
 | `shared-types` | `packages/shared-types/` | TypeScript | 서비스 간 공용 타입 |
 
 ```text
@@ -42,7 +43,8 @@ Discord human input / slash commands
   - debate
   - research-loop
   - verdict
-  - report
+  - investment decision
+  - deterministic report
   - provider session dir + transport dispatch
 ```
 
@@ -73,6 +75,9 @@ Discord human input / slash commands
 - collector 후보를 받아 phase-aware 의사결정 파이프라인으로 처리한다.
 - research 부족분은 collector submission API를 통해 다시 요청한다.
 - 최종 verdict는 premium model policy를 분리해 사용한다.
+- watchlist-prioritized daily shortlist는 별도 investment decision subsystem이 담당한다.
+- investment decision run은 항상 request/response/report artifact를 먼저 남기고, Discord와 daily report는 그 결과 artifact만 소비한다.
+- 실행 모드는 `provider_exec`와 `external_artifact` 두 가지를 지원한다.
 - 기본 provider 경로는 `codex, claude, gemini`다.
 - `ENABLED_PROVIDERS`가 실제 등록과 health monitoring 대상을 결정하고, `DEFAULT_PROVIDERS`는 그 안에서 실행 우선순위를 결정한다.
 - `OPENAI_API_KEY`만으로는 OpenAI provider가 자동 등록되지 않고, `ENABLED_PROVIDERS`에 `openai`를 넣었을 때만 추가 등록된다.
@@ -85,6 +90,7 @@ Discord human input / slash commands
 - 메시지 내용을 bot이 직접 분류하지 않고 raw envelope 그대로 collector에 전달한다.
 - collector가 돌려준 `action_requests` 중 저위험 주식 watchlist add/remove만 자동 실행한다.
 - collector가 돌려준 `investment_module` handoff는 orchestrator investment intake API로 전달한다.
+- `/report run`은 더 이상 자체 판단 로직을 만들지 않고 orchestrator investment decision run을 호출한 뒤 결과 artifact를 보고 채널로 렌더링한다.
 - slash command 표면은 `report`, `radar`, `run`, `queue`, `ops` 5개 namespace로 고정한다.
 
 ## 빠른 시작
@@ -218,6 +224,37 @@ collector는 이를 `human_input_inbox` source로 받고 다음을 판단한다.
 
 장문 스터디/리서치 입력은 orchestrator의 investment module에 Markdown으로 축적된다.
 
+## Investment Decision Module
+
+- 위치: `packages/mcp-orchestrator/src/investment/`
+- 목적: watchlist-prioritized daily shortlist를 만들고 Discord/daily report가 소비할 canonical artifact를 남기는 것
+- 출력 범위: v1은 `stock-only`
+- 내부 구조: asset-neutral 유지
+
+artifact-first run 디렉터리:
+
+```text
+data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
+  request.json
+  request.md
+  status.json
+  response.json
+  response.md
+  report.md
+```
+
+핵심 규칙:
+- orchestrator는 항상 `request.json`과 `request.md`를 먼저 쓴다.
+- direct CLI 실행도 최종 결과는 `response.json`으로 정규화한다.
+- `external_artifact` 모드에서는 외부 프로세스가 `request.*`를 읽고 `response.json`을 쓴다.
+- Discord와 scheduled report는 `response.json` 기반 deterministic formatter만 사용한다.
+
+투자 universe 규칙:
+- guild watchlist 종목이 항상 기본 universe에 포함된다.
+- collector cluster, beneficiary mapping, investment dossier는 보조 입력으로만 들어간다.
+- exact alias/ticker/company_name 매칭이 안 되는 신규 후보는 `coverage_gaps`로 남긴다.
+- curated equity mapping 파일 기본 경로는 `data/investment-module/equity-map.json`이다.
+
 ## Session And Graph Strategy
 
 - collector의 목적은 단어만 모으는 것이 아니라 매일의 사건, 신호, 관계를 evidence bundle로 정리하는 것이다.
@@ -282,6 +319,10 @@ collector는 이를 `human_input_inbox` source로 받고 다음을 판단한다.
 - `POST /investment/intake`
 - `GET /investment/intakes/:intake_id`
 - `GET /investment/assets/:asset_key`
+- `POST /investment/decisions/runs`
+- `GET /investment/decisions/runs/:run_id`
+- `GET /investment/decisions/runs/:run_id/report`
+- `GET /investment/decisions/latest`
 
 ## Collector CLI 분석
 
@@ -359,7 +400,7 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 - `/report watchlist add ticker:<코드>`: 관심 종목 추가
 - `/report watchlist remove ticker:<코드>`: 관심 종목 제거
 - `/report watchlist list`: 관심 종목 목록 조회
-- `/report run [detail:summary|full]`: 일일 리포트를 실행하고 보고 채널로 전송
+- `/report run [detail:summary|full]`: orchestrator investment decision run을 실행하고 결과 artifact를 보고 채널로 전송
 - `/report status`: 리포트 설정과 최근 실행 상태 조회
 
 ### `/radar`
@@ -423,6 +464,11 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 | `GEMINI_TRANSPORT` | mcp-orchestrator | gemini transport 기본값 |
 | `PROVIDER_SESSION_ROOT_DIR` | mcp-orchestrator | provider session/artifact 루트 |
 | `PROVIDER_EXTERNAL_POLL_INTERVAL_MS` | mcp-orchestrator | external injection 응답 polling 간격 |
+| `INVESTMENT_DECISION_RUNNER` | mcp-orchestrator | `provider_exec` 또는 `external_artifact` |
+| `INVESTMENT_DECISION_RUN_ROOT` | mcp-orchestrator | investment decision run artifact 루트 |
+| `INVESTMENT_DECISION_TIMEOUT_MS` | mcp-orchestrator | decision run 최대 대기 시간 |
+| `INVESTMENT_DECISION_POLL_INTERVAL_MS` | mcp-orchestrator | external artifact polling 간격 |
+| `INVESTMENT_EQUITY_MAP_PATH` | mcp-orchestrator | curated equity alias/ticker mapping 파일 경로 |
 | `PROVIDER_HEALTH_POLL_INTERVAL_SEC` | mcp-orchestrator | provider health probe 주기 |
 | `PROVIDER_REPAIR_COOLDOWN_SEC` | mcp-orchestrator | provider repair 재시도 cooldown |
 | `PROVIDER_REPAIR_CODEX_COMMAND` | mcp-orchestrator | optional Codex repair command |

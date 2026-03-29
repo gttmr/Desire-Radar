@@ -22,6 +22,11 @@ import type {
   InvestmentIntakeResponse,
   GetInvestmentIntakeResponse,
   GetInvestmentAssetResponse,
+  CreateInvestmentDecisionRunRequest,
+  CreateInvestmentDecisionRunResponse,
+  GetInvestmentDecisionRunResponse,
+  GetLatestInvestmentDecisionResponse,
+  InvestmentDecisionReportResponse,
 } from '@agentic/shared-types';
 
 export class OrchestratorClient {
@@ -92,6 +97,36 @@ export class OrchestratorClient {
 
   async getInvestmentAsset(assetKey: string): Promise<GetInvestmentAssetResponse> {
     return this.get(`/investment/assets/${encodeURIComponent(assetKey)}`);
+  }
+
+  async createInvestmentDecisionRun(
+    req: CreateInvestmentDecisionRunRequest,
+  ): Promise<CreateInvestmentDecisionRunResponse> {
+    return this.post('/investment/decisions/runs', req);
+  }
+
+  async getInvestmentDecisionRun(
+    runId: string,
+    detail: 'summary' | 'full' = 'full',
+  ): Promise<GetInvestmentDecisionRunResponse> {
+    return this.get(
+      `/investment/decisions/runs/${encodeURIComponent(runId)}?detail=${encodeURIComponent(detail)}`,
+    );
+  }
+
+  async getLatestInvestmentDecision(
+    detail: 'summary' | 'full' = 'full',
+  ): Promise<GetLatestInvestmentDecisionResponse> {
+    return this.get(`/investment/decisions/latest?detail=${encodeURIComponent(detail)}`);
+  }
+
+  async getInvestmentDecisionReport(
+    runId: string,
+    detail: 'summary' | 'full' = 'full',
+  ): Promise<InvestmentDecisionReportResponse> {
+    return this.get(
+      `/investment/decisions/runs/${encodeURIComponent(runId)}/report?detail=${encodeURIComponent(detail)}`,
+    );
   }
 
   async listSessions(agentName?: string): Promise<ListSessionsResponse> {

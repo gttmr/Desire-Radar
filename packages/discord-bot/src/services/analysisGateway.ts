@@ -1,8 +1,8 @@
 import type {
   PredictorRequest,
   PredictorResponse,
-  EvidenceBundle,
-  SignalCandidate,
+  InvestmentDecisionArtifact,
+  CreateInvestmentDecisionRunResponse,
 } from '@agentic/shared-types';
 import type { CollectorClient } from './collectorClient.js';
 import type { OrchestratorClient } from './orchestratorClient.js';
@@ -13,8 +13,19 @@ export interface AnalysisGateway {
   generateReport(request: PredictorRequest): Promise<PredictorResponse>;
 }
 
-function getCandidateSources(candidate: Pick<SignalCandidate, 'sources' | 'primary_sources'>): string[] {
-  return candidate.sources.length > 0 ? candidate.sources : (candidate.primary_sources ?? []);
+function recommendationToDirection(
+  recommendation: InvestmentDecisionArtifact['top_picks'][number]['recommendation'],
+): 'bullish' | 'bearish' | 'neutral' {
+  switch (recommendation) {
+    case 'buy_now':
+    case 'accumulate':
+      return 'bullish';
+    case 'pass':
+      return 'bearish';
+    case 'watch':
+    default:
+      return 'neutral';
+  }
 }
 
 /**
@@ -29,38 +40,13 @@ export class OrchestratorGatewayAdapter implements AnalysisGateway {
 
   async generateReport(request: PredictorRequest): Promise<PredictorResponse> {
     try {
-      // 1) Get top emerging candidates from collector
-      const { candidates } = await this._collector.getEmergingCandidates();
-
-      if (candidates.length === 0) {
-        return {
-          generatedAt: new Date().toISOString(),
-          detail: request.detail,
-          summary: '수집된 신호 후보가 없습니다. 데이터 소스 상태를 확인하세요.',
-          marketCommentary: '',
-          markdown: '> 수집된 신호 후보가 없습니다.',
-          items: [],
-          risks: [],
-          sources: [],
-          tickers: request.tickers
-        } as PredictorResponse;
-      }
-
-      // 2) Sort by emergence_score and take top candidates
-      const top = candidates
-        .sort((a, b) => b.emergence_score - a.emergence_score)
-        .slice(0, 20);
-
-      // 3) Try orchestrator pipeline with timeout
-      try {
-        const report = await this._generateViaOrchestrator(request, top);
-        if (report) return report;
-      } catch {
-        // Orchestrator unavailable — fall through to collector-only report
-      }
-
-      // 4) Fallback: generate report directly from collector data
-      return this._generateFromCollectorData(request, top);
+      const result = await this._orchestrator.createInvestmentDecisionRun({
+        watchlist: request.tickers,
+        mode: request.mode,
+        detail: request.detail,
+        as_of_date: request.asOfDate,
+      });
+      return this._mapDecisionResponse(result, request);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
@@ -72,117 +58,52 @@ export class OrchestratorGatewayAdapter implements AnalysisGateway {
         items: [],
         risks: [],
         sources: [],
-        tickers: request.tickers
       } as PredictorResponse;
     }
   }
 
-  private async _generateViaOrchestrator(
+  private _mapDecisionResponse(
+    result: CreateInvestmentDecisionRunResponse,
     request: PredictorRequest,
-    candidates: SignalCandidate[],
-  ): Promise<PredictorResponse | null> {
-    const entityList = candidates.map(c => c.entity);
-    const evidenceSummary = candidates
-      .map(c => `${c.entity} (emergence=${c.emergence_score}, velocity=${c.velocity_score}, sources=${c.source_count})`)
-      .join('\n');
-    const totalSourceCount = candidates.reduce((sum, c) => sum + c.source_count, 0);
-
-    const bundle: EvidenceBundle = {
-      bundle_id: `gateway-${Date.now()}`,
-      entity: entityList.join(', '),
-      time_window: {
-        start: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-        end: new Date().toISOString()
-      },
-      evidence_items: [],
-      cross_source_summary: `${candidates.length} emerging candidates across ${totalSourceCount} source hits.\n${evidenceSummary}`,
-      recommended_agents: ['search_intent', 'ranking_momentum', 'synthesis'],
-      quality_flags: []
-    };
-
-    // Submit evidence
-    const { run_id } = await this._orchestrator.submitEvidence({
-      topic: `Daily analysis ${request.asOfDate}`,
-      evidence_bundle: bundle
-    });
-
-    // Run debate with timeout — abort if orchestrator is too slow
-    const debatePromise = this._orchestrator.runDebate({ run_id, max_rounds: 1 });
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('orchestrator_timeout')), 30_000)
-    );
-    await Promise.race([debatePromise, timeoutPromise]);
-
-    // Synthesize report
-    const synthesis = await this._orchestrator.synthesizeReport({ run_id });
-    const sections = synthesis.sections ?? [];
-    const markdown = sections.map(s => `## ${s.title}\n\n${s.content}`).join('\n\n');
-
-    return {
-      generatedAt: new Date().toISOString(),
-      detail: request.detail,
-      summary: synthesis.summary ?? 'Report generated via orchestrator pipeline.',
-      marketCommentary: sections.find(s => s.title.toLowerCase().includes('market'))?.content ?? '',
-      markdown,
-      items: [],
-      risks: [],
-      sources: [...new Set(candidates.flatMap(getCandidateSources))],
-      tickers: request.tickers
-    } as PredictorResponse;
-  }
-
-  private _generateFromCollectorData(
-    request: PredictorRequest,
-    candidates: SignalCandidate[],
   ): PredictorResponse {
-    const now = new Date().toISOString();
-    const date = request.asOfDate || now.slice(0, 10);
-
-    // Build markdown report from collector data
-    const lines: string[] = [];
-    lines.push(`# 욕망 레이더 일일 리포트 — ${date}\n`);
-    lines.push(`> ${candidates.length}개 신호 후보 기반 (오케스트레이터 미연결, 수집 데이터 직접 분석)\n`);
-
-    // Group by status
-    const emerging = candidates.filter(c => c.status === 'emerging' || c.emergence_score >= 7);
-    const preheat = candidates.filter(c => c.status === 'preheat' && c.emergence_score < 7);
-
-    if (emerging.length > 0) {
-      lines.push(`## 🔥 주요 급부상 신호 (${emerging.length}개)\n`);
-      for (const c of emerging.slice(0, 10)) {
-        const score = Math.round(c.emergence_score * 100);
-        const velocity = Math.round(c.velocity_score * 100);
-        lines.push(`- **${c.entity}** — 출현 ${score}% | 확산 속도 ${velocity}% | 소스(${c.source_count}): ${getCandidateSources(c).join(', ')}`);
-      }
-      lines.push('');
-    }
-
-    if (preheat.length > 0) {
-      lines.push(`## 📡 관찰 중인 신호 (${preheat.length}개)\n`);
-      for (const c of preheat.slice(0, 10)) {
-        const score = Math.round(c.emergence_score * 100);
-        lines.push(`- **${c.entity}** — 출현 ${score}% | 소스(${c.source_count}): ${getCandidateSources(c).join(', ')}`);
-      }
-      lines.push('');
-    }
-
-    const allSources = [...new Set(candidates.flatMap(getCandidateSources))];
-    lines.push(`## 📊 데이터 소스\n`);
-    lines.push(`활성 소스: ${allSources.join(', ')}\n`);
-
-    const markdown = lines.join('\n');
-    const summary = `${date} 기준 ${candidates.length}개 신호 후보 탐지. 급부상 ${emerging.length}개, 관찰 중 ${preheat.length}개.`;
-
+    const artifact = result.artifact;
     return {
-      generatedAt: now,
+      generatedAt: artifact.generated_at,
       detail: request.detail,
-      summary,
-      marketCommentary: '',
-      markdown,
-      items: [],
-      risks: [],
-      sources: allSources,
-      tickers: request.tickers
+      summary: artifact.summary,
+      marketCommentary: artifact.market_view,
+      markdown: result.report.markdown,
+      items: [...artifact.top_picks, ...artifact.watch_candidates, ...artifact.rejected_candidates].map((item) => ({
+        ticker: item.ticker,
+        headline: item.why_now || item.company_name,
+        direction: recommendationToDirection(item.recommendation),
+        confidence: item.confidence,
+        news: item.linked_clusters,
+        disclosures: item.missing_information,
+        bullCase: [item.thesis],
+        bearCase: item.risks,
+        watchPoints: item.missing_information,
+        debateLog: {
+          bull: {
+            stance: item.thesis,
+            confidence: item.confidence,
+            arguments: [item.beneficiary_path],
+          },
+          bear: {
+            stance: item.risks[0] ?? 'No explicit bear case',
+            confidence: Math.max(0, 1 - item.confidence),
+            arguments: item.risks,
+          },
+          judge: {
+            verdict: item.recommendation,
+            rationale: [item.why_now],
+            selectedRisks: item.risks,
+            selectedWatchPoints: item.missing_information,
+          },
+        },
+      })),
+      risks: artifact.risks,
+      sources: [...new Set(result.request.source_health_summary.map((item) => item.source_id))],
     } as PredictorResponse;
   }
 }

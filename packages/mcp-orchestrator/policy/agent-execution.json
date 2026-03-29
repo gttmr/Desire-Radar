@@ -30,6 +30,14 @@
       ],
       "modelProfile": "balanced",
       "responseFormat": "json"
+    },
+    "investment_decision": {
+      "providers": [
+        "codex",
+        "claude"
+      ],
+      "modelProfile": "premium",
+      "responseFormat": "json"
     }
   },
   "agents": {
@@ -131,6 +139,15 @@
         "codex"
       ],
       "modelProfile": "balanced",
+      "responseFormat": "json"
+    },
+    "investment_decision": {
+      "phase": "investment_decision",
+      "providers": [
+        "codex",
+        "claude"
+      ],
+      "modelProfile": "premium",
       "responseFormat": "json"
     }
   }
