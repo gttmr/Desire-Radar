@@ -54,11 +54,21 @@ export class InvestmentDecisionService {
       requestMarkdown,
     });
     await this.store.markRunning(runId);
-    const artifact = await this.runner.run({
-      run,
-      request: assembled,
-      requestMarkdown,
-    });
+    let artifact;
+    try {
+      artifact = await this.runner.run({
+        run,
+        request: assembled,
+        requestMarkdown,
+        updateStatus: async (patch) => {
+          await this.store.updateProgress(runId, patch);
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.store.fail(runId, message);
+      throw error;
+    }
     const responseMarkdown = this.formatter.renderResponseMarkdown(assembled, artifact);
     const fullReport = this.formatter.formatReport(assembled, artifact, 'full');
     const completedRun = await this.store.complete(runId, artifact, responseMarkdown, fullReport);

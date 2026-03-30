@@ -478,4 +478,9 @@ export type InvestmentDecisionRunRecord = {
   report_path?: string | null;
   degraded_reason?: string | null;
   error?: string | null;
+  active_stage?: 'prepare' | 'final' | null;
+  active_provider?: string | null;
+  prepare_status?: string | null;
+  final_status?: string | null;
+  last_attempt_at?: string | null;
 };

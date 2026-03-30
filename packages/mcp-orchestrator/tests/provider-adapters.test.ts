@@ -75,6 +75,19 @@ warn line
     expect(parsed.threadId).toBe('thread-456');
   });
 
+  it('extracts codex text from nested delta/content payloads without agent_message', () => {
+    const parsed = extractCodexExecResult(`
+{"type":"thread.started","thread_id":"thread-789"}
+{"type":"response.delta","response":{"items":[{"content":[{"delta":{"text":"<structured_json>{\\\"executive_summary\\\":\\\"ok\\\",\\\"market_context\\\":\\\"steady\\\"}</structured_json>"}}]}]}}
+{"type":"turn.completed","usage":{"input_tokens":8,"cached_input_tokens":0,"output_tokens":6}}
+`);
+
+    expect(parsed.messageText).toBe(
+      '<structured_json>{"executive_summary":"ok","market_context":"steady"}</structured_json>',
+    );
+    expect(parsed.threadId).toBe('thread-789');
+  });
+
   it('uses the current codex exec JSON flow instead of deprecated --quiet', async () => {
     mockExecFile((_file, args, options, callback) => {
       callback(

@@ -7,10 +7,22 @@ export type StructuredJsonParseStrategy =
   | 'exact'
   | 'balanced';
 
+export type StructuredTransportOutcome =
+  | 'transport_failure'
+  | 'empty_stream'
+  | 'text_stream';
+
+export type StructuredJsonOutcome =
+  | 'tagged_json'
+  | 'reasoning_then_json'
+  | 'json_without_tag'
+  | 'unreadable_json';
+
 export type StructuredJsonParseResult = {
   parsed: unknown;
   jsonText: string;
   strategy: StructuredJsonParseStrategy;
+  structuredOutcome: StructuredJsonOutcome;
 };
 
 function stripMarkdownFences(text: string): string {
@@ -28,6 +40,18 @@ function extractTaggedJson(text: string): string | null {
     lastMatch = match;
   }
   return lastMatch?.[1]?.trim() ?? null;
+}
+
+function extractTaggedBlock(text: string): string | null {
+  const matcher = new RegExp(
+    `${STRUCTURED_JSON_OPEN_TAG}[\\s\\S]*?${STRUCTURED_JSON_CLOSE_TAG}`,
+    'gi',
+  );
+  let lastMatch: RegExpExecArray | null = null;
+  for (let match = matcher.exec(text); match; match = matcher.exec(text)) {
+    lastMatch = match;
+  }
+  return lastMatch?.[0]?.trim() ?? null;
 }
 
 function extractBalancedJson(text: string): string | null {
@@ -85,12 +109,43 @@ function summarizeParseError(error: unknown, text: string): string {
   return `${message} (raw=${snippet})`;
 }
 
-function parseCandidate(text: string, strategy: StructuredJsonParseStrategy): StructuredJsonParseResult {
+function classifyStructuredJsonOutcome(
+  rawText: string,
+  strategy: StructuredJsonParseStrategy,
+  jsonText: string,
+): StructuredJsonOutcome {
+  const trimmed = rawText.trim();
+
+  if (strategy === 'tagged') {
+    const taggedBlock = extractTaggedBlock(trimmed);
+    if (taggedBlock && taggedBlock === trimmed) {
+      return 'tagged_json';
+    }
+    return 'reasoning_then_json';
+  }
+
+  if (strategy === 'balanced') {
+    return trimmed === jsonText.trim() ? 'json_without_tag' : 'reasoning_then_json';
+  }
+
+  return 'json_without_tag';
+}
+
+function parseCandidate(
+  rawText: string,
+  text: string,
+  strategy: StructuredJsonParseStrategy,
+): StructuredJsonParseResult {
   return {
     parsed: JSON.parse(text),
     jsonText: text,
     strategy,
+    structuredOutcome: classifyStructuredJsonOutcome(rawText, strategy, text),
   };
+}
+
+export function classifyStructuredTransportOutcome(text: string): StructuredTransportOutcome {
+  return text.trim() ? 'text_stream' : 'empty_stream';
 }
 
 export function parseStructuredJsonText(text: string): StructuredJsonParseResult {
@@ -115,7 +170,7 @@ export function parseStructuredJsonText(text: string): StructuredJsonParseResult
     }
     seen.add(`${candidate.strategy}:${normalized}`);
     try {
-      return parseCandidate(normalized, candidate.strategy);
+      return parseCandidate(trimmed, normalized, candidate.strategy);
     } catch (error) {
       lastError = error;
     }

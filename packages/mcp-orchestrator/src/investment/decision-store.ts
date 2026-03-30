@@ -51,6 +51,11 @@ export class InvestmentDecisionStore {
       report_path: join(dateDir, 'report.md'),
       degraded_reason: null,
       error: null,
+      active_stage: null,
+      active_provider: null,
+      prepare_status: null,
+      final_status: null,
+      last_attempt_at: null,
     };
 
     await writeFile(record.request_path, JSON.stringify(args.request, null, 2), 'utf8');
@@ -60,7 +65,23 @@ export class InvestmentDecisionStore {
   }
 
   async markRunning(runId: string): Promise<InvestmentDecisionRunRecord> {
-    return this.updateRecord(runId, { status: 'running', error: null });
+    return this.updateRecord(runId, {
+      status: 'running',
+      error: null,
+      degraded_reason: null,
+      active_stage: null,
+      active_provider: null,
+      prepare_status: 'pending',
+      final_status: 'pending',
+      last_attempt_at: null,
+    });
+  }
+
+  async updateProgress(
+    runId: string,
+    patch: Partial<InvestmentDecisionRunRecord>,
+  ): Promise<InvestmentDecisionRunRecord> {
+    return this.updateRecord(runId, patch);
   }
 
   async complete(
@@ -80,6 +101,9 @@ export class InvestmentDecisionStore {
       status: artifact.status,
       degraded_reason: artifact.degraded_reason ?? null,
       error: artifact.status === 'failed' ? artifact.summary : null,
+      active_stage: null,
+      active_provider: null,
+      final_status: artifact.status,
     });
   }
 
@@ -88,6 +112,9 @@ export class InvestmentDecisionStore {
       status: 'failed',
       degraded_reason: message,
       error: message,
+      active_stage: null,
+      active_provider: null,
+      final_status: 'failed',
     });
   }
 
@@ -176,6 +203,9 @@ export class InvestmentDecisionStore {
         status: 'failed',
         degraded_reason: args.reason,
         error: args.reason,
+        active_stage: null,
+        active_provider: null,
+        final_status: 'failed',
         updated_at: new Date().toISOString(),
       };
       changed += 1;

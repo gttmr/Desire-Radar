@@ -62,3 +62,5 @@ Each item in `coverage_gaps` must include:
 - Keep evidence provenance hints when they matter, but do not repeat raw request fields verbatim unless necessary.
 - Source health degradation and coverage gaps must survive this step.
 - If something is unclear, keep it as a gap or risk instead of smoothing it over.
+- Keep every field compact. Prefer short clause-level summaries over paragraphs.
+- Use only the most material items already present in the request. Do not expand the scope.

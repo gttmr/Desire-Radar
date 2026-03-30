@@ -21,8 +21,11 @@ import type { ProviderHealthProbe } from '../providers/base.js';
 import type { ToolPolicy } from '../providers/base.js';
 import {
   buildStructuredJsonRetryPrompt,
+  classifyStructuredTransportOutcome,
   parseStructuredJsonText,
   type StructuredJsonParseStrategy,
+  type StructuredJsonOutcome,
+  type StructuredTransportOutcome,
 } from './structured-output.js';
 
 function sleep(ms: number): Promise<void> {
@@ -39,6 +42,10 @@ async function writeProviderAttemptArtifact(args: {
   degradedMessage?: string | null;
   parseError?: string | null;
   parseStrategy?: StructuredJsonParseStrategy | null;
+  transportOutcome: StructuredTransportOutcome;
+  structuredOutcome?: StructuredJsonOutcome | null;
+  retryCount: number;
+  usedFallbackProvider: boolean;
 }): Promise<void> {
   const attemptsDir = join(args.runDir, 'provider-attempts');
   await mkdir(attemptsDir, { recursive: true });
@@ -53,6 +60,10 @@ async function writeProviderAttemptArtifact(args: {
         degraded_message: args.degradedMessage ?? null,
         parse_error: args.parseError ?? null,
         parse_strategy: args.parseStrategy ?? null,
+        transport_outcome: args.transportOutcome,
+        structured_outcome: args.structuredOutcome ?? null,
+        retry_count: args.retryCount,
+        used_fallback_provider: args.usedFallbackProvider,
         text: args.resultText,
       },
       null,
@@ -232,6 +243,13 @@ type JsonAgentRunResult = {
   degradedReason?: string | null;
 };
 
+type RunStatusPatch = Pick<
+  InvestmentDecisionRunRecord,
+  'active_stage' | 'active_provider' | 'prepare_status' | 'final_status' | 'last_attempt_at'
+>;
+
+type JsonAgentAttemptStatus = 'running' | 'completed' | 'degraded' | 'failed' | 'fallback';
+
 function mergeReasonParts(...parts: Array<string | null | undefined>): string | null {
   const normalized = parts.map((part) => part?.trim()).filter(Boolean) as string[];
   if (normalized.length === 0) {
@@ -259,6 +277,32 @@ function isRetryableStructuredResponse(result: {
     degradedMessage.includes('unreadable response') ||
     degradedMessage.includes('stream disconnected')
   );
+}
+
+function stageStatusKey(agentName: string): 'prepare_status' | 'final_status' {
+  return agentName === 'investment_decision_prepare' ? 'prepare_status' : 'final_status';
+}
+
+function stageName(agentName: string): 'prepare' | 'final' {
+  return agentName === 'investment_decision_prepare' ? 'prepare' : 'final';
+}
+
+function buildStagePatch(
+  agentName: string,
+  status: JsonAgentAttemptStatus,
+  providerName?: string | null,
+): Partial<RunStatusPatch> {
+  const key = stageStatusKey(agentName);
+  return {
+    active_stage: status === 'completed' || status === 'degraded' || status === 'failed' || status === 'fallback'
+      ? null
+      : stageName(agentName),
+    active_provider:
+      status === 'completed' || status === 'degraded' || status === 'failed' || status === 'fallback'
+        ? null
+        : providerName ?? null,
+    [key]: status,
+  };
 }
 
 function normalizePriority(value: unknown): 'high' | 'medium' | 'low' {
@@ -424,6 +468,7 @@ export interface InvestmentDecisionRunner {
     run: InvestmentDecisionRunRecord;
     request: InvestmentDecisionRequest;
     requestMarkdown: string;
+    updateStatus?: (patch: Partial<RunStatusPatch>) => Promise<void>;
   }): Promise<InvestmentDecisionArtifact>;
 }
 
@@ -453,6 +498,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
     run: InvestmentDecisionRunRecord;
     request: InvestmentDecisionRequest;
     requestMarkdown: string;
+    updateStatus?: (patch: Partial<RunStatusPatch>) => Promise<void>;
   }): Promise<InvestmentDecisionArtifact> {
     const runDir = dirname(args.run.request_path);
     const fallbackBriefing = this.promptBuilder.buildPreparedBriefingFallback(args.request);
@@ -461,13 +507,15 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
     let preparedSource: 'llm_preprocess' | 'fallback_disabled' | 'fallback_error' = 'llm_preprocess';
 
     if (this.preprocessConfig.enabled) {
-    const preparedResult = await this.runStructuredJsonAgent({
-      run: args.run,
-      request: args.request,
-      agentName: 'investment_decision_prepare',
-      artifactPrefix: 'prepare',
-      toolPolicy: this.preprocessConfig.toolPolicy,
-      timeoutMs: this.preprocessConfig.timeoutMs,
+      await args.updateStatus?.(buildStagePatch('investment_decision_prepare', 'running'));
+      const preparedResult = await this.runStructuredJsonAgent({
+        run: args.run,
+        request: args.request,
+        agentName: 'investment_decision_prepare',
+        artifactPrefix: 'prepare',
+        toolPolicy: this.preprocessConfig.toolPolicy,
+        timeoutMs: this.preprocessConfig.timeoutMs,
+        updateStatus: args.updateStatus,
         providersOverride: this.preprocessConfig.providers,
         modelProfileOverride: this.preprocessConfig.modelProfile,
         buildPrompt: async ({ provider, model, modelProfile }) =>
@@ -485,11 +533,18 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
         preparedSource = 'fallback_error';
         preprocessWarning =
           `Preprocessing failed; deterministic fallback briefing used. ${preparedResult.error}`;
+        await args.updateStatus?.(buildStagePatch('investment_decision_prepare', 'fallback'));
       } else {
         preparedBriefing = normalizePreparedBriefing(
           preparedResult.parsed,
           args.request,
           fallbackBriefing,
+        );
+        await args.updateStatus?.(
+          buildStagePatch(
+            'investment_decision_prepare',
+            preparedResult.degraded ? 'degraded' : 'completed',
+          ),
         );
         if (preparedResult.degraded || preparedResult.degradedReason) {
           preprocessWarning =
@@ -500,6 +555,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
     } else {
       preparedSource = 'fallback_disabled';
       preprocessWarning = null;
+      await args.updateStatus?.(buildStagePatch('investment_decision_prepare', 'fallback'));
     }
 
     await writePreparedArtifacts({
@@ -510,6 +566,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
       warning: preprocessWarning,
     });
 
+    await args.updateStatus?.(buildStagePatch('investment_decision', 'running'));
     const finalResult = await this.runStructuredJsonAgent({
       run: args.run,
       request: args.request,
@@ -517,6 +574,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
       artifactPrefix: 'decision',
       toolPolicy: this.finalConfig.toolPolicy,
       timeoutMs: this.finalConfig.timeoutMs,
+      updateStatus: args.updateStatus,
       providersOverride: this.finalConfig.providers,
       modelProfileOverride: this.finalConfig.modelProfile,
       buildPrompt: async ({ provider, model, modelProfile }) =>
@@ -532,6 +590,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
 
     if ('error' in finalResult) {
       const failureReason = mergeReasonParts(preprocessWarning, finalResult.error) ?? 'provider_exec failed';
+      await args.updateStatus?.(buildStagePatch('investment_decision', 'failed'));
       return buildFailureArtifact(
         args.request,
         'No provider completed the investment decision run.',
@@ -539,10 +598,21 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
       );
     }
 
-    return normalizeArtifact(finalResult.parsed, args.request, {
+    const artifact = normalizeArtifact(finalResult.parsed, args.request, {
       degraded: finalResult.degraded || Boolean(preprocessWarning),
       degradedReason: mergeReasonParts(preprocessWarning, finalResult.degradedReason),
     });
+    await args.updateStatus?.(
+      buildStagePatch(
+        'investment_decision',
+        artifact.status === 'failed'
+          ? 'failed'
+          : artifact.status === 'degraded'
+            ? 'degraded'
+            : 'completed',
+      ),
+    );
+    return artifact;
   }
 
   private resolvePolicy(
@@ -571,6 +641,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
     artifactPrefix: string;
     toolPolicy: ToolPolicy;
     timeoutMs: number;
+    updateStatus?: (patch: Partial<RunStatusPatch>) => Promise<void>;
     providersOverride?: string[];
     modelProfileOverride?: ModelProfile;
     buildPrompt: (args: {
@@ -586,7 +657,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
     const providerErrors: string[] = [];
     const runDir = dirname(args.run.request_path);
 
-    for (const providerName of resolvedPolicy.providers) {
+    for (const [providerIndex, providerName] of resolvedPolicy.providers.entries()) {
       const adapter = this.registry.get(providerName);
       if (!adapter) {
         providerErrors.push(`${providerName}: provider not registered`);
@@ -604,6 +675,11 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
       const modelProfile = resolvedPolicy.modelProfile;
       const model = this.policyResolver.resolveModel(providerName, modelProfile);
       const transportMode = adapter.defaultTransportMode ?? 'cli_exec';
+      const usedFallbackProvider = providerIndex > 0;
+      const forceFreshExecution =
+        args.agentName === 'investment_decision_prepare' && args.toolPolicy === 'none';
+      let currentAttemptStage: 'initial' | 'retry' | 'repair' = 'initial';
+      let currentRetryCount = 0;
       let session = this.sessionStore.getSession(args.agentName, providerName, {
         phase: 'investment_decision',
         modelProfile,
@@ -622,6 +698,11 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
       }
 
       try {
+        await args.updateStatus?.({
+          active_stage: stageName(args.agentName),
+          active_provider: providerName,
+          last_attempt_at: new Date().toISOString(),
+        });
         const prompt = await args.buildPrompt({
           provider: providerName,
           model,
@@ -629,10 +710,10 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
         });
         const result = await adapter.execute({
           prompt,
-          sessionId: session.provider_session_id ?? undefined,
+          sessionId: forceFreshExecution ? undefined : session.provider_session_id ?? undefined,
           logicalSessionId: session.session_id,
           workingDirectory: session.session_dir,
-          turnCount: session.turn_count,
+          turnCount: forceFreshExecution ? 0 : session.turn_count,
           transportMode,
           transportTarget: session.transport_target ?? null,
           model,
@@ -664,8 +745,19 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
             resultStatus: result.status,
             degradedMessage: result.degraded_message ?? null,
             parseError: result.text.trim() ? null : 'Provider returned an empty response',
+            transportOutcome: classifyStructuredTransportOutcome(result.text),
+            structuredOutcome: result.text.trim() ? 'unreadable_json' : null,
+            retryCount: currentRetryCount,
+            usedFallbackProvider,
           });
 
+          currentAttemptStage = 'retry';
+          currentRetryCount = 1;
+          await args.updateStatus?.({
+            active_stage: stageName(args.agentName),
+            active_provider: providerName,
+            last_attempt_at: new Date().toISOString(),
+          });
           const retryResult = await adapter.execute({
             prompt,
             sessionId: undefined,
@@ -704,9 +796,16 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
             resultStatus: attemptResult.status,
             degradedMessage: attemptResult.degraded_message ?? null,
             parseStrategy: parsedResult.strategy,
+            transportOutcome: classifyStructuredTransportOutcome(attemptResult.text),
+            structuredOutcome: parsedResult.structuredOutcome,
+            retryCount: currentRetryCount,
+            usedFallbackProvider,
           });
         } catch (parseError) {
           const parseMessage = parseError instanceof Error ? parseError.message : String(parseError);
+          const transportOutcome = classifyStructuredTransportOutcome(attemptResult.text);
+          const structuredOutcome =
+            transportOutcome === 'empty_stream' ? null : ('unreadable_json' as const);
           if (!retryableEmptyResponse) {
             await writeProviderAttemptArtifact({
               runDir,
@@ -717,6 +816,10 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
               resultStatus: attemptResult.status,
               degradedMessage: attemptResult.degraded_message ?? null,
               parseError: parseMessage,
+              transportOutcome,
+              structuredOutcome,
+              retryCount: currentRetryCount,
+              usedFallbackProvider,
             });
           } else {
             await writeProviderAttemptArtifact({
@@ -728,15 +831,33 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
               resultStatus: attemptResult.status,
               degradedMessage: attemptResult.degraded_message ?? null,
               parseError: parseMessage,
+              transportOutcome,
+              structuredOutcome,
+              retryCount: currentRetryCount,
+              usedFallbackProvider,
             });
           }
 
+          if (retryableEmptyResponse && transportOutcome === 'empty_stream') {
+            providerErrors.push(
+              `${providerName}: ${attemptResult.degraded_message ?? parseMessage}`,
+            );
+            continue;
+          }
+
+          currentAttemptStage = 'repair';
+          currentRetryCount += 1;
+          await args.updateStatus?.({
+            active_stage: stageName(args.agentName),
+            active_provider: providerName,
+            last_attempt_at: new Date().toISOString(),
+          });
           const retryResult = await adapter.execute({
             prompt: buildStructuredJsonRetryPrompt(prompt),
-            sessionId: attemptSessionId,
+            sessionId: forceFreshExecution ? undefined : attemptSessionId,
             logicalSessionId: session.session_id,
             workingDirectory: session.session_dir,
-            turnCount: session.turn_count,
+            turnCount: forceFreshExecution ? 0 : session.turn_count,
             transportMode,
             transportTarget: session.transport_target ?? null,
             model,
@@ -763,6 +884,10 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
             resultStatus: retryResult.status,
             degradedMessage: retryResult.degraded_message ?? null,
             parseStrategy: parsedResult.strategy,
+            transportOutcome: classifyStructuredTransportOutcome(retryResult.text),
+            structuredOutcome: parsedResult.structuredOutcome,
+            retryCount: currentRetryCount,
+            usedFallbackProvider,
           });
           return {
             parsed,
@@ -782,8 +907,23 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
           degradedReason: attemptResult.degraded_message ?? null,
         };
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        await writeProviderAttemptArtifact({
+          runDir,
+          provider: providerName,
+          prefix: args.artifactPrefix,
+          stage: currentAttemptStage,
+          resultText: '',
+          resultStatus: 'failed',
+          degradedMessage: errorMessage,
+          parseError: errorMessage,
+          transportOutcome: 'transport_failure',
+          structuredOutcome: null,
+          retryCount: currentRetryCount,
+          usedFallbackProvider,
+        });
         providerErrors.push(
-          `${providerName}: ${error instanceof Error ? error.message : String(error)}`,
+          `${providerName}: ${errorMessage}`,
         );
       }
     }
@@ -804,6 +944,7 @@ export class ExternalArtifactDecisionRunner implements InvestmentDecisionRunner 
     run: InvestmentDecisionRunRecord;
     request: InvestmentDecisionRequest;
     requestMarkdown: string;
+    updateStatus?: (patch: Partial<RunStatusPatch>) => Promise<void>;
   }): Promise<InvestmentDecisionArtifact> {
     const startedAt = Date.now();
     let lastError: string | null = null;

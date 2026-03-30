@@ -85,6 +85,7 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 - orchestrator는 항상 `request.json`과 `request.md`를 먼저 쓴다.
 - preprocessing step이 켜져 있으면 `prepared_request.*`를 내부 artifact로 추가 생성한다.
 - `provider_exec` 경로는 raw provider output, parse error, parse strategy를 `provider-attempts/` 아래에 남긴다.
+- attempt artifact에는 `transport_outcome`, `structured_outcome`, `retry_count`, `used_fallback_provider`도 같이 남긴다.
 - direct provider execution도 결과를 `response.json`으로 정규화한다.
 - external mode는 외부 프로세스가 `request.*`를 읽고 `response.json`을 쓴다.
 - Discord와 scheduled report는 `response.json` 기반 formatter만 사용한다.
@@ -107,6 +108,8 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
   - provider가 reasoning이나 짧은 preamble을 섞어도 downstream artifact 계약은 유지된다.
   - provider가 빈 stream이나 unreadable output으로 끝나면 같은 stage에서 같은 prompt를 fresh하게 한 번 더 시도한다.
   - 이 재시도도 `provider-attempts/*-retry.json`으로 남겨서, prompt 문제인지 transport 문제인지 구분할 수 있게 한다.
+  - 같은 provider가 두 번 연속 `empty_stream`이면 같은 provider에 `repair`를 더 걸지 않고 다음 preprocess provider로 넘긴다.
+  - `status.json`에는 `active_stage`, `active_provider`, `prepare_status`, `final_status`, `last_attempt_at`가 additive하게 남는다.
 
 ### `external_artifact`
 
@@ -222,6 +225,7 @@ bootstrap 규칙:
   - Codex adapter는 `agent_message`가 아닌 stream frame에서도 텍스트를 회수하도록 완화한다.
   - Gemini adapter는 wrapper 없는 direct JSON object도 유효 응답으로 인정한다.
   - 그래도 빈 stream으로 끝나는 경우는 parse failure가 아니라 retryable transport 결과로 분류하고, 다음 provider로 넘어가기 전에 같은 provider를 한 번 더 시도한다.
+  - `investment_decision_prepare + tool_policy=none` 조합은 fresh turn 우선으로 실행한다.
 - Gemini readiness probe도 `gemini-2.5-flash`를 명시적으로 사용한다. health가 phase와 다른 default model 상태에 끌려가면 안 되기 때문이다.
 - stale `running` run은 timeout budget을 넘기면 자동으로 `failed`로 정리한다. 오래된 status가 영구히 `running`으로 남아 dashboard나 latest API를 오염시키면 안 된다.
 
@@ -299,6 +303,11 @@ flow:
 4. `response.json`
 5. `report.md`
 6. 그 다음 provider health 또는 external writer 상태
+
+이 기준으로 바로 봐야 하는 것:
+- `status.json`: 지금 `prepare`인지 `final`인지, 어떤 provider가 active였는지
+- `provider-attempts/*.json`: empty stream이었는지, tagged JSON였는지, fallback provider가 개입했는지
+- `prepared_request.meta.json`: LLM preprocess인지 deterministic fallback인지
 
 ## Open Questions
 

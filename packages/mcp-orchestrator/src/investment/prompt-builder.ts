@@ -23,6 +23,7 @@ ${toolRule}
 6. This step is only for restructuring and compressing the provided request into a cleaner briefing for a downstream final decision model.
 7. If coverage is incomplete, keep the gap in coverage_gaps instead of pretending it is resolved.
 8. Keep the output concise and loss-aware. Summarize without dropping material investment signals.
+9. Prefer short field values over polished prose. Keep summaries compact and deterministic.
 
 ${renderStructuredJsonContract()}
 `;
@@ -95,7 +96,7 @@ function buildCompactRequestProjection(request: InvestmentDecisionRequest) {
     mode: request.mode,
     window: request.window,
     watchlist: request.watchlist,
-    resolved_equities: request.resolved_equities.map((item) => ({
+    resolved_equities: request.resolved_equities.slice(0, 12).map((item) => ({
       asset_key: item.asset_key,
       ticker: item.ticker,
       company_name: item.company_name,
@@ -104,7 +105,7 @@ function buildCompactRequestProjection(request: InvestmentDecisionRequest) {
       linked_notes: item.linked_notes.slice(0, 4),
       watchlist_member: item.watchlist_member,
     })),
-    candidate_clusters: request.candidate_clusters.map((cluster) => ({
+    candidate_clusters: request.candidate_clusters.slice(0, 12).map((cluster) => ({
       cluster_id: cluster.cluster_id,
       display_label: cluster.display_label,
       primary_entity: cluster.primary_entity,
@@ -119,7 +120,7 @@ function buildCompactRequestProjection(request: InvestmentDecisionRequest) {
       velocity_score: cluster.velocity_score,
       status: cluster.status,
     })),
-    investment_notes: request.investment_notes.map((note) => ({
+    investment_notes: request.investment_notes.slice(0, 8).map((note) => ({
       intake_id: note.intake_id,
       asset_key: note.asset_key ?? null,
       title: note.title,
@@ -129,8 +130,8 @@ function buildCompactRequestProjection(request: InvestmentDecisionRequest) {
       source_submission_id: note.source_submission_id,
       created_at: note.created_at,
     })),
-    source_health_summary: request.source_health_summary,
-    coverage_gaps: request.coverage_gaps,
+    source_health_summary: request.source_health_summary.slice(0, 12),
+    coverage_gaps: request.coverage_gaps.slice(0, 12),
     supporting_evidence_ref_count: request.supporting_evidence_refs.length,
     schema_version: request.schema_version,
   };

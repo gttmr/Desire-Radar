@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildStructuredJsonRetryPrompt,
+  classifyStructuredTransportOutcome,
   parseStructuredJsonText,
   STRUCTURED_JSON_CLOSE_TAG,
   STRUCTURED_JSON_OPEN_TAG,
@@ -17,6 +18,7 @@ ${STRUCTURED_JSON_CLOSE_TAG}
 `);
 
     expect(parsed.strategy).toBe('tagged');
+    expect(parsed.structuredOutcome).toBe('reasoning_then_json');
     expect(parsed.parsed).toEqual({
       executive_summary: 'prepared',
       market_context: 'stable',
@@ -29,10 +31,23 @@ ${STRUCTURED_JSON_CLOSE_TAG}
     );
 
     expect(parsed.strategy).toBe('balanced');
+    expect(parsed.structuredOutcome).toBe('reasoning_then_json');
     expect(parsed.parsed).toEqual({
       summary: 'Recovered shortlist',
       market_view: 'Neutral',
     });
+  });
+
+  it('classifies exact JSON without tags as json_without_tag', () => {
+    const parsed = parseStructuredJsonText('{"summary":"Recovered shortlist","market_view":"Neutral"}');
+
+    expect(parsed.strategy).toBe('exact');
+    expect(parsed.structuredOutcome).toBe('json_without_tag');
+  });
+
+  it('classifies transport outcome for empty and non-empty streams', () => {
+    expect(classifyStructuredTransportOutcome('   ')).toBe('empty_stream');
+    expect(classifyStructuredTransportOutcome('{"ok":true}')).toBe('text_stream');
   });
 
   it('builds a retry prompt that reiterates the tagged JSON contract', () => {

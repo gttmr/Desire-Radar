@@ -44,31 +44,37 @@ type CodexProviderOptions = {
   defaultTransportMode?: ProviderTransportMode;
 };
 
-function extractCodexTextFragments(value: unknown): string[] {
+function isCodexContentKey(key: string): boolean {
+  return /text|content|message|delta|response|result|output|body|summary|value|parts/i.test(key);
+}
+
+function extractCodexTextFragments(value: unknown, keyHint?: string): string[] {
   if (typeof value === 'string') {
     const trimmed = value.trim();
-    return trimmed ? [trimmed] : [];
+    if (!trimmed) {
+      return [];
+    }
+    if (!keyHint || isCodexContentKey(keyHint)) {
+      return [trimmed];
+    }
+    return [];
   }
   if (Array.isArray(value)) {
-    return value.flatMap((item) => extractCodexTextFragments(item));
+    return value.flatMap((item) => extractCodexTextFragments(item, keyHint));
   }
   if (!value || typeof value !== 'object') {
     return [];
   }
 
   const raw = value as Record<string, unknown>;
-  const fields: unknown[] = [
-    raw.text,
-    raw.output_text,
-    raw.content,
-    raw.message,
-    raw.item,
-    raw.delta,
-    raw.response,
-    raw.result,
-  ];
-
-  return fields.flatMap((field) => extractCodexTextFragments(field));
+  const fragments: string[] = [];
+  for (const [key, field] of Object.entries(raw)) {
+    if (key === 'type' || key === 'thread_id' || key === 'id' || key === 'usage') {
+      continue;
+    }
+    fragments.push(...extractCodexTextFragments(field, key));
+  }
+  return fragments;
 }
 
 export function extractCodexExecResult(stdout: string): CodexExecResult {

@@ -293,6 +293,8 @@ describe('investment decision module', () => {
     const updated = await store.getRun('run-stale');
     expect(updated?.status).toBe('failed');
     expect(updated?.error).toContain('exceeded timeout budget');
+    expect(updated?.active_stage).toBeNull();
+    expect(updated?.final_status).toBe('failed');
   });
 
   it('normalizes provider_exec output into the canonical response artifact', async () => {
@@ -1046,7 +1048,13 @@ describe('investment decision module', () => {
         ),
         'utf8',
       ),
-    ) as { parse_error: string | null };
+    ) as {
+      parse_error: string | null;
+      transport_outcome: string;
+      structured_outcome: string | null;
+      retry_count: number;
+      used_fallback_provider: boolean;
+    };
     const retryAttempt = JSON.parse(
       readFileSync(
         join(
@@ -1058,9 +1066,231 @@ describe('investment decision module', () => {
         ),
         'utf8',
       ),
-    ) as { parse_strategy: string | null };
+    ) as {
+      parse_strategy: string | null;
+      transport_outcome: string;
+      structured_outcome: string | null;
+      retry_count: number;
+      used_fallback_provider: boolean;
+    };
     expect(initialAttempt.parse_error).toBe('Provider returned an empty response');
+    expect(initialAttempt.transport_outcome).toBe('empty_stream');
+    expect(initialAttempt.structured_outcome).toBeNull();
+    expect(initialAttempt.retry_count).toBe(0);
+    expect(initialAttempt.used_fallback_provider).toBe(false);
     expect(retryAttempt.parse_strategy).toBe('tagged');
+    expect(retryAttempt.transport_outcome).toBe('text_stream');
+    expect(retryAttempt.structured_outcome).toBe('tagged_json');
+    expect(retryAttempt.retry_count).toBe(1);
+    expect(retryAttempt.used_fallback_provider).toBe(false);
+  });
+
+  it('records when a fallback preprocess provider produced the final briefing', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'investment-preprocess-fallback-provider-'));
+    const registry = new ProviderRegistry();
+    const statusPatches: Array<Record<string, string | null | undefined>> = [];
+    let emptyProviderCalls = 0;
+    registry.register({
+      name: 'mock-empty',
+      defaultTransportMode: 'cli_exec',
+      async execute() {
+        emptyProviderCalls += 1;
+        return {
+          text: '',
+          sessionId: 'provider-session-empty',
+          durationMs: 20,
+          status: 'degraded' as const,
+          degraded_message: 'provider returned an empty response',
+        };
+      },
+      async health() {
+        return true;
+      },
+      async probeHealth() {
+        return { available: true, ready_for_execution: true, status: 'healthy' as const };
+      },
+    });
+    registry.register({
+      name: 'mock-fallback',
+      defaultTransportMode: 'cli_exec',
+      async execute(request) {
+        if (request.agentName === 'investment_decision_prepare') {
+          return {
+            text: [
+              '<structured_json>',
+              JSON.stringify({
+                executive_summary: 'prepared summary',
+                market_context: 'prepared context',
+                watchlist_focus: ['005930'],
+                resolved_equity_briefs: [],
+                cluster_briefs: [],
+                note_briefs: [],
+                source_health_flags: [],
+                coverage_gaps: [],
+              }),
+              '</structured_json>',
+            ].join('\n'),
+            sessionId: 'provider-session-prepare',
+            durationMs: 40,
+            status: 'completed' as const,
+          };
+        }
+        return {
+          text: JSON.stringify({
+            summary: 'Final shortlist',
+            market_view: 'Constructive',
+            top_picks: [],
+            watch_candidates: [],
+            rejected_candidates: [],
+            coverage_gaps: [],
+            risks: [],
+            degraded: false,
+            degraded_reason: null,
+          }),
+          sessionId: 'provider-session-final',
+          durationMs: 60,
+          status: 'completed' as const,
+        };
+      },
+      async health() {
+        return true;
+      },
+      async probeHealth() {
+        return { available: true, ready_for_execution: true, status: 'healthy' as const };
+      },
+    });
+    const runner = new ProviderExecDecisionRunner(
+      registry,
+      new SessionStore(dataDir),
+      new ExecutionPolicyResolver(
+        {
+          defaults: {
+            triage: { providers: ['mock-fallback'], modelProfile: 'cheap', responseFormat: 'json' },
+            debate: { providers: ['mock-fallback'], modelProfile: 'cheap', responseFormat: 'json' },
+            verdict: { providers: ['mock-fallback'], modelProfile: 'premium', responseFormat: 'json' },
+            report: { providers: ['mock-fallback'], modelProfile: 'balanced', responseFormat: 'json' },
+            investment_decision: {
+              providers: ['mock-fallback'],
+              modelProfile: 'premium',
+              responseFormat: 'json',
+            },
+          },
+          agents: {
+            investment_decision_prepare: {
+              phase: 'investment_decision',
+              providers: ['mock-empty', 'mock-fallback'],
+              modelProfile: 'cheap',
+              responseFormat: 'json',
+            },
+            investment_decision: {
+              phase: 'investment_decision',
+              providers: ['mock-fallback'],
+              modelProfile: 'premium',
+              responseFormat: 'json',
+            },
+          },
+        },
+        {
+          providers: {
+            'mock-empty': {
+              cheap: 'mock-empty-cheap',
+              balanced: 'mock-empty-balanced',
+              premium: 'mock-empty-premium',
+            },
+            'mock-fallback': {
+              cheap: 'mock-fallback-cheap',
+              balanced: 'mock-fallback-balanced',
+              premium: 'mock-fallback-premium',
+            },
+          },
+        },
+        ['mock-empty', 'mock-fallback'],
+      ),
+      makePromptBuilderStub(),
+      5_000,
+      {
+        enabled: true,
+        providers: ['mock-empty', 'mock-fallback'],
+        modelProfile: 'cheap',
+        toolPolicy: 'none',
+        timeoutMs: 1_000,
+      },
+      {
+        providers: ['mock-fallback'],
+        modelProfile: 'premium',
+        toolPolicy: 'default',
+        timeoutMs: 5_000,
+      },
+    );
+
+    const artifact = await runner.run({
+      run: makeRunRecord(dataDir, 'run-preprocess-fallback-provider'),
+      request: makeRequest('run-preprocess-fallback-provider'),
+      requestMarkdown: '# request',
+      updateStatus: async (patch) => {
+        statusPatches.push({
+          active_stage: patch.active_stage ?? null,
+          active_provider: patch.active_provider ?? null,
+          prepare_status: patch.prepare_status ?? null,
+          final_status: patch.final_status ?? null,
+        });
+      },
+    });
+
+    expect(artifact.status).toBe('completed');
+    expect(emptyProviderCalls).toBe(2);
+    const emptyRetryAttempt = JSON.parse(
+      readFileSync(
+        join(
+          dataDir,
+          '2026-03-29',
+          'run-preprocess-fallback-provider',
+          'provider-attempts',
+          'prepare-mock-empty-retry.json',
+        ),
+        'utf8',
+      ),
+    ) as { transport_outcome: string; structured_outcome: string | null; retry_count: number };
+    expect(emptyRetryAttempt.transport_outcome).toBe('empty_stream');
+    expect(emptyRetryAttempt.structured_outcome).toBeNull();
+    expect(emptyRetryAttempt.retry_count).toBe(1);
+    const fallbackAttempt = JSON.parse(
+      readFileSync(
+        join(
+          dataDir,
+          '2026-03-29',
+          'run-preprocess-fallback-provider',
+          'provider-attempts',
+          'prepare-mock-fallback-initial.json',
+        ),
+        'utf8',
+      ),
+    ) as { used_fallback_provider: boolean; structured_outcome: string };
+    expect(fallbackAttempt.used_fallback_provider).toBe(true);
+    expect(fallbackAttempt.structured_outcome).toBe('tagged_json');
+    expect(statusPatches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          active_stage: 'prepare',
+          prepare_status: 'running',
+        }),
+        expect.objectContaining({
+          active_stage: 'prepare',
+          active_provider: 'mock-empty',
+        }),
+        expect.objectContaining({
+          active_stage: 'prepare',
+          active_provider: 'mock-fallback',
+        }),
+        expect.objectContaining({
+          prepare_status: 'completed',
+        }),
+        expect.objectContaining({
+          active_stage: 'final',
+          final_status: 'running',
+        }),
+      ]),
+    );
   });
 
   it('falls back to a deterministic prepared briefing when preprocessing fails', async () => {
