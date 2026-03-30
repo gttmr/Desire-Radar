@@ -254,7 +254,10 @@ async function main(): Promise<void> {
     ),
   );
 
-  app.listen(config.runtime.ORCHESTRATOR_PORT, config.runtime.ORCHESTRATOR_HOST, () => {
+  const server = app.listen(
+    config.runtime.ORCHESTRATOR_PORT,
+    config.runtime.ORCHESTRATOR_HOST,
+    () => {
     console.log(
       `MCP Orchestrator listening on ${config.runtime.ORCHESTRATOR_HOST}:${config.runtime.ORCHESTRATOR_PORT}`,
     );
@@ -267,7 +270,12 @@ async function main(): Promise<void> {
     console.log(
       `Investment decision runner: ${config.investmentDecision.INVESTMENT_DECISION_RUNNER}`,
     );
-  });
+    },
+  );
+  // Long-running investment decision runs should keep the HTTP request open
+  // until the artifact is ready instead of tripping Node's default timeout.
+  server.requestTimeout = 0;
+  server.timeout = 0;
 }
 
 main().catch((error) => {

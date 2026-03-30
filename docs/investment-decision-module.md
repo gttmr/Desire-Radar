@@ -60,6 +60,7 @@ Discord bot does not:
 - decide picks itself
 - re-run LLM formatting after the decision artifact exists
 - perform stock identity parsing locally
+- swallow orchestrator errors and record them as successful reports
 
 ## Artifact-First Contract
 
@@ -113,7 +114,9 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
   - provider가 빈 stream이나 unreadable output으로 끝나면 같은 stage에서 같은 prompt를 fresh하게 한 번 더 시도한다.
   - 이 재시도도 `provider-attempts/*-retry.json`으로 남겨서, prompt 문제인지 transport 문제인지 구분할 수 있게 한다.
   - 같은 provider가 두 번 연속 `empty_stream`이면 같은 provider에 `repair`를 더 걸지 않고 다음 preprocess provider로 넘긴다.
-  - `status.json`에는 `active_stage`, `active_provider`, `prepare_status`, `final_status`, `last_attempt_at`가 additive하게 남는다.
+- `status.json`에는 `active_stage`, `active_provider`, `prepare_status`, `final_status`, `last_attempt_at`가 additive하게 남는다.
+- `provider_exec` decision run은 수 분 이상 걸릴 수 있으므로, orchestrator와 discord-bot HTTP server는 Node 기본 5분 request timeout에 걸리지 않도록 long request를 허용한다.
+- Discord bot의 orchestrator client는 long-running decision run에서 `fetch` 헤더 timeout 영향을 피하기 위해 Node `http/https` 요청을 사용한다.
 
 ### `external_artifact`
 
@@ -281,6 +284,7 @@ flow:
 5. bot이 결과 markdown을 지정 채널에 전송
 
 즉, Discord는 consumer이고 canonical state owner가 아니다.
+또한 Discord report trigger가 upstream fetch/connection failure를 만나면, 에러 메시지를 채널에 보내더라도 guild `lastReport.status`는 `error`로 남겨야 한다.
 
 ## Operator Report Rules
 

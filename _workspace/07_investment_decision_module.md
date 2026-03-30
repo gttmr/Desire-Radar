@@ -64,6 +64,15 @@
 - provider attempt stage tracking은 outer catch와 같은 scope에서 유지한다. 그래서 retry/repair 실패가 `initial` artifact로 덮어써지지 않는다.
 - 목적은 프롬프트 튜닝만으로 버티는 것이 아니라, provider 출력 습관이 조금 변해도 `prepared_request.json`과 최종 `response.json` 계약이 유지되게 만드는 것이다.
 
+## 2026-03-31 Runtime Follow-up
+
+- Docker runtime end-to-end 점검에서 `discord-bot -> mcp-orchestrator`의 `POST /investment/decisions/runs`가 약 5분 지점에서 `fetch failed`로 끊기는 문제가 재현됐다.
+- 원인은 Node HTTP server의 기본 request timeout과 긴 `provider_exec` investment decision run 조합이었다.
+- 그래서 orchestrator와 discord-bot API server 모두 long-running request를 허용하도록 `requestTimeout=0`, `timeout=0`을 명시했다.
+- 그리고 `discord-bot -> mcp-orchestrator` 내부 호출은 Node `fetch` 대신 `http/https` request로 바꿨다. 이 경로는 응답 헤더가 늦게 오는 long-running decision run에서 `fetch failed`로 끊기면 안 된다.
+- 추가로 Discord bot `AnalysisGateway`가 upstream failure를 synthetic ok report로 바꾸던 경로를 제거했다.
+- 이제 upstream fetch failure는 그대로 throw되어 `runReport()` catch로 올라가고, guild `lastReport.status`도 `error`로 기록된다.
+
 ## Current Gaps
 
 - verdict pipeline과 investment decision의 연결은 아직 느슨하다.

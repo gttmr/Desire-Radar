@@ -201,6 +201,12 @@ xdg-open http://127.0.0.1:5002/dashboard
 curl http://127.0.0.1:5003/health
 ```
 
+긴 investment decision run:
+- `POST /investment/decisions/runs`는 provider_exec 경로에서 수 분 이상 걸릴 수 있다.
+- 현재 orchestrator와 discord-bot API server는 Node 기본 5분 request timeout을 비활성화해 long-running report trigger를 허용한다.
+- Discord bot은 orchestrator 호출에 Node `http/https` client를 사용한다. long-running decision run에서 `fetch` 계열 header timeout이 재발하지 않도록 하기 위한 조치다.
+- 그래도 Discord bot에서 `fetch failed`가 보이면, 먼저 orchestrator run dir의 `status.json`과 `provider-attempts/`가 계속 갱신되는지 확인한다.
+
 주의:
 - `/health`는 provider probe 때문에 즉시가 아니라 수 초 이상 걸릴 수 있다.
 - 이것은 현재 설계상 정상이다.

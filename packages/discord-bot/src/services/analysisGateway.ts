@@ -39,27 +39,13 @@ export class OrchestratorGatewayAdapter implements AnalysisGateway {
   ) {}
 
   async generateReport(request: PredictorRequest): Promise<PredictorResponse> {
-    try {
-      const result = await this._orchestrator.createInvestmentDecisionRun({
-        watchlist: request.tickers,
-        mode: request.mode,
-        detail: request.detail,
-        as_of_date: request.asOfDate,
-      });
-      return this._mapDecisionResponse(result, request);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return {
-        generatedAt: new Date().toISOString(),
-        detail: request.detail,
-        summary: `리포트 생성 실패: ${message}`,
-        marketCommentary: '',
-        markdown: `> **Error**: ${message}`,
-        items: [],
-        risks: [],
-        sources: [],
-      } as PredictorResponse;
-    }
+    const result = await this._orchestrator.createInvestmentDecisionRun({
+      watchlist: request.tickers,
+      mode: request.mode,
+      detail: request.detail,
+      as_of_date: request.asOfDate,
+    });
+    return this._mapDecisionResponse(result, request);
   }
 
   private _mapDecisionResponse(

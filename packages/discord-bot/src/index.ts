@@ -30,6 +30,10 @@ async function bootstrap() {
     console.log(`API listening on ${env.HEALTH_PORT}`);
     console.log(`Analysis backend: ${env.ANALYSIS_BACKEND}`);
   });
+  // Investment decision report generation can legitimately exceed Node's default
+  // 5 minute request timeout when upstream providers are slow.
+  server.requestTimeout = 0;
+  server.timeout = 0;
 
   const shutdown = async () => {
     server.close();

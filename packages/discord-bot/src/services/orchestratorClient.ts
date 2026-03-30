@@ -1,3 +1,5 @@
+import http from 'node:http';
+import https from 'node:https';
 import type {
   SubmitEvidenceRequest,
   SubmitEvidenceResponse,
@@ -35,10 +37,7 @@ import type {
 } from '@agentic/shared-types';
 
 export class OrchestratorClient {
-  constructor(
-    private readonly baseUrl: string,
-    private readonly fetchImpl: typeof fetch = fetch
-  ) {}
+  constructor(private readonly baseUrl: string) {}
 
   async submitEvidence(req: SubmitEvidenceRequest): Promise<SubmitEvidenceResponse> {
     return this.post('/runs/submit-evidence', req);
@@ -160,37 +159,70 @@ export class OrchestratorClient {
   }
 
   private async get<T>(path: string): Promise<T> {
-    const response = await this.fetchImpl(new URL(path, this.baseUrl));
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Orchestrator request failed (${response.status}): ${text}`);
-    }
-    return (await response.json()) as T;
+    return this.request<T>('GET', path);
   }
 
   private async post<T>(path: string, body: unknown): Promise<T> {
-    const response = await this.fetchImpl(new URL(path, this.baseUrl), {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Orchestrator request failed (${response.status}): ${text}`);
-    }
-    return (await response.json()) as T;
+    return this.request<T>('POST', path, body);
   }
 
   private async put<T>(path: string, body: unknown): Promise<T> {
-    const response = await this.fetchImpl(new URL(path, this.baseUrl), {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body)
+    return this.request<T>('PUT', path, body);
+  }
+
+  private async request<T>(
+    method: 'GET' | 'POST' | 'PUT',
+    path: string,
+    body?: unknown,
+  ): Promise<T> {
+    const url = new URL(path, this.baseUrl);
+    const transport = url.protocol === 'https:' ? https : http;
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+
+    return new Promise<T>((resolve, reject) => {
+      const req = transport.request(
+        url,
+        {
+          method,
+          headers: payload
+            ? {
+                'content-type': 'application/json',
+                'content-length': Buffer.byteLength(payload).toString(),
+              }
+            : undefined,
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk) => {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          });
+          res.on('end', () => {
+            const text = Buffer.concat(chunks).toString('utf8');
+            const status = res.statusCode ?? 0;
+            if (status < 200 || status >= 300) {
+              reject(new Error(`Orchestrator request failed (${status}): ${text}`));
+              return;
+            }
+            try {
+              resolve(JSON.parse(text) as T);
+            } catch (error) {
+              reject(
+                new Error(
+                  `Orchestrator returned unreadable JSON: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+                ),
+              );
+            }
+          });
+        },
+      );
+      req.on('error', reject);
+      req.setTimeout(0);
+      if (payload) {
+        req.write(payload);
+      }
+      req.end();
     });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Orchestrator request failed (${response.status}): ${text}`);
-    }
-    return (await response.json()) as T;
   }
 }

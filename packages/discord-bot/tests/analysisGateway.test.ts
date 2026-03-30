@@ -94,4 +94,25 @@ describe('OrchestratorGatewayAdapter', () => {
     expect(response.items[0]?.ticker).toBe('005930');
     expect(response.sources).toEqual(['reddit_mentions']);
   });
+
+  it('surfaces orchestrator failures instead of converting them into ok reports', async () => {
+    const gateway = new OrchestratorGatewayAdapter(
+      {
+        async createInvestmentDecisionRun() {
+          throw new Error('fetch failed');
+        },
+      } as never,
+      {} as never,
+    );
+
+    await expect(
+      gateway.generateReport({
+        guildId: 'guild-1',
+        tickers: ['005930'],
+        asOfDate: '2026-03-29',
+        mode: 'manual',
+        detail: 'summary',
+      }),
+    ).rejects.toThrow('fetch failed');
+  });
 });
