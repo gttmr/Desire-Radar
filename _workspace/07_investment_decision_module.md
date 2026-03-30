@@ -53,6 +53,8 @@
 - 기본 계약은 `<structured_json>...</structured_json>` tagged block이며, parser는 tagged JSON를 우선 읽는다.
 - provider가 reasoning/preamble을 먼저 내더라도 parser는 fenced JSON와 balanced JSON까지 순차적으로 복구를 시도한다.
 - `provider-attempts/*.json`에는 `parse_strategy`가 같이 남는다. 즉 실제로 `tagged`, `balanced`, `repair` 중 어떤 경로로 회수됐는지 사후 점검 가능하다.
+- Codex나 Gemini가 빈 stream이나 unreadable output으로 끝나는 경우는 parse failure 이전의 retryable transport 결과로 본다.
+- 이 경우 같은 stage에서 같은 prompt를 fresh하게 한 번 더 시도하고, 결과는 `provider-attempts/*-retry.json`으로 별도 남긴다.
 - Codex adapter는 `agent_message` 외 stream shape에서도 텍스트를 회수하도록 완화했다.
 - Gemini adapter는 `{"response":"..."}` wrapper뿐 아니라 model이 직접 뱉은 JSON object도 유효 응답으로 인정한다.
 - 목적은 프롬프트 튜닝만으로 버티는 것이 아니라, provider 출력 습관이 조금 변해도 `prepared_request.json`과 최종 `response.json` 계약이 유지되게 만드는 것이다.

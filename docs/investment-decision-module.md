@@ -71,8 +71,10 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
   prepared_request.meta.json
   provider-attempts/
     decision-<provider>-initial.json
+    decision-<provider>-retry.json
     decision-<provider>-repair.json
     prepare-<provider>-initial.json
+    prepare-<provider>-retry.json
     prepare-<provider>-repair.json
   response.json
   response.md
@@ -103,6 +105,8 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
   - 우선 계약은 `<structured_json>...</structured_json>` 블록이다.
   - parser는 tagged block, fenced JSON, balanced JSON 순으로 복구를 시도한다.
   - provider가 reasoning이나 짧은 preamble을 섞어도 downstream artifact 계약은 유지된다.
+  - provider가 빈 stream이나 unreadable output으로 끝나면 같은 stage에서 같은 prompt를 fresh하게 한 번 더 시도한다.
+  - 이 재시도도 `provider-attempts/*-retry.json`으로 남겨서, prompt 문제인지 transport 문제인지 구분할 수 있게 한다.
 
 ### `external_artifact`
 
@@ -217,6 +221,7 @@ bootstrap 규칙:
 - Codex와 Gemini는 모두 “reasoning 후 결과” 형태를 낼 수 있으므로, `prepare` 단계는 prompt 지시만으로 신뢰하지 않고 parser를 함께 둔다.
   - Codex adapter는 `agent_message`가 아닌 stream frame에서도 텍스트를 회수하도록 완화한다.
   - Gemini adapter는 wrapper 없는 direct JSON object도 유효 응답으로 인정한다.
+  - 그래도 빈 stream으로 끝나는 경우는 parse failure가 아니라 retryable transport 결과로 분류하고, 다음 provider로 넘어가기 전에 같은 provider를 한 번 더 시도한다.
 - Gemini readiness probe도 `gemini-2.5-flash`를 명시적으로 사용한다. health가 phase와 다른 default model 상태에 끌려가면 안 되기 때문이다.
 - stale `running` run은 timeout budget을 넘기면 자동으로 `failed`로 정리한다. 오래된 status가 영구히 `running`으로 남아 dashboard나 latest API를 오염시키면 안 된다.
 

@@ -905,6 +905,164 @@ describe('investment decision module', () => {
     expect(initialAttempt.parse_error).toBeNull();
   });
 
+  it('retries the preprocessing stage when the first provider stream is empty and then parses tagged JSON', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'investment-preprocess-retry-'));
+    const registry = new ProviderRegistry();
+    let prepareCalls = 0;
+    registry.register({
+      name: 'mock',
+      defaultTransportMode: 'cli_exec',
+      async execute(request) {
+        if (request.agentName === 'investment_decision_prepare') {
+          prepareCalls += 1;
+          if (prepareCalls === 1) {
+            return {
+              text: '',
+              sessionId: 'provider-session-empty',
+              durationMs: 25,
+              status: 'degraded' as const,
+              degraded_message: 'provider returned an empty response',
+            };
+          }
+          return {
+            text: [
+              '<structured_json>',
+              JSON.stringify({
+                executive_summary: 'prepared summary',
+                market_context: 'prepared context',
+                watchlist_focus: ['005930'],
+                resolved_equity_briefs: [],
+                cluster_briefs: [],
+                note_briefs: [],
+                source_health_flags: [],
+                coverage_gaps: [],
+              }),
+              '</structured_json>',
+            ].join('\n'),
+            sessionId: 'provider-session-prepare',
+            durationMs: 40,
+            status: 'completed' as const,
+          };
+        }
+        return {
+          text: JSON.stringify({
+            summary: 'Final shortlist',
+            market_view: 'Constructive',
+            top_picks: [],
+            watch_candidates: [],
+            rejected_candidates: [],
+            coverage_gaps: [],
+            risks: [],
+            degraded: false,
+            degraded_reason: null,
+          }),
+          sessionId: 'provider-session-final',
+          durationMs: 60,
+          status: 'completed' as const,
+        };
+      },
+      async health() {
+        return true;
+      },
+      async probeHealth() {
+        return { available: true, ready_for_execution: true, status: 'healthy' as const };
+      },
+    });
+    const runner = new ProviderExecDecisionRunner(
+      registry,
+      new SessionStore(dataDir),
+      new ExecutionPolicyResolver(
+        {
+          defaults: {
+            triage: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
+            debate: { providers: ['mock'], modelProfile: 'cheap', responseFormat: 'json' },
+            verdict: { providers: ['mock'], modelProfile: 'premium', responseFormat: 'json' },
+            report: { providers: ['mock'], modelProfile: 'balanced', responseFormat: 'json' },
+            investment_decision: {
+              providers: ['mock'],
+              modelProfile: 'premium',
+              responseFormat: 'json',
+            },
+          },
+          agents: {
+            investment_decision_prepare: {
+              phase: 'investment_decision',
+              providers: ['mock'],
+              modelProfile: 'cheap',
+              responseFormat: 'json',
+            },
+            investment_decision: {
+              phase: 'investment_decision',
+              providers: ['mock'],
+              modelProfile: 'premium',
+              responseFormat: 'json',
+            },
+          },
+        },
+        {
+          providers: {
+            mock: {
+              cheap: 'mock-cheap',
+              balanced: 'mock-balanced',
+              premium: 'mock-premium',
+            },
+          },
+        },
+        ['mock'],
+      ),
+      makePromptBuilderStub(),
+      5_000,
+      {
+        enabled: true,
+        providers: ['mock'],
+        modelProfile: 'cheap',
+        toolPolicy: 'none',
+        timeoutMs: 1_000,
+      },
+      {
+        providers: ['mock'],
+        modelProfile: 'premium',
+        toolPolicy: 'default',
+        timeoutMs: 5_000,
+      },
+    );
+
+    const artifact = await runner.run({
+      run: makeRunRecord(dataDir, 'run-prepare-retry'),
+      request: makeRequest('run-prepare-retry'),
+      requestMarkdown: '# request',
+    });
+
+    expect(artifact.status).toBe('completed');
+    expect(prepareCalls).toBe(2);
+    const initialAttempt = JSON.parse(
+      readFileSync(
+        join(
+          dataDir,
+          '2026-03-29',
+          'run-prepare-retry',
+          'provider-attempts',
+          'prepare-mock-initial.json',
+        ),
+        'utf8',
+      ),
+    ) as { parse_error: string | null };
+    const retryAttempt = JSON.parse(
+      readFileSync(
+        join(
+          dataDir,
+          '2026-03-29',
+          'run-prepare-retry',
+          'provider-attempts',
+          'prepare-mock-retry.json',
+        ),
+        'utf8',
+      ),
+    ) as { parse_strategy: string | null };
+    expect(initialAttempt.parse_error).toBe('Provider returned an empty response');
+    expect(retryAttempt.parse_strategy).toBe('tagged');
+  });
+
   it('falls back to a deterministic prepared briefing when preprocessing fails', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'investment-preprocess-fallback-'));
     const registry = new ProviderRegistry();

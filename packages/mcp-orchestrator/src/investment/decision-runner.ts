@@ -33,7 +33,7 @@ async function writeProviderAttemptArtifact(args: {
   runDir: string;
   provider: string;
   prefix: string;
-  stage: 'initial' | 'repair';
+  stage: 'initial' | 'retry' | 'repair';
   resultText: string;
   resultStatus: string;
   degradedMessage?: string | null;
@@ -238,6 +238,27 @@ function mergeReasonParts(...parts: Array<string | null | undefined>): string | 
     return null;
   }
   return normalized.join(' | ');
+}
+
+function isRetryableStructuredResponse(result: {
+  text: string;
+  status: string;
+  degraded_message?: string | null;
+}): boolean {
+  const normalizedText = result.text.trim();
+  const degradedMessage = (result.degraded_message ?? '').toLowerCase();
+  if (!normalizedText) {
+    return true;
+  }
+  if (result.status !== 'degraded') {
+    return false;
+  }
+  return (
+    degradedMessage.includes('missing agent_message') ||
+    degradedMessage.includes('empty response') ||
+    degradedMessage.includes('unreadable response') ||
+    degradedMessage.includes('stream disconnected')
+  );
 }
 
 function normalizePriority(value: unknown): 'high' | 'medium' | 'low' {
@@ -628,36 +649,91 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
           transportTarget: session.transport_target ?? null,
         });
 
+        let attemptResult = result;
+        let attemptSessionId = result.sessionId ?? session.provider_session_id ?? undefined;
+        let retryableEmptyResponse = false;
+
+        if (isRetryableStructuredResponse(result)) {
+          retryableEmptyResponse = true;
+          await writeProviderAttemptArtifact({
+            runDir,
+            provider: providerName,
+            prefix: args.artifactPrefix,
+            stage: 'initial',
+            resultText: result.text,
+            resultStatus: result.status,
+            degradedMessage: result.degraded_message ?? null,
+            parseError: result.text.trim() ? null : 'Provider returned an empty response',
+          });
+
+          const retryResult = await adapter.execute({
+            prompt,
+            sessionId: undefined,
+            logicalSessionId: session.session_id,
+            workingDirectory: session.session_dir,
+            turnCount: 0,
+            transportMode,
+            transportTarget: session.transport_target ?? null,
+            model,
+            modelProfile,
+            toolPolicy: args.toolPolicy,
+            phase: 'investment_decision',
+            agentName: args.agentName,
+            responseFormat: 'json',
+            timeoutMs: Math.min(args.timeoutMs, this.overallTimeoutMs),
+          });
+          this.sessionStore.updateSessionActivity(session.session_id, {
+            providerSessionId: retryResult.sessionId,
+            transportMode,
+            transportTarget: session.transport_target ?? null,
+          });
+          attemptResult = retryResult;
+          attemptSessionId = retryResult.sessionId ?? undefined;
+        }
+
         let parsed: unknown;
         try {
-          const parsedResult = parseStructuredJsonText(result.text);
+          const parsedResult = parseStructuredJsonText(attemptResult.text);
           parsed = parsedResult.parsed;
           await writeProviderAttemptArtifact({
             runDir,
             provider: providerName,
             prefix: args.artifactPrefix,
-            stage: 'initial',
-            resultText: result.text,
-            resultStatus: result.status,
-            degradedMessage: result.degraded_message ?? null,
+            stage: retryableEmptyResponse ? 'retry' : 'initial',
+            resultText: attemptResult.text,
+            resultStatus: attemptResult.status,
+            degradedMessage: attemptResult.degraded_message ?? null,
             parseStrategy: parsedResult.strategy,
           });
         } catch (parseError) {
           const parseMessage = parseError instanceof Error ? parseError.message : String(parseError);
-          await writeProviderAttemptArtifact({
-            runDir,
-            provider: providerName,
-            prefix: args.artifactPrefix,
-            stage: 'initial',
-            resultText: result.text,
-            resultStatus: result.status,
-            degradedMessage: result.degraded_message ?? null,
-            parseError: parseMessage,
-          });
+          if (!retryableEmptyResponse) {
+            await writeProviderAttemptArtifact({
+              runDir,
+              provider: providerName,
+              prefix: args.artifactPrefix,
+              stage: 'initial',
+              resultText: attemptResult.text,
+              resultStatus: attemptResult.status,
+              degradedMessage: attemptResult.degraded_message ?? null,
+              parseError: parseMessage,
+            });
+          } else {
+            await writeProviderAttemptArtifact({
+              runDir,
+              provider: providerName,
+              prefix: args.artifactPrefix,
+              stage: 'retry',
+              resultText: attemptResult.text,
+              resultStatus: attemptResult.status,
+              degradedMessage: attemptResult.degraded_message ?? null,
+              parseError: parseMessage,
+            });
+          }
 
           const retryResult = await adapter.execute({
             prompt: buildStructuredJsonRetryPrompt(prompt),
-            sessionId: result.sessionId ?? session.provider_session_id ?? undefined,
+            sessionId: attemptSessionId,
             logicalSessionId: session.session_id,
             workingDirectory: session.session_dir,
             turnCount: session.turn_count,
@@ -693,7 +769,7 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
             providerName,
             degraded: true,
             degradedReason:
-              result.degraded_message ??
+              attemptResult.degraded_message ??
               retryResult.degraded_message ??
               `${args.agentName} required JSON repair retry: ${parseMessage}`,
           };
@@ -702,8 +778,8 @@ export class ProviderExecDecisionRunner implements InvestmentDecisionRunner {
         return {
           parsed,
           providerName,
-          degraded: result.status === 'degraded',
-          degradedReason: result.degraded_message ?? null,
+          degraded: attemptResult.status === 'degraded',
+          degradedReason: attemptResult.degraded_message ?? null,
         };
       } catch (error) {
         providerErrors.push(
