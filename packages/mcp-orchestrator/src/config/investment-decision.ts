@@ -34,6 +34,10 @@ const investmentDecisionEnvSchema = z.object({
   INVESTMENT_DECISION_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
   INVESTMENT_DECISION_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2_000),
   INVESTMENT_EQUITY_MAP_PATH: z.string().default(''),
+  INVESTMENT_EQUITY_IDENTITY_CACHE_PATH: z.string().default(''),
+  KIS_APP_KEY: z.string().default(''),
+  KIS_APP_SECRET: z.string().default(''),
+  KIS_BASE_URL: z.string().default('https://openapi.koreainvestment.com:9443'),
   INVESTMENT_DECISION_PREPROCESS_ENABLED: z.string().default('true'),
   INVESTMENT_DECISION_PREPROCESS_PROVIDERS: z.string().default(''),
   INVESTMENT_DECISION_PREPROCESS_MODEL_PROFILE: z
@@ -56,6 +60,7 @@ const investmentDecisionEnvSchema = z.object({
 export type InvestmentDecisionConfig = z.infer<typeof investmentDecisionEnvSchema> & {
   runRootDir: string;
   equityMapPath: string;
+  identityCachePath: string;
   preprocessEnabled: boolean;
   preprocessProviders: string[];
   finalProviders: string[];
@@ -78,5 +83,8 @@ export function loadInvestmentDecisionConfig(
     equityMapPath:
       parsed.INVESTMENT_EQUITY_MAP_PATH.trim() ||
       join(investmentModuleDir, 'equity-map.json'),
+    identityCachePath:
+      parsed.INVESTMENT_EQUITY_IDENTITY_CACHE_PATH.trim() ||
+      join(investmentModuleDir, 'identity-cache.json'),
   };
 }

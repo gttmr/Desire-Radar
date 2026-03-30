@@ -15,10 +15,10 @@ export const commandBuilders = [
             .addStringOption((opt) =>
               opt
                 .setName('ticker')
-                .setDescription('6자리 종목 코드')
+                .setDescription('티커, 종목코드, 회사명')
                 .setRequired(true)
-                .setMinLength(6)
-                .setMaxLength(12),
+                .setMinLength(1)
+                .setMaxLength(40),
             ),
         )
         .addSubcommand((sub) =>
@@ -28,10 +28,10 @@ export const commandBuilders = [
             .addStringOption((opt) =>
               opt
                 .setName('ticker')
-                .setDescription('삭제할 6자리 종목 코드')
+                .setDescription('삭제할 티커, 종목코드, 회사명')
                 .setRequired(true)
-                .setMinLength(6)
-                .setMaxLength(12),
+                .setMinLength(1)
+                .setMaxLength(40),
             ),
         )
         .addSubcommand((sub) =>
@@ -43,16 +43,17 @@ export const commandBuilders = [
     .addSubcommand((sub) =>
       sub
         .setName('run')
-        .setDescription('일일 리포트 생성 및 전송')
+        .setDescription('짧은 일일 리포트 생성 및 전송'),
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName('detail')
+        .setDescription('최신 또는 특정 투자 리포트 상세 조회')
         .addStringOption((opt) =>
           opt
-            .setName('detail')
-            .setDescription('리포트 상세도')
-            .setRequired(false)
-            .addChoices(
-              { name: 'summary', value: 'summary' },
-              { name: 'full', value: 'full' },
-            ),
+            .setName('run_id')
+            .setDescription('특정 투자 decision run id (미지정 시 latest)')
+            .setRequired(false),
         ),
     )
     .addSubcommand((sub) =>

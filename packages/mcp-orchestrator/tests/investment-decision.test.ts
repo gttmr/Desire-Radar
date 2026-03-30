@@ -11,10 +11,14 @@ import {
   ExternalArtifactDecisionRunner,
   ProviderExecDecisionRunner,
 } from '../src/investment/decision-runner.js';
+import { EquityIdentityResolver } from '../src/investment/equity-identity.js';
+import { EquityIdentityCacheStore } from '../src/investment/identity-cache.js';
 import { EquityMapStore } from '../src/investment/equity-map.js';
+import { InvestmentEquityIdentityService } from '../src/investment/equity-identity-service.js';
 import { InvestmentEquityMapService } from '../src/investment/equity-map-service.js';
 import { InvestmentDecisionService } from '../src/investment/decision-service.js';
 import { ExternalInvestmentDecisionWorker } from '../src/investment/external-worker.js';
+import { KisInstrumentLookupClient } from '../src/investment/kis-client.js';
 import { InvestmentMarkdownStore } from '../src/investment/markdown-store.js';
 import { InvestmentDecisionPromptBuilder } from '../src/investment/prompt-builder.js';
 import { InvestmentReportFormatter } from '../src/investment/report-formatter.js';
@@ -113,6 +117,16 @@ function makePromptBuilderStub() {
   } as unknown as InvestmentDecisionPromptBuilder;
 }
 
+function makeIdentityResolver(dataDir: string, equityMapPath: string): EquityIdentityResolver {
+  return new EquityIdentityResolver(
+    new EquityMapStore(equityMapPath),
+    new EquityIdentityCacheStore(join(dataDir, 'investment-module', 'identity-cache.json')),
+    new KisInstrumentLookupClient({
+      baseUrl: 'https://example.test',
+    }),
+  );
+}
+
 describe('investment decision module', () => {
   let server: ReturnType<express.Express['listen']> | undefined;
 
@@ -151,7 +165,7 @@ describe('investment decision module', () => {
       'utf8',
     );
     const resolver = new InvestableUniverseResolver(
-      new EquityMapStore(equityMapPath),
+      makeIdentityResolver(dataDir, equityMapPath),
       new InvestmentContextProvider(new InvestmentMarkdownStore(dataDir)),
     );
     const assembler = new InvestmentSignalAssembler(
@@ -232,6 +246,30 @@ describe('investment decision module', () => {
     expect(entries.find((entry) => entry.ticker === 'GOOGL')?.aliases).toContain('YouTube');
   });
 
+  it('normalizes exact ticker and company-name inputs through the identity resolver', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'investment-identity-'));
+    const equityMapPath = join(dataDir, 'investment-module', 'equity-map.json');
+    const equityMapStore = new EquityMapStore(equityMapPath);
+    await equityMapStore.ensureExists();
+    const resolver = makeIdentityResolver(dataDir, equityMapPath);
+
+    const us = await resolver.normalize('TSLA');
+    const kr = await resolver.normalize('삼성전자');
+
+    expect(us).toMatchObject({
+      resolved: true,
+      ticker: 'TSLA',
+      company_name: 'Tesla',
+      normalization_source: 'equity_map',
+    });
+    expect(kr).toMatchObject({
+      resolved: true,
+      ticker: '005930',
+      company_name: '삼성전자',
+      normalization_source: 'equity_map',
+    });
+  });
+
   it('renders compact request markdown without embedding the full request json', () => {
     const formatter = new InvestmentReportFormatter();
     const markdown = formatter.renderRequestMarkdown({
@@ -251,6 +289,80 @@ describe('investment decision module', () => {
     expect(markdown).toContain('coverage_gap_count: 1');
     expect(markdown).not.toContain('## Request JSON');
     expect(markdown).not.toContain('"supporting_evidence_refs"');
+  });
+
+  it('renders summary reports with only operator sections and short reasons', () => {
+    const formatter = new InvestmentReportFormatter();
+    const markdown = formatter.formatReport(
+      makeRequest('run-summary'),
+      {
+        run_id: 'run-summary',
+        status: 'completed',
+        generated_at: '2026-03-29T00:00:00.000Z',
+        summary: 'Long summary that should not be the only operator output',
+        report_summary: '오늘은 대형 기술주 중 실적 가시성이 높은 종목만 추려서 봅니다.',
+        operator_highlights: ['성장주 전반이 아니라 광고/콘텐츠 실적 가시성 중심입니다.'],
+        market_view: 'Neutral',
+        top_picks: [
+          {
+            asset_key: 'stock:NASDAQ:TSLA',
+            ticker: 'TSLA',
+            company_name: 'Tesla',
+            recommendation: 'watch',
+            confidence: 0.65,
+            why_now: 'verbose why now',
+            short_reason: '실적 모멘텀보다 변동성 관리가 더 중요합니다.',
+            report_priority: 'high',
+            thesis: 'thesis',
+            beneficiary_path: 'beneficiary',
+            linked_clusters: ['cluster-1'],
+            linked_evidence_refs: ['ev-1'],
+            risks: ['risk'],
+            missing_information: ['info'],
+          },
+        ],
+        watch_candidates: [],
+        rejected_candidates: [
+          {
+            asset_key: 'stock:NASDAQ:AMZN',
+            ticker: 'AMZN',
+            company_name: 'Amazon',
+            recommendation: 'pass',
+            confidence: 0.55,
+            why_now: 'why',
+            short_reason: 'reason',
+            report_priority: 'low',
+            thesis: 'thesis',
+            beneficiary_path: 'beneficiary',
+            linked_clusters: [],
+            linked_evidence_refs: [],
+            risks: [],
+            missing_information: [],
+          },
+        ],
+        coverage_gaps: [
+          {
+            label: 'OpenAI',
+            reason: 'No exact equity mapping found',
+            linked_cluster_id: 'cluster-openai',
+            linked_note_ids: [],
+          },
+        ],
+        risks: ['macro'],
+        degraded: false,
+        degraded_reason: null,
+        schema_version: 1,
+      },
+      'summary',
+    );
+
+    expect(markdown).toContain('## 오늘의 판단 요약');
+    expect(markdown).toContain('## 우선 검토 종목');
+    expect(markdown).toContain('## 관찰 종목');
+    expect(markdown).toContain('실적 모멘텀보다 변동성 관리가 더 중요합니다.');
+    expect(markdown).not.toContain('## Rejected Candidates');
+    expect(markdown).not.toContain('## Coverage Gaps');
+    expect(markdown).not.toContain('## Source Health');
   });
 
   it('reconciles stale running decision runs into failed status', async () => {
@@ -1496,6 +1608,9 @@ describe('investment decision module', () => {
     const equityMapStore = new EquityMapStore(join(dataDir, 'investment-module', 'equity-map.json'));
     await equityMapStore.ensureExists();
     const equityMapService = new InvestmentEquityMapService(equityMapStore);
+    const identityService = new InvestmentEquityIdentityService(
+      makeIdentityResolver(dataDir, equityMapStore.path),
+    );
 
     const service = new InvestmentDecisionService(
       new InvestmentDecisionStore(join(dataDir, 'investment-decisions', 'runs')),
@@ -1510,7 +1625,7 @@ describe('investment decision module', () => {
         } as unknown as CandidateService,
         new InvestmentContextProvider(new InvestmentMarkdownStore(dataDir)),
         new InvestableUniverseResolver(
-          equityMapStore,
+          makeIdentityResolver(dataDir, equityMapStore.path),
           new InvestmentContextProvider(new InvestmentMarkdownStore(dataDir)),
         ),
       ),
@@ -1615,6 +1730,7 @@ describe('investment decision module', () => {
         undefined,
         service,
         equityMapService,
+        identityService,
       ),
     );
     server = app.listen(0);
@@ -1671,5 +1787,23 @@ describe('investment decision module', () => {
     expect(getMapResponse.status).toBe(200);
     const mapPayload = (await getMapResponse.json()) as { equities: Array<{ ticker: string }> };
     expect(mapPayload.equities[0]?.ticker).toBe('MSFT');
+
+    const normalizeResponse = await fetch(
+      `http://127.0.0.1:${address.port}/investment/normalize-equity`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ input: 'MSFT' }),
+      },
+    );
+    expect(normalizeResponse.status).toBe(200);
+    const normalized = (await normalizeResponse.json()) as {
+      identity: { resolved: boolean; ticker: string; company_name: string };
+    };
+    expect(normalized.identity).toMatchObject({
+      resolved: true,
+      ticker: 'MSFT',
+      company_name: 'Microsoft',
+    });
   });
 });

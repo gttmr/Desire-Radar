@@ -13,6 +13,7 @@ import { resetSession } from '../tools/reset-session.js';
 import type { InvestmentIntakeService } from '../investment/intake-service.js';
 import type { InvestmentDecisionService } from '../investment/decision-service.js';
 import type { InvestmentEquityMapService } from '../investment/equity-map-service.js';
+import type { InvestmentEquityIdentityService } from '../investment/equity-identity-service.js';
 
 export function createRoutes(
   orchestrator: RunOrchestrator,
@@ -22,6 +23,7 @@ export function createRoutes(
   investmentIntakeService?: InvestmentIntakeService,
   investmentDecisionService?: InvestmentDecisionService,
   investmentEquityMapService?: InvestmentEquityMapService,
+  investmentEquityIdentityService?: InvestmentEquityIdentityService,
 ): Router {
   const router = Router();
 
@@ -353,6 +355,22 @@ export function createRoutes(
           equities: Array.isArray(req.body.equities) ? req.body.equities : [],
         }),
       );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(400).json({ error: message });
+    }
+  });
+
+  router.post('/investment/normalize-equity', async (req, res) => {
+    if (!investmentEquityIdentityService) {
+      res.status(404).json({ error: 'investment equity identity not configured' });
+      return;
+    }
+    try {
+      const result = await investmentEquityIdentityService.normalize({
+        input: String(req.body.input ?? ''),
+      });
+      res.json(result);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       res.status(400).json({ error: message });

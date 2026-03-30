@@ -17,9 +17,14 @@ describe('GuildConfigStore', () => {
 
     const afterAdd = await store.addTicker('g1', '005930');
     expect(afterAdd.tickers).toEqual(['005930']);
+    expect(afterAdd.watchlist?.[0]).toMatchObject({
+      ticker: '005930',
+      companyName: '005930',
+    });
 
     const afterRemove = await store.removeTicker('g1', '005930');
     expect(afterRemove.tickers).toEqual([]);
+    expect(afterRemove.watchlist).toEqual([]);
 
     await store.markRun('g1', { status: 'ok', mode: 'manual' });
     const saved = JSON.parse(await readFile(path.join(root, 'config.json'), 'utf8')) as {

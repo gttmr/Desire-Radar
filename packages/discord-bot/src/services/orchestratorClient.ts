@@ -28,6 +28,8 @@ import type {
   GetLatestInvestmentDecisionResponse,
   InvestmentDecisionReportResponse,
   GetInvestmentEquityMapResponse,
+  NormalizeInvestmentEquityRequest,
+  NormalizeInvestmentEquityResponse,
   PutInvestmentEquityMapRequest,
   PutInvestmentEquityMapResponse,
 } from '@agentic/shared-types';
@@ -134,6 +136,12 @@ export class OrchestratorClient {
 
   async getInvestmentEquityMap(): Promise<GetInvestmentEquityMapResponse> {
     return this.get('/investment/equity-map');
+  }
+
+  async normalizeInvestmentEquity(
+    req: NormalizeInvestmentEquityRequest,
+  ): Promise<NormalizeInvestmentEquityResponse> {
+    return this.post('/investment/normalize-equity', req);
   }
 
   async replaceInvestmentEquityMap(

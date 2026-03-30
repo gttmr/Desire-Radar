@@ -19,7 +19,7 @@ describe('discord slash command surface', () => {
   it('defines expected report and run subcommands', () => {
     const report = commandSchema.find((command) => command.name === 'report');
     const run = commandSchema.find((command) => command.name === 'run');
-    expect(report?.options?.map((option) => option.name)).toEqual(['watchlist', 'run', 'status']);
+    expect(report?.options?.map((option) => option.name)).toEqual(['watchlist', 'run', 'detail', 'status']);
     expect(run?.options?.map((option) => option.name)).toEqual(['start', 'status', 'verdict', 'research', 'requests']);
   });
 });

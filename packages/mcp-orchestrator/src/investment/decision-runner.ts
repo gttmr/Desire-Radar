@@ -124,6 +124,14 @@ function normalizeArtifact(
   const topPicks = Array.isArray(parsed.top_picks) ? parsed.top_picks : [];
   const watchCandidates = Array.isArray(parsed.watch_candidates) ? parsed.watch_candidates : [];
   const rejectedCandidates = Array.isArray(parsed.rejected_candidates) ? parsed.rejected_candidates : [];
+  const normalizeReportPriority = (
+    priority: unknown,
+  ): 'high' | 'medium' | 'low' | null => {
+    if (priority === 'high' || priority === 'medium' || priority === 'low') {
+      return priority;
+    }
+    return null;
+  };
 
   const normalizeItem = (item: unknown) => {
     const raw = typeof item === 'object' && item != null ? (item as Record<string, unknown>) : {};
@@ -138,6 +146,8 @@ function normalizeArtifact(
       recommendation: asRecommendation(raw.recommendation),
       confidence: Math.max(0, Math.min(1, Number(raw.confidence ?? 0))),
       why_now: String(raw.why_now ?? '').trim(),
+      short_reason: String(raw.short_reason ?? '').trim() || null,
+      report_priority: normalizeReportPriority(raw.report_priority),
       thesis: String(raw.thesis ?? '').trim(),
       beneficiary_path: String(raw.beneficiary_path ?? '').trim(),
       linked_clusters: normalizeStringArray(raw.linked_clusters),
@@ -158,6 +168,11 @@ function normalizeArtifact(
     status: normalizedStatus,
     generated_at: new Date().toISOString(),
     summary: String(parsed.summary ?? '').trim() || 'No investment summary provided.',
+    report_summary:
+      String(parsed.report_summary ?? '').trim() ||
+      String(parsed.summary ?? '').trim() ||
+      'No investment summary provided.',
+    operator_highlights: normalizeStringArray(parsed.operator_highlights).slice(0, 5),
     market_view: String(parsed.market_view ?? '').trim(),
     top_picks: topPicks.map(normalizeItem),
     watch_candidates: watchCandidates.map(normalizeItem),
@@ -182,6 +197,8 @@ function buildFailureArtifact(
     status: 'failed',
     generated_at: new Date().toISOString(),
     summary,
+    report_summary: summary,
+    operator_highlights: [],
     market_view: '',
     top_picks: [],
     watch_candidates: [],

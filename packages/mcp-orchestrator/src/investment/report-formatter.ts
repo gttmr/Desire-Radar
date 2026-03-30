@@ -6,7 +6,11 @@ import type {
 import type { ReportDetailLevel } from '@agentic/shared-types';
 
 function formatItemBrief(item: InvestmentDecisionRecommendationItem): string {
-  return `- ${item.company_name} (\`${item.ticker}\`) · ${item.recommendation} · ${(item.confidence * 100).toFixed(0)}% · ${item.why_now}`;
+  const reason = (item.short_reason?.trim() || item.why_now || '(reason unavailable)').trim();
+  return [
+    `- ${item.company_name} (\`${item.ticker}\`) · ${item.recommendation} · ${(item.confidence * 100).toFixed(0)}%`,
+    `  ${reason}`,
+  ].join('\n');
 }
 
 function formatItemFull(item: InvestmentDecisionRecommendationItem): string[] {
@@ -68,11 +72,34 @@ export class InvestmentReportFormatter {
     detail: ReportDetailLevel,
   ): string {
     const title = `# Daily Investment Shortlist — ${request.window.label}`;
-    const sections: string[] = [
-      title,
-      '',
-      `> run_id=${request.run_id} · mode=${request.mode} · generated_at=${artifact.generated_at}`,
-      '',
+    const sections: string[] = [title, '', `> run_id=${request.run_id} · mode=${request.mode} · generated_at=${artifact.generated_at}`, ''];
+
+    if (detail === 'summary') {
+      sections.push(
+        '## 오늘의 판단 요약',
+        '',
+        artifact.report_summary?.trim() || artifact.summary || '(none)',
+        '',
+        ...(artifact.operator_highlights?.length
+          ? artifact.operator_highlights.slice(0, 3).map((entry) => `- ${entry}`)
+          : []),
+        ...(artifact.operator_highlights?.length ? [''] : []),
+        '## 우선 검토 종목',
+        '',
+        ...(artifact.top_picks.slice(0, 3).length > 0
+          ? artifact.top_picks.slice(0, 3).map(formatItemBrief)
+          : ['- (none)']),
+        '',
+        '## 관찰 종목',
+        '',
+        ...(artifact.watch_candidates.slice(0, 3).length > 0
+          ? artifact.watch_candidates.slice(0, 3).map(formatItemBrief)
+          : ['- (none)']),
+      );
+      return sections.join('\n');
+    }
+
+    sections.push(
       '## Summary',
       '',
       artifact.summary || '(none)',
@@ -81,56 +108,27 @@ export class InvestmentReportFormatter {
       '',
       artifact.market_view || '(none)',
       '',
-    ];
-
-    if (detail === 'summary') {
-      sections.push(
-        '## Top Picks',
-        '',
-        ...(artifact.top_picks.length > 0
-          ? artifact.top_picks.map(formatItemBrief)
-          : ['- (none)']),
-        '',
-        '## Watch Candidates',
-        '',
-        ...(artifact.watch_candidates.length > 0
-          ? artifact.watch_candidates.map(formatItemBrief)
-          : ['- (none)']),
-        '',
-        '## Rejected Candidates',
-        '',
-        ...(artifact.rejected_candidates.length > 0
-          ? artifact.rejected_candidates.map(formatItemBrief)
-          : ['- (none)']),
-      );
-    } else {
-      sections.push(
-        '## Request Scope',
-        '',
-        `- watchlist: ${request.watchlist.join(', ') || '(none)'}`,
-        `- resolved_equities: ${request.resolved_equities.length}`,
-        `- candidate_clusters: ${request.candidate_clusters.length}`,
-        '',
-        '## Top Picks',
-        '',
-        ...(artifact.top_picks.length > 0
-          ? artifact.top_picks.flatMap(formatItemFull)
-          : ['- (none)', '']),
-        '## Watch Candidates',
-        '',
-        ...(artifact.watch_candidates.length > 0
-          ? artifact.watch_candidates.flatMap(formatItemFull)
-          : ['- (none)', '']),
-        '## Rejected Candidates',
-        '',
-        ...(artifact.rejected_candidates.length > 0
-          ? artifact.rejected_candidates.flatMap(formatItemFull)
-          : ['- (none)', '']),
-      );
-    }
-
-    sections.push(
+      '## Request Scope',
       '',
+      `- watchlist: ${request.watchlist.join(', ') || '(none)'}`,
+      `- resolved_equities: ${request.resolved_equities.length}`,
+      `- candidate_clusters: ${request.candidate_clusters.length}`,
+      '',
+      '## Top Picks',
+      '',
+      ...(artifact.top_picks.length > 0
+        ? artifact.top_picks.flatMap(formatItemFull)
+        : ['- (none)', '']),
+      '## Watch Candidates',
+      '',
+      ...(artifact.watch_candidates.length > 0
+        ? artifact.watch_candidates.flatMap(formatItemFull)
+        : ['- (none)', '']),
+      '## Rejected Candidates',
+      '',
+      ...(artifact.rejected_candidates.length > 0
+        ? artifact.rejected_candidates.flatMap(formatItemFull)
+        : ['- (none)', '']),
       '## Coverage Gaps',
       '',
       ...formatCoverageGaps(artifact),

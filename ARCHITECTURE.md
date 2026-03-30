@@ -271,7 +271,7 @@ Key idea:
 - asset dossiers provide a stable future hook for verdict/report context
 - this module is an interface and archive layer first, not a second verdict engine
 
-#### InvestmentSignalAssembler, InvestableUniverseResolver, InvestmentDecisionRunner, InvestmentDecisionStore, InvestmentReportFormatter, InvestmentEquityMapService
+#### InvestmentSignalAssembler, InvestableUniverseResolver, InvestmentDecisionRunner, InvestmentDecisionStore, InvestmentReportFormatter, InvestmentEquityMapService, InvestmentEquityIdentityService
 `packages/mcp-orchestrator/src/investment/`
 
 These components own the daily shortlist path separately from the debate/verdict pipeline.
@@ -279,9 +279,10 @@ These components own the daily shortlist path separately from the debate/verdict
 Key idea:
 - `InvestmentSignalAssembler` builds a canonical request bundle from watchlist state, collector clusters, source health, and investment notes
 - `InvestableUniverseResolver` keeps the universe watchlist-prioritized and only admits exact or curated equity mappings
+- `InvestmentEquityIdentityService` is the canonical stock identity boundary for ticker, company-name, and code normalization
 - `InvestmentDecisionRunner` can execute directly through providers or wait for an external artifact writer without changing downstream contracts
 - `InvestmentDecisionStore` is the canonical run directory owner
-- `InvestmentReportFormatter` renders the final operator-facing text deterministically from `response.json`
+- `InvestmentReportFormatter` renders a short operator report by default and keeps detailed output behind explicit detail requests
 - `InvestmentEquityMapService` is the operational input boundary for curated exact alias/ticker/company_name mappings
 
 This keeps provider transport decisions, artifact storage, and report generation decoupled.
@@ -310,6 +311,7 @@ This component executes only the safe side effects from collector's human input 
 Key idea:
 - collector decides what the message means
 - bot may auto-apply only low-risk stock watchlist actions
+- bot should not normalize stock identities on its own; it should call orchestrator and store canonical identities
 - investment-note handoff is forwarded to orchestrator, not stored locally
 
 #### ProviderHealthMonitor

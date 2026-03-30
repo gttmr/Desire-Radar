@@ -13,6 +13,7 @@
 - [docs/collector-external-source-notes.md](docs/collector-external-source-notes.md): 외부 소스/skill 비교와 collector 편입 기준 메모
 - [docs/investment-module.md](docs/investment-module.md): free-form human input와 orchestrator investment module living design
 - [docs/investment-decision-module.md](docs/investment-decision-module.md): watchlist-prioritized daily shortlist와 artifact-first decision contract
+- [docs/equity-identity-normalization.md](docs/equity-identity-normalization.md): Discord/watchlist/investment decision 공통 종목 정규화 규칙
 - `packages/mcp-orchestrator/src/agents/*.md`: 오케스트레이터 분석 에이전트 프롬프트
 
 ## 아키텍처
@@ -97,7 +98,10 @@ Discord human input / slash commands
 - 메시지 내용을 bot이 직접 분류하지 않고 raw envelope 그대로 collector에 전달한다.
 - collector가 돌려준 `action_requests` 중 저위험 주식 watchlist add/remove만 자동 실행한다.
 - collector가 돌려준 `investment_module` handoff는 orchestrator investment intake API로 전달한다.
+- `/report watchlist add/remove`와 human input 기반 watchlist action은 모두 orchestrator 종목 정규화를 먼저 거친다.
 - `/report run`은 더 이상 자체 판단 로직을 만들지 않고 orchestrator investment decision run을 호출한 뒤 결과 artifact를 보고 채널로 렌더링한다.
+- 기본 Discord 리포트는 `오늘의 판단 요약`, `우선 검토 종목`, `관찰 종목` 3섹션만 보여준다.
+- 긴 thesis/risk/coverage/source health는 `/report detail`에서만 본다.
 - slash command 표면은 `report`, `radar`, `run`, `queue`, `ops` 5개 namespace로 고정한다.
 
 ## 빠른 시작
@@ -267,9 +271,13 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 - collector cluster, beneficiary mapping, investment dossier는 보조 입력으로만 들어간다.
 - exact alias/ticker/company_name 매칭이 안 되는 신규 후보는 `coverage_gaps`로 남긴다.
 - curated equity mapping 파일 기본 경로는 `data/investment-module/equity-map.json`이다.
+- 종목 정규화 순서는 `local equity-map -> identity cache -> KIS API -> unresolved`다.
+- KIS는 종목 식별 fallback에만 쓰고, 투자 판단 evidence source로는 쓰지 않는다.
+- watchlist 저장은 raw 입력 문자열이 아니라 canonical 종목 identity를 기준으로 한다.
 - 이 파일이 없거나 비어 있으면 orchestrator가 보수적인 starter map을 자동으로 채운다.
   - 예: `삼성전자/005930`, `Microsoft/MSFT`, `NVIDIA/NVDA`, `Alphabet/Google/YouTube`, `Meta`, `Amazon`, `Netflix`, `Tesla`, `Disney`, `Sony/PlayStation`, `Apple`
 - orchestrator는 `GET /investment/equity-map`, `PUT /investment/equity-map`로 이 매핑 파일을 읽고 교체할 수 있다.
+- orchestrator는 `POST /investment/normalize-equity`로 ticker, 종목코드, 회사명을 canonical 종목으로 정규화할 수 있다.
 - `external_artifact` 모드를 실제로 처리하려면 별도 worker를 실행한다. 기본 스크립트는 `npm --prefix packages/mcp-orchestrator run worker:investment-decisions -- --watch`다.
 
 ## Session And Graph Strategy
@@ -337,6 +345,7 @@ data/investment-decisions/runs/YYYY-MM-DD/<run_id>/
 - `GET /investment/intakes/:intake_id`
 - `GET /investment/assets/:asset_key`
 - `GET /investment/equity-map`
+- `POST /investment/normalize-equity`
 - `PUT /investment/equity-map`
 - `POST /investment/decisions/runs`
 - `GET /investment/decisions/runs/:run_id`
@@ -420,10 +429,11 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 ## Discord 명령어
 
 ### `/report`
-- `/report watchlist add ticker:<코드>`: 관심 종목 추가
-- `/report watchlist remove ticker:<코드>`: 관심 종목 제거
+- `/report watchlist add ticker:<TSLA|005930|삼성전자>`: 관심 종목 추가
+- `/report watchlist remove ticker:<TSLA|005930|삼성전자>`: 관심 종목 제거
 - `/report watchlist list`: 관심 종목 목록 조회
-- `/report run [detail:summary|full]`: orchestrator investment decision run을 실행하고 결과 artifact를 보고 채널로 전송
+- `/report run`: 짧은 기본 투자 리포트를 생성하고 전송
+- `/report detail [run_id]`: 최신 또는 특정 run의 상세 투자 리포트 조회
 - `/report status`: 리포트 설정과 최근 실행 상태 조회
 
 ### `/radar`
@@ -501,6 +511,10 @@ npm exec tsc -b packages/shared-types/tsconfig.json
 | `INVESTMENT_DECISION_FINAL_TOOL_POLICY` | mcp-orchestrator | 최종 판단 단계 tool 정책 |
 | `INVESTMENT_DECISION_FINAL_TIMEOUT_MS` | mcp-orchestrator | 최종 판단 단계 timeout |
 | `INVESTMENT_EQUITY_MAP_PATH` | mcp-orchestrator | curated equity alias/ticker mapping 파일 경로 |
+| `INVESTMENT_EQUITY_IDENTITY_CACHE_PATH` | mcp-orchestrator | runtime 종목 정규화 캐시 경로 |
+| `KIS_APP_KEY` | mcp-orchestrator | KIS 종목 정규화 fallback app key |
+| `KIS_APP_SECRET` | mcp-orchestrator | KIS 종목 정규화 fallback app secret |
+| `KIS_BASE_URL` | mcp-orchestrator | KIS base URL |
 | `PROVIDER_HEALTH_POLL_INTERVAL_SEC` | mcp-orchestrator | provider health probe 주기 |
 | `PROVIDER_REPAIR_COOLDOWN_SEC` | mcp-orchestrator | provider repair 재시도 cooldown |
 | `PROVIDER_REPAIR_CODEX_COMMAND` | mcp-orchestrator | optional Codex repair command |

@@ -75,7 +75,7 @@ export class OrchestratorGatewayAdapter implements AnalysisGateway {
       markdown: result.report.markdown,
       items: [...artifact.top_picks, ...artifact.watch_candidates, ...artifact.rejected_candidates].map((item) => ({
         ticker: item.ticker,
-        headline: item.why_now || item.company_name,
+        headline: item.short_reason || item.why_now || item.company_name,
         direction: recommendationToDirection(item.recommendation),
         confidence: item.confidence,
         news: item.linked_clusters,

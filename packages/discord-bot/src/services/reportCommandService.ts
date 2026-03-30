@@ -1,13 +1,18 @@
 import type { ReportDetailLevel } from '../types/domain.js';
 import type { ReportDispatch, ReportService } from './reportService.js';
-import type { ActionRequest } from '@agentic/shared-types';
+import type { ActionRequest, NormalizedEquityIdentity } from '@agentic/shared-types';
 
-function normalizeTicker(input: string): string {
-  return input.trim().toUpperCase();
-}
+type ResolvedEquityIdentity = NormalizedEquityIdentity & {
+  resolved: true;
+  ticker: string;
+  company_name: string;
+};
 
-function isValidTicker(input: string): boolean {
-  return /^\d{6}$/.test(input);
+function formatResolvedIdentity(identity: NormalizedEquityIdentity): string {
+  if (!identity.resolved || !identity.ticker || !identity.company_name) {
+    return identity.input;
+  }
+  return `${identity.company_name} (\`${identity.ticker}\`)`;
 }
 
 export class ReportCommandService {
@@ -20,38 +25,50 @@ export class ReportCommandService {
       mode: 'manual',
       detail: ReportDetailLevel,
     ) => Promise<ReportDispatch>,
+    private readonly normalizeEquity: (input: string) => Promise<NormalizedEquityIdentity>,
+    private readonly loadDetailedReport: (runId?: string) => Promise<string>,
   ) {}
 
-  async addTicker(guildId: string, rawTicker: string): Promise<string> {
-    const ticker = normalizeTicker(rawTicker);
-    if (!isValidTicker(ticker)) {
-      throw new Error('종목 코드는 6자리 숫자여야 합니다. 예: `005930`');
+  private async requireResolvedIdentity(input: string): Promise<ResolvedEquityIdentity> {
+    const identity = await this.normalizeEquity(input);
+    if (!identity.resolved || !identity.ticker || !identity.company_name) {
+      throw new Error(`종목 정규화에 실패했습니다: \`${input}\``);
     }
+    return identity as ResolvedEquityIdentity;
+  }
+
+  async addTicker(guildId: string, rawTicker: string): Promise<string> {
+    const identity = await this.requireResolvedIdentity(rawTicker);
     const config = await this.reports.addTicker(
       guildId,
       this.resolveDefaultReportChannelId(guildId),
-      ticker,
+      identity.ticker,
+      {
+        assetKey: identity.asset_key ?? `stock:${identity.ticker}`,
+        companyName: identity.company_name,
+        market: identity.market,
+        exchange: identity.exchange,
+        instrumentCode: identity.instrument_code,
+        normalizationSource: identity.normalization_source,
+      },
     );
     return [
-      `관심 종목 등록 완료: \`${ticker}\``,
+      `관심 종목 등록 완료: ${formatResolvedIdentity(identity)}`,
       `리포트 채널: <#${config.reportChannelId}>`,
-      `현재 목록: ${config.tickers.join(', ')}`,
+      `현재 목록: ${config.watchlist?.map((entry) => `${entry.companyName} (${entry.ticker})`).join(', ') || config.tickers.join(', ')}`,
     ].join('\n');
   }
 
   async removeTicker(guildId: string, rawTicker: string): Promise<string> {
-    const ticker = normalizeTicker(rawTicker);
-    if (!isValidTicker(ticker)) {
-      throw new Error('종목 코드는 6자리 숫자여야 합니다. 예: `005930`');
-    }
+    const identity = await this.requireResolvedIdentity(rawTicker);
     const config = await this.reports.removeTicker(
       guildId,
       this.resolveDefaultReportChannelId(guildId),
-      ticker,
+      identity.ticker,
     );
     return config.tickers.length > 0
-      ? `관심 종목 삭제 완료: \`${ticker}\`\n현재 목록: ${config.tickers.join(', ')}`
-      : `관심 종목 삭제 완료: \`${ticker}\`\n현재 목록이 비어 있습니다.`;
+      ? `관심 종목 삭제 완료: ${formatResolvedIdentity(identity)}\n현재 목록: ${config.watchlist?.map((entry) => `${entry.companyName} (${entry.ticker})`).join(', ') || config.tickers.join(', ')}`
+      : `관심 종목 삭제 완료: ${formatResolvedIdentity(identity)}\n현재 목록이 비어 있습니다.`;
   }
 
   async listWatchlist(guildId: string): Promise<string> {
@@ -59,18 +76,30 @@ export class ReportCommandService {
       guildId,
       this.resolveDefaultReportChannelId(guildId),
     );
+    const watchlistSummary =
+      config.watchlist && config.watchlist.length > 0
+        ? config.watchlist
+            .map((entry) => `${entry.companyName} (\`${entry.ticker}\`)`)
+            .join(', ')
+        : config.tickers.length > 0
+          ? config.tickers.join(', ')
+          : '(비어 있음)';
     return [
       `리포트 채널: <#${config.reportChannelId}>`,
       `시간대: ${config.timezone}`,
-      `관심 종목: ${config.tickers.length > 0 ? config.tickers.join(', ') : '(비어 있음)'}`,
+      `관심 종목: ${watchlistSummary}`,
       `자동 발송: ${config.enabled ? '활성화' : '비활성화'}`,
     ].join('\n');
   }
 
-  async run(guildId: string, detail: ReportDetailLevel): Promise<string> {
+  async run(guildId: string): Promise<string> {
     const fallbackChannelId = this.resolveDefaultReportChannelId(guildId);
-    const dispatch = await this.runReport(guildId, fallbackChannelId, 'manual', detail);
-    return `${detail === 'summary' ? '요약' : '전체'} 리포트를 <#${dispatch.channelId}>에 전송했습니다.`;
+    const dispatch = await this.runReport(guildId, fallbackChannelId, 'manual', 'summary');
+    return `요약 리포트를 <#${dispatch.channelId}>에 전송했습니다.`;
+  }
+
+  async detail(runId?: string): Promise<string> {
+    return this.loadDetailedReport(runId);
   }
 
   async status(guildId: string): Promise<string> {
@@ -95,23 +124,28 @@ export class ReportCommandService {
     rawTicker: string,
     displayName?: string,
   ): Promise<string> {
-    const ticker = normalizeTicker(rawTicker);
-    if (!isValidTicker(ticker)) {
-      throw new Error('종목 코드는 6자리 숫자여야 합니다. 예: `005930`');
-    }
+    const identity = await this.requireResolvedIdentity(rawTicker);
     if (action === 'watchlist_add') {
       await this.reports.addTicker(
         guildId,
         this.resolveDefaultReportChannelId(guildId),
-        ticker,
+        identity.ticker,
+        {
+          assetKey: identity.asset_key ?? `stock:${identity.ticker}`,
+          companyName: identity.company_name ?? displayName ?? identity.ticker,
+          market: identity.market,
+          exchange: identity.exchange,
+          instrumentCode: identity.instrument_code,
+          normalizationSource: identity.normalization_source,
+        },
       );
-      return `watchlist 자동 추가: ${displayName ?? ticker} (\`${ticker}\`)`;
+      return `watchlist 자동 추가: ${displayName ?? identity.company_name ?? identity.ticker} (\`${identity.ticker}\`)`;
     }
     await this.reports.removeTicker(
       guildId,
       this.resolveDefaultReportChannelId(guildId),
-      ticker,
+      identity.ticker,
     );
-    return `watchlist 자동 제거: ${displayName ?? ticker} (\`${ticker}\`)`;
+    return `watchlist 자동 제거: ${displayName ?? identity.company_name ?? identity.ticker} (\`${identity.ticker}\`)`;
   }
 }

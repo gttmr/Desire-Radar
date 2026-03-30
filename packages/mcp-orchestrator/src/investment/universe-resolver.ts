@@ -1,12 +1,12 @@
 import type {
   InvestmentCandidateCluster,
   InvestmentCoverageGap,
-  InvestmentEquityMapEntry,
+  NormalizedEquityIdentity,
   ResolvedEquityCandidate,
 } from '@agentic/shared-types';
 import type { CollectorCandidate } from '../collector/client.js';
 import type { InvestmentContextProvider } from './context-provider.js';
-import { EquityMapStore } from './equity-map.js';
+import { EquityIdentityResolver } from './equity-identity.js';
 
 type ResolutionState = {
   equities: Map<string, ResolvedEquityCandidate>;
@@ -41,7 +41,7 @@ function asCluster(candidate: CollectorCandidate): InvestmentCandidateCluster {
 
 export class InvestableUniverseResolver {
   constructor(
-    private readonly equityMap: EquityMapStore,
+    private readonly identityResolver: EquityIdentityResolver,
     private readonly investmentContext: InvestmentContextProvider,
   ) {}
 
@@ -80,12 +80,12 @@ export class InvestableUniverseResolver {
       ]);
       let matched = false;
       for (const label of labels) {
-        const mapping = await this.equityMap.resolveByAlias(label);
-        if (!mapping) {
+        const identity = await this.identityResolver.normalize(label);
+        if (!identity.resolved) {
           continue;
         }
         matched = true;
-        this.mergeResolved(state, mapping, {
+        this.mergeResolved(state, identity, {
           linkedCluster: cluster.cluster_id ?? cluster.display_label,
           watchlistMember: false,
           whyInScope: `collector cluster: ${cluster.display_label}`,
@@ -113,39 +113,53 @@ export class InvestableUniverseResolver {
     };
   }
 
-  private async resolveWatchlistTicker(ticker: string): Promise<InvestmentEquityMapEntry> {
-    const normalized = ticker.trim().toUpperCase();
-    const mapped = await this.equityMap.resolveByTicker(normalized);
-    if (mapped) {
-      return mapped;
+  private async resolveWatchlistTicker(ticker: string): Promise<NormalizedEquityIdentity> {
+    const identity = await this.identityResolver.normalize(ticker);
+    if (identity.resolved) {
+      return identity;
     }
+    const normalized = ticker.trim().toUpperCase();
     const dossier = await this.investmentContext.getAssetDossier(`stock:${normalized}`);
+    const assetKey = dossier?.asset.asset_key ?? `stock:${normalized}`;
     return {
-      asset_key: dossier?.asset.asset_key ?? `stock:${normalized}`,
+      input: ticker,
+      resolved: true,
+      asset_key: assetKey,
       ticker: normalized,
       company_name: dossier?.asset.display_name ?? normalized,
+      market: null,
+      exchange: null,
+      instrument_code: null,
       aliases: [],
+      normalization_source: 'dossier_fallback',
+      normalization_confidence: 0.5,
     };
   }
 
   private mergeResolved(
     state: ResolutionState,
-    mapped: InvestmentEquityMapEntry,
+    mapped: NormalizedEquityIdentity,
     options: {
       linkedCluster: string | null;
       watchlistMember: boolean;
       whyInScope?: string;
     },
   ): void {
-    const current = state.equities.get(mapped.asset_key);
+    const assetKey =
+      mapped.asset_key ?? `stock:${mapped.ticker ?? mapped.company_name ?? 'unknown'}`;
+    const companyName = mapped.company_name ?? mapped.ticker ?? 'unknown';
+    const current = state.equities.get(assetKey);
     const merged: ResolvedEquityCandidate = {
-      asset_key: mapped.asset_key,
-      ticker: mapped.ticker,
-      company_name: mapped.company_name,
+      asset_key: assetKey,
+      ticker: mapped.ticker ?? companyName,
+      company_name: companyName,
+      market: mapped.market,
+      exchange: mapped.exchange,
+      instrument_code: mapped.instrument_code,
       why_in_scope:
         current?.why_in_scope ??
         options.whyInScope ??
-        (options.watchlistMember ? 'watchlist member' : `resolved from ${mapped.company_name}`),
+        (options.watchlistMember ? 'watchlist member' : `resolved from ${companyName}`),
       linked_clusters: uniqueStrings([
         ...(current?.linked_clusters ?? []),
         options.linkedCluster,
@@ -159,6 +173,6 @@ export class InvestableUniverseResolver {
         ? current.why_in_scope
         : `watchlist member; ${current.why_in_scope}`;
     }
-    state.equities.set(mapped.asset_key, merged);
+    state.equities.set(assetKey, merged);
   }
 }

@@ -16,6 +16,10 @@ import {
 } from './investment/decision-runner.js';
 import { EquityMapStore } from './investment/equity-map.js';
 import { InvestmentEquityMapService } from './investment/equity-map-service.js';
+import { EquityIdentityCacheStore } from './investment/identity-cache.js';
+import { EquityIdentityResolver } from './investment/equity-identity.js';
+import { InvestmentEquityIdentityService } from './investment/equity-identity-service.js';
+import { KisInstrumentLookupClient } from './investment/kis-client.js';
 import { InvestmentDecisionService } from './investment/decision-service.js';
 import { AgentExecutor } from './orchestrator/agent-executor.js';
 import { RunContextStore } from './orchestrator/run-context-store.js';
@@ -158,11 +162,27 @@ async function main(): Promise<void> {
   const investmentContextProvider = new InvestmentContextProvider(investmentMarkdownStore);
   const equityMapStore = new EquityMapStore(config.investmentDecision.equityMapPath);
   await equityMapStore.ensureExists();
-  const investmentUniverseResolver = new InvestableUniverseResolver(
+  const equityIdentityCacheStore = new EquityIdentityCacheStore(
+    config.investmentDecision.identityCachePath,
+  );
+  const kisLookupClient = new KisInstrumentLookupClient({
+    appKey: config.investmentDecision.KIS_APP_KEY,
+    appSecret: config.investmentDecision.KIS_APP_SECRET,
+    baseUrl: config.investmentDecision.KIS_BASE_URL,
+  });
+  const equityIdentityResolver = new EquityIdentityResolver(
     equityMapStore,
+    equityIdentityCacheStore,
+    kisLookupClient,
+  );
+  const investmentUniverseResolver = new InvestableUniverseResolver(
+    equityIdentityResolver,
     investmentContextProvider,
   );
   const investmentEquityMapService = new InvestmentEquityMapService(equityMapStore);
+  const investmentEquityIdentityService = new InvestmentEquityIdentityService(
+    equityIdentityResolver,
+  );
   const investmentSignalAssembler = new InvestmentSignalAssembler(
     candidateService,
     investmentContextProvider,
@@ -230,6 +250,7 @@ async function main(): Promise<void> {
       investmentIntakeService,
       investmentDecisionService,
       investmentEquityMapService,
+      investmentEquityIdentityService,
     ),
   );
 

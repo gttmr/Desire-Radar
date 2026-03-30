@@ -45,6 +45,7 @@ Rules:
 6. Do not narrate what you are about to do before the JSON block.
 ${toolRule}
 8. Do not ask follow-up questions. Produce the best final decision you can from the provided request now.
+9. The default Discord report is short. Include concise report_summary, operator_highlights, and per-name short_reason fields that can stand alone without raw cluster lists.
 
 ${renderStructuredJsonContract()}
 `;

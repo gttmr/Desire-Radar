@@ -23,6 +23,7 @@ export const commandSchema: CommandSchema[] = [
         ],
       },
       { name: 'run', type: 'subcommand' },
+      { name: 'detail', type: 'subcommand' },
       { name: 'status', type: 'subcommand' },
     ],
   },

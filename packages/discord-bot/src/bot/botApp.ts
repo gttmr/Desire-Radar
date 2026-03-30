@@ -92,6 +92,8 @@ export class BotApp {
       reports,
       this.resolveDefaultReportChannelId.bind(this),
       this.runReport.bind(this),
+      async (input) => (await orchestrator.normalizeInvestmentEquity({ input })).identity,
+      this.loadDetailedInvestmentReport.bind(this),
     );
     this.radarCommands = new RadarCommandService(collector);
     this.runCommands = new RunCommandService(orchestrator);
@@ -239,8 +241,12 @@ export class BotApp {
 
     switch (subcommand) {
       case 'run': {
-        const detail = (interaction.options.getString('detail') ?? 'summary') as ReportDetailLevel;
-        content = await this.reportCommands.run(interaction.guildId!, detail);
+        content = await this.reportCommands.run(interaction.guildId!);
+        break;
+      }
+      case 'detail': {
+        const runId = interaction.options.getString('run_id') ?? undefined;
+        content = await this.reportCommands.detail(runId);
         break;
       }
       case 'status':
@@ -478,6 +484,18 @@ export class BotApp {
       await this.sendToTextChannel(fallbackChannelId, `리포트 생성 실패: ${message}`);
       throw error;
     }
+  }
+
+  private async loadDetailedInvestmentReport(runId?: string): Promise<string> {
+    if (runId) {
+      const report = await this.orchestrator.getInvestmentDecisionReport(runId, 'full');
+      return report.markdown;
+    }
+    const latest = await this.orchestrator.getLatestInvestmentDecision('full');
+    if (!latest.latest?.report?.markdown) {
+      throw new Error('조회 가능한 최신 투자 리포트가 없습니다.');
+    }
+    return latest.latest.report.markdown;
   }
 
   private logChannelRoutingWarnings(): void {

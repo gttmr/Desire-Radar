@@ -1,6 +1,11 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { GuildReportConfig, GuildReportConfigStore, ReportRunMode } from '../types/domain.js';
+import type {
+  GuildReportConfig,
+  GuildReportConfigStore,
+  GuildWatchlistEntry,
+  ReportRunMode,
+} from '../types/domain.js';
 
 const EMPTY_STORE: GuildReportConfigStore = {
   version: 1,
@@ -13,6 +18,22 @@ function nowIso(): string {
 
 function normalizeTicker(input: string): string {
   return input.trim().toUpperCase();
+}
+
+function normalizeWatchlistEntry(
+  ticker: string,
+  entry?: Partial<GuildWatchlistEntry>,
+): GuildWatchlistEntry {
+  return {
+    assetKey: entry?.assetKey?.trim() || `stock:${ticker}`,
+    ticker,
+    companyName: entry?.companyName?.trim() || ticker,
+    market: entry?.market?.trim() || null,
+    exchange: entry?.exchange?.trim() || null,
+    instrumentCode: entry?.instrumentCode?.trim() || null,
+    normalizationSource: entry?.normalizationSource?.trim() || null,
+    addedAt: entry?.addedAt || nowIso(),
+  };
 }
 
 export class GuildConfigStore {
@@ -48,6 +69,7 @@ export class GuildConfigStore {
         guildId,
         reportChannelId: defaults.reportChannelId,
         tickers: [],
+        watchlist: [],
         enabled: defaults.enabled ?? true,
         timezone: defaults.timezone,
         createdAt: timestamp,
@@ -62,13 +84,21 @@ export class GuildConfigStore {
     return this.updateGuild(guildId, (current) => ({ ...current, reportChannelId }));
   }
 
-  async addTicker(guildId: string, ticker: string): Promise<GuildReportConfig> {
+  async addTicker(
+    guildId: string,
+    ticker: string,
+    entry?: Partial<GuildWatchlistEntry>,
+  ): Promise<GuildReportConfig> {
     const normalized = normalizeTicker(ticker);
     return this.updateGuild(guildId, (current) => ({
       ...current,
       tickers: current.tickers.includes(normalized)
         ? current.tickers
-        : [...current.tickers, normalized].sort((left, right) => left.localeCompare(right))
+        : [...current.tickers, normalized].sort((left, right) => left.localeCompare(right)),
+      watchlist: [
+        ...(current.watchlist ?? []).filter((item) => item.ticker !== normalized),
+        normalizeWatchlistEntry(normalized, entry),
+      ].sort((left, right) => left.ticker.localeCompare(right.ticker)),
     }));
   }
 
@@ -76,7 +106,8 @@ export class GuildConfigStore {
     const normalized = normalizeTicker(ticker);
     return this.updateGuild(guildId, (current) => ({
       ...current,
-      tickers: current.tickers.filter((item) => item !== normalized)
+      tickers: current.tickers.filter((item) => item !== normalized),
+      watchlist: (current.watchlist ?? []).filter((item) => item.ticker !== normalized),
     }));
   }
 
@@ -137,7 +168,44 @@ export class GuildConfigStore {
       const parsed = JSON.parse(content) as Partial<GuildReportConfigStore>;
       return {
         version: 1,
-        guilds: parsed.guilds ?? {}
+        guilds: Object.fromEntries(
+          Object.entries(parsed.guilds ?? {}).map(([guildId, config]) => {
+            const watchlist = Array.isArray(config.watchlist)
+              ? config.watchlist.map((entry) =>
+                  normalizeWatchlistEntry(normalizeTicker(String(entry.ticker ?? '')), {
+                    assetKey: String(entry.assetKey ?? ''),
+                    companyName: String(entry.companyName ?? entry.ticker ?? ''),
+                    market: entry.market == null ? null : String(entry.market),
+                    exchange: entry.exchange == null ? null : String(entry.exchange),
+                    instrumentCode:
+                      entry.instrumentCode == null ? null : String(entry.instrumentCode),
+                    normalizationSource:
+                      entry.normalizationSource == null
+                        ? null
+                        : String(entry.normalizationSource),
+                    addedAt: typeof entry.addedAt === 'string' ? entry.addedAt : nowIso(),
+                  }),
+                )
+              : Array.isArray(config.tickers)
+                ? config.tickers.map((ticker) =>
+                    normalizeWatchlistEntry(normalizeTicker(String(ticker))),
+                  )
+                : [];
+            const tickers =
+              Array.isArray(config.tickers) && config.tickers.length > 0
+                ? config.tickers.map((ticker) => normalizeTicker(String(ticker)))
+                : watchlist.map((entry) => entry.ticker);
+            return [
+              guildId,
+              {
+                ...config,
+                guildId,
+                tickers,
+                watchlist,
+              } satisfies GuildReportConfig,
+            ];
+          }),
+        ),
       };
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;

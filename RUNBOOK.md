@@ -301,6 +301,28 @@ curl -X PUT http://127.0.0.1:5003/investment/equity-map \
   }'
 ```
 
+종목 정규화 API:
+
+```bash
+curl -X POST http://127.0.0.1:5003/investment/normalize-equity \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"TSLA"}'
+
+curl -X POST http://127.0.0.1:5003/investment/normalize-equity \
+  -H 'Content-Type: application/json' \
+  -d '{"input":"005930"}'
+```
+
+정규화 순서:
+- `local equity-map`
+- `identity cache`
+- `KIS API`
+- `unresolved`
+
+운영 메모:
+- KIS는 정규화 전용 fallback이다. order/account/balance API는 쓰지 않는다.
+- KIS를 쓰려면 orchestrator에 `KIS_APP_KEY`, `KIS_APP_SECRET`를 넣는다.
+
 external artifact worker:
 
 ```bash
@@ -423,6 +445,7 @@ collector가 이를 해석해서:
 - `report`
   - `watchlist add/remove/list`
   - `run`
+  - `detail`
   - `status`
 - `radar`
   - `sources`
@@ -453,7 +476,8 @@ collector가 이를 해석해서:
 - slash command 응답은 기본적으로 ephemeral이다.
 - `/queue human`은 `DISCORD_HUMAN_QUEUE_CHANNEL_IDS`가 설정된 경우 해당 채널에서만 허용된다.
 - `/ops health`, `/ops providers`는 `DISCORD_STATUS_CHANNEL_IDS` 또는 `DISCORD_PROVIDER_ALERT_CHANNEL_IDS`에 포함된 채널에서 허용된다.
-- `/report run`은 orchestrator investment decision run을 실행한다.
+- `/report run`은 짧은 3섹션 operator report만 전송한다.
+- `/report detail`은 최신 또는 특정 run의 상세 리포트를 ephemeral로 보여준다.
 - `/report run`은 ephemeral ack를 반환하고 실제 리포트 본문은 `DISCORD_DAILY_REPORT_CHANNEL_ID` 또는 guild 기본 보고 채널로 전송된다.
 - 봇은 investment decision 결과 artifact를 그대로 렌더링하므로, report formatting 문제를 볼 때는 Discord보다 먼저 orchestrator `response.json`과 `report.md`를 확인하는 편이 빠르다.
 

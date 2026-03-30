@@ -372,17 +372,45 @@ export type ResolvedEquityCandidate = {
   asset_key: string;
   ticker: string;
   company_name: string;
+  market?: string | null;
+  exchange?: string | null;
+  instrument_code?: string | null;
   why_in_scope: string;
   linked_clusters: string[];
   linked_notes: string[];
   watchlist_member: boolean;
 };
 
+export type InvestmentEquityNormalizationSource =
+  | 'equity_map'
+  | 'identity_cache'
+  | 'kis_api'
+  | 'kis_master'
+  | 'dossier_fallback'
+  | 'unresolved';
+
 export type InvestmentEquityMapEntry = {
   asset_key: string;
   ticker: string;
   company_name: string;
   aliases: string[];
+  market?: string | null;
+  exchange?: string | null;
+  instrument_code?: string | null;
+};
+
+export type NormalizedEquityIdentity = {
+  input: string;
+  resolved: boolean;
+  asset_key: string | null;
+  ticker: string | null;
+  company_name: string | null;
+  market: string | null;
+  exchange: string | null;
+  instrument_code: string | null;
+  aliases: string[];
+  normalization_source: InvestmentEquityNormalizationSource;
+  normalization_confidence: number;
 };
 
 export type InvestmentDecisionNote = {
@@ -439,6 +467,8 @@ export type InvestmentDecisionRecommendationItem = {
   recommendation: InvestmentDecisionRecommendation;
   confidence: number;
   why_now: string;
+  short_reason?: string | null;
+  report_priority?: 'high' | 'medium' | 'low' | null;
   thesis: string;
   beneficiary_path: string;
   linked_clusters: string[];
@@ -452,6 +482,8 @@ export type InvestmentDecisionArtifact = {
   status: Exclude<InvestmentDecisionRunStatus, 'queued' | 'running'>;
   generated_at: string;
   summary: string;
+  report_summary?: string | null;
+  operator_highlights?: string[];
   market_view: string;
   top_picks: InvestmentDecisionRecommendationItem[];
   watch_candidates: InvestmentDecisionRecommendationItem[];

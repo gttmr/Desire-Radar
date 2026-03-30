@@ -6,6 +6,7 @@ import type {
   AgentTurn,
   DailyReport,
   InvestmentDecisionArtifact,
+  NormalizedEquityIdentity,
   InvestmentEquityMapEntry,
   InvestmentDecisionRequest,
   InvestmentDecisionRunRecord,
@@ -291,6 +292,14 @@ export type GetLatestInvestmentDecisionResponse = {
 export type GetInvestmentEquityMapResponse = {
   path: string;
   equities: InvestmentEquityMapEntry[];
+};
+
+export type NormalizeInvestmentEquityRequest = {
+  input: string;
+};
+
+export type NormalizeInvestmentEquityResponse = {
+  identity: NormalizedEquityIdentity;
 };
 
 export type PutInvestmentEquityMapRequest = {

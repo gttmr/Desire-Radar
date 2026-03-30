@@ -6,6 +6,8 @@
 - daily shortlist 판단 경계를 고정한다.
 - direct CLI 실행과 external file-based execution을 같은 계약으로 묶는다.
 - Discord daily/on-demand report가 어떤 artifact를 소비하는지 명확히 한다.
+- 짧은 기본 Discord 리포트와 상세 조회를 분리한다.
+- 종목 정규화 경계를 orchestrator 기준으로 고정한다.
 
 ## Purpose
 
@@ -42,6 +44,7 @@ Collector does not:
 Orchestrator investment decision owns:
 - watchlist-prioritized universe assembly
 - curated equity mapping resolution
+- canonical equity identity normalization
 - request/response/report artifact lifecycle
 - provider or external execution mode dispatch
 - deterministic report formatting
@@ -56,6 +59,7 @@ Discord bot owns:
 Discord bot does not:
 - decide picks itself
 - re-run LLM formatting after the decision artifact exists
+- perform stock identity parsing locally
 
 ## Artifact-First Contract
 
@@ -168,6 +172,8 @@ npm --prefix packages/mcp-orchestrator run worker:investment-decisions -- --watc
 - `status`
 - `generated_at`
 - `summary`
+- `report_summary`
+- `operator_highlights`
 - `market_view`
 - `top_picks`
 - `watch_candidates`
@@ -185,6 +191,8 @@ npm --prefix packages/mcp-orchestrator run worker:investment-decisions -- --watc
 - `recommendation`
 - `confidence`
 - `why_now`
+- `short_reason`
+- `report_priority`
 - `thesis`
 - `beneficiary_path`
 - `linked_clusters`
@@ -205,6 +213,8 @@ v1 recommendation enum:
 - collector cluster와 investment note는 보조 입력이다.
 - 새 종목은 exact/curated resolution이 될 때만 편입한다.
 - 안 되면 `coverage_gaps`로 남긴다.
+- 종목 입력 정규화는 `local equity-map -> identity cache -> KIS API -> unresolved` 순서다.
+- KIS는 정규화 전용 fallback이다. 투자 판단 evidence source가 아니다.
 
 curated mapping 기본 경로:
 
@@ -253,6 +263,7 @@ Gemini-specific notes:
 
 운영 API:
 - `GET /investment/equity-map`
+- `POST /investment/normalize-equity`
 - `PUT /investment/equity-map`
 
 ## Discord Report Flow
@@ -260,6 +271,7 @@ Gemini-specific notes:
 trigger:
 - scheduled daily report
 - `/report run`
+- `/report detail [run_id]`
 
 flow:
 1. discord-bot이 orchestrator decision run API 호출
@@ -269,6 +281,23 @@ flow:
 5. bot이 결과 markdown을 지정 채널에 전송
 
 즉, Discord는 consumer이고 canonical state owner가 아니다.
+
+## Operator Report Rules
+
+기본 Discord 리포트는 아래 3섹션만 쓴다.
+
+- `오늘의 판단 요약`
+- `우선 검토 종목` 최대 3개
+- `관찰 종목` 최대 3개
+
+기본 리포트에서 제외:
+- rejected candidates
+- coverage gaps
+- source health
+- raw cluster/supporting term 나열
+- 긴 thesis/risk 본문
+
+상세 정보는 `report detail`에서만 본다.
 
 ## Operational Notes
 
@@ -286,6 +315,11 @@ flow:
 - `INVESTMENT_DECISION_FINAL_MODEL_PROFILE`
 - `INVESTMENT_DECISION_FINAL_TOOL_POLICY`
 - `INVESTMENT_DECISION_FINAL_TIMEOUT_MS`
+- `INVESTMENT_EQUITY_MAP_PATH`
+- `INVESTMENT_EQUITY_IDENTITY_CACHE_PATH`
+- `KIS_APP_KEY`
+- `KIS_APP_SECRET`
+- `KIS_BASE_URL`
 - `INVESTMENT_EQUITY_MAP_PATH`
 
 권장 운영 기본값:

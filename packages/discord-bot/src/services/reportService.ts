@@ -1,5 +1,6 @@
 import type {
   GuildReportConfig,
+  GuildWatchlistEntry,
   ReportDetailLevel,
   PredictorRequest,
   PredictorResponse,
@@ -48,9 +49,14 @@ export class ReportService {
     });
   }
 
-  async addTicker(guildId: string, reportChannelId: string, ticker: string): Promise<GuildReportConfig> {
+  async addTicker(
+    guildId: string,
+    reportChannelId: string,
+    ticker: string,
+    entry?: Partial<GuildWatchlistEntry>,
+  ): Promise<GuildReportConfig> {
     await this.ensureGuild(guildId, reportChannelId);
-    return this.store.addTicker(guildId, ticker);
+    return this.store.addTicker(guildId, ticker, entry);
   }
 
   async removeTicker(guildId: string, reportChannelId: string, ticker: string): Promise<GuildReportConfig> {
@@ -70,7 +76,9 @@ export class ReportService {
     }
 
     if (config.tickers.length === 0) {
-      throw new Error('관심 종목이 없습니다. `/report watchlist add ticker:005930` 형태로 먼저 등록하세요.');
+      throw new Error(
+        '관심 종목이 없습니다. `/report watchlist add ticker:TSLA` 또는 `ticker:005930` 형태로 먼저 등록하세요.',
+      );
     }
 
     const response = await this.analysis.generateReport({

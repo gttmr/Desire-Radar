@@ -49,10 +49,22 @@ export type ReportRunRecord = {
   error?: string;
 };
 
+export type GuildWatchlistEntry = {
+  assetKey: string;
+  ticker: string;
+  companyName: string;
+  market?: string | null;
+  exchange?: string | null;
+  instrumentCode?: string | null;
+  normalizationSource?: string | null;
+  addedAt: string;
+};
+
 export type GuildReportConfig = {
   guildId: string;
   reportChannelId: string;
   tickers: string[];
+  watchlist?: GuildWatchlistEntry[];
   enabled: boolean;
   timezone: string;
   createdAt: string;
