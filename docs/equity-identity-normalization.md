@@ -84,3 +84,24 @@ collector owns:
 - `TSLA`와 `Tesla`는 같은 종목으로 수렴해야 한다.
 - `005930`과 `삼성전자`도 같은 종목으로 수렴해야 한다.
 - KIS가 실패하거나 미설정이면 unresolved를 정직하게 반환하고, 가짜 매핑을 만들지 않는다.
+
+## Discord Report Surface
+
+- Discord 기본 투자 리포트는 짧은 operator report로 제한한다.
+- 기본 리포트는 `오늘의 판단 요약`, `우선 검토 종목`, `관찰 종목` 3섹션만 사용한다.
+- 긴 thesis, risk, coverage gap, source health는 `/report detail`에서만 노출한다.
+- 이때 watchlist와 report가 모두 같은 canonical identity를 사용해야 `TSLA`, `Tesla`, `005930`, `삼성전자`가 서로 다른 종목처럼 보이지 않는다.
+
+## 구조적 의미
+
+- Discord bot은 종목 파서를 직접 들고 있지 않다.
+- guild watchlist와 investment decision universe가 같은 canonical 종목 식별 체계를 공유한다.
+- KIS는 evidence source가 아니라 normalization fallback이다.
+- artifact-first investment decision 경계는 유지하면서 report surface만 짧게 바꾼다.
+
+## 남은 후속 작업
+
+- KIS 해외 종목 lookup coverage를 실제 운영 입력으로 더 검증
+- `identity-cache.json` 운영 정책 정리
+- `/report detail` 응답 길이 제한과 chunking UX 보강
+- short report 품질 회귀용 golden fixture 추가

@@ -11,6 +11,9 @@
 - [RUNBOOK.md](RUNBOOK.md): WSL 기준 로컬 런타임, 네이티브 실행, 재기동, health, smoke, 장애 대응 절차
 - [docs/collector-source-agents.md](docs/collector-source-agents.md): collector source-agent living design
 - [docs/collector-external-source-notes.md](docs/collector-external-source-notes.md): 외부 소스/skill 비교와 collector 편입 기준 메모
+- [docs/collector-data-pipeline-overview.md](docs/collector-data-pipeline-overview.md): collector data pipeline 보강 문서 세트 입구
+- [docs/collector-data-gathering-review.md](docs/collector-data-gathering-review.md): collector readiness/checkpoint/quality/run-history 보강 리뷰
+- [docs/collector-source-diversification.md](docs/collector-source-diversification.md): public-first source 다양화 기준
 - [docs/investment-module.md](docs/investment-module.md): free-form human input와 orchestrator investment module living design
 - [docs/investment-decision-module.md](docs/investment-decision-module.md): watchlist-prioritized daily shortlist와 artifact-first decision contract
 - [docs/equity-identity-normalization.md](docs/equity-identity-normalization.md): Discord/watchlist/investment decision 공통 종목 정규화 규칙
