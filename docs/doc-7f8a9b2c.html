@@ -1,0 +1,1305 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portfolio — AI × Search Engineer</title>
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --blue: #5b7cf3;
+      --blue-light: #eef2ff;
+      --navy-900: #2a3550;
+      --dark: #191f28;
+      --gray-700: #3d4350;
+      --gray-500: #6b7684;
+      --gray-300: #d8dde5;
+      --gray-100: #f7f5f1;
+      --surface: #fcfbf8;
+      --white: #ffffff;
+      --radius: 12px;
+      --shadow: 0 14px 30px rgba(60, 76, 107, 0.08);
+      --font: 'Apple SD Gothic Neo', 'Noto Sans KR', -apple-system, sans-serif;
+    }
+
+    body {
+      font-family: var(--font);
+      color: var(--dark);
+      background: var(--surface);
+      line-height: 1.6;
+      word-break: keep-all;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 40px;
+    }
+
+    section {
+      padding: 96px 0;
+    }
+
+    section+section {
+      border-top: 1px solid var(--gray-300);
+    }
+
+    /* Hero */
+    .hero {
+      background: linear-gradient(135deg, #f7efe5 0%, #f8fbff 58%, #eef4ff 100%);
+      color: var(--dark);
+      padding: 72px 0 64px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      inset: auto -10% -35% auto;
+      width: 520px;
+      height: 520px;
+      background: radial-gradient(circle, rgba(120, 152, 255, 0.22) 0%, rgba(120, 152, 255, 0) 70%);
+      pointer-events: none;
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      inset: -20% auto auto -8%;
+      width: 360px;
+      height: 360px;
+      background: radial-gradient(circle, rgba(255, 203, 156, 0.22) 0%, rgba(255, 203, 156, 0) 72%);
+      pointer-events: none;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.16fr) minmax(360px, 0.84fr);
+      gap: 56px;
+      align-items: start;
+    }
+
+    .hero-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      position: relative;
+      z-index: 1;
+      max-width: 700px;
+      padding-top: 18px;
+    }
+
+    .hero-label {
+      display: inline-block;
+      background: rgba(91, 124, 243, 0.12);
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 20px;
+      width: fit-content;
+    }
+
+    .hero h1 {
+      font-size: clamp(38px, 4.8vw, 64px);
+      font-weight: 800;
+      line-height: 1.08;
+      letter-spacing: -0.03em;
+      word-break: keep-all;
+    }
+
+    .hero h1 span {
+      color: var(--blue);
+    }
+
+    .hero-sub {
+      font-size: 19px;
+      line-height: 1.8;
+      color: var(--gray-700);
+      max-width: 680px;
+    }
+
+    .hero-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .badge {
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--gray-700);
+      font-size: 13px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      border: 1px solid #d8e1f0;
+    }
+
+    .hero-cta {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+
+    .btn:hover {
+      opacity: .85;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: var(--blue);
+      color: #fff;
+      box-shadow: 0 8px 20px rgba(91, 124, 243, 0.22);
+    }
+
+    .btn-outline {
+      background: rgba(255, 255, 255, 0.7);
+      color: var(--dark);
+      border: 1px solid #d7dfef;
+    }
+
+    .hero-panel {
+      position: relative;
+      z-index: 1;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid #dce6f5;
+      border-radius: 28px;
+      padding: 30px;
+      box-shadow: 0 18px 38px rgba(77, 93, 127, 0.12);
+      backdrop-filter: blur(8px);
+      max-width: 420px;
+      justify-self: end;
+    }
+
+    .hero-panel-label {
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      color: var(--gray-500);
+      margin-bottom: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .hero-panel h3 {
+      font-size: 21px;
+      line-height: 1.35;
+      margin-bottom: 10px;
+    }
+
+    .hero-panel p {
+      color: var(--gray-700);
+      font-size: 14px;
+      margin-bottom: 18px;
+      line-height: 1.75;
+    }
+
+    .hero-stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .hero-stat {
+      border-radius: 16px;
+      background: rgba(249, 251, 255, 0.94);
+      border: 1px solid #dde6f6;
+      padding: 14px 16px;
+    }
+
+    .hero-stat strong {
+      display: block;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--dark);
+      margin-bottom: 4px;
+    }
+
+    .hero-stat span {
+      font-size: 12px;
+      color: var(--gray-500);
+    }
+
+    .hero-panel-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .hero-panel-list li {
+      font-size: 13px;
+      color: var(--gray-700);
+      padding-left: 14px;
+      position: relative;
+    }
+
+    .hero-panel-list li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 9px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--blue);
+    }
+
+    /* Section components */
+    .section-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: var(--blue);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+
+    .section-title {
+      font-size: clamp(22px, 3.5vw, 30px);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .section-desc {
+      font-size: 17px;
+      color: var(--gray-500);
+      max-width: 760px;
+      margin-bottom: 48px;
+      line-height: 1.75;
+    }
+
+    /* Career Arc Timeline */
+    .arc-timeline {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px;
+    }
+
+    .arc-item {
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr);
+      gap: 18px;
+      padding: 24px;
+      background: var(--white);
+      border: 1px solid var(--gray-300);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      min-height: 220px;
+    }
+
+    .arc-dot {
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: var(--white);
+      border: 2px solid var(--blue);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+    }
+
+    .arc-item.current {
+      border-color: #a9c7ff;
+      background: linear-gradient(180deg, #f5f9ff 0%, #eef5ff 100%);
+    }
+
+    .arc-item.current .arc-dot {
+      background: var(--blue);
+    }
+
+    .arc-content {
+      padding-top: 2px;
+    }
+
+    .arc-period {
+      font-size: 12px;
+      color: var(--gray-500);
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .arc-role {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      line-height: 1.35;
+    }
+
+    .arc-desc {
+      font-size: 15px;
+      color: var(--gray-700);
+      line-height: 1.7;
+    }
+
+    .arc-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 12px;
+    }
+
+    .tag {
+      background: var(--gray-100);
+      color: var(--gray-700);
+      font-size: 12px;
+      padding: 4px 12px;
+      border-radius: 20px;
+    }
+
+    .tag.highlight {
+      background: var(--blue-light);
+      color: var(--blue);
+      font-weight: 600;
+      border: 1px solid #cad7ff;
+    }
+
+    /* Case Study specific */
+    .case-header {
+      background: linear-gradient(180deg, #f7faff 0%, #edf3fb 100%);
+      border-radius: 20px;
+      padding: 30px 32px;
+      margin-bottom: 24px;
+      border: 1px solid #e0e9fa;
+    }
+
+    .case-header h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .case-header p {
+      color: var(--gray-700);
+      font-size: 15px;
+      max-width: 680px;
+    }
+
+    .case-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin-bottom: 40px;
+    }
+
+    .case-card {
+      background: var(--white);
+      border: 1px solid var(--gray-300);
+      border-radius: 18px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .case-card h4 {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .case-card p {
+      font-size: 14px;
+      color: var(--gray-700);
+    }
+
+    .case-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .case-list li {
+      font-size: 14px;
+      color: var(--gray-700);
+      padding-left: 16px;
+      position: relative;
+    }
+
+    .case-list li::before {
+      content: "•";
+      position: absolute;
+      left: 0;
+      top: 0;
+      color: var(--blue);
+      font-weight: 700;
+    }
+
+    /* Architecture diagram */
+    .arch-diagram {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 48px minmax(0, 1fr) 48px minmax(0, 1fr);
+      align-items: stretch;
+      margin: 32px 0;
+    }
+
+    .arch-box {
+      background: var(--white);
+      border: 1.5px solid var(--gray-300);
+      border-radius: 22px;
+      padding: 28px 22px;
+      text-align: center;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .arch-box.primary {
+      border-color: var(--blue);
+      background: var(--blue-light);
+    }
+
+    .arch-box-icon {
+      font-size: 30px;
+      margin-bottom: 10px;
+    }
+
+    .arch-box-name {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      line-height: 1.35;
+    }
+
+    .arch-box-lang {
+      font-size: 12px;
+      color: var(--gray-500);
+      margin-bottom: 14px;
+      font-weight: bold;
+      background: #fff;
+      border: 1px solid #dce2ed;
+      padding: 3px 8px;
+      border-radius: 12px;
+      display: inline-block;
+      align-self: center;
+    }
+
+    .arch-box-items {
+      list-style: none;
+      text-align: left;
+      margin-top: auto;
+    }
+
+    .arch-box-items li {
+      font-size: 14px;
+      color: var(--gray-700);
+      padding: 4px 0;
+      line-height: 1.5;
+    }
+
+    .arch-box-items li::before {
+      content: "· ";
+      color: var(--blue);
+    }
+
+    .arch-arrow {
+      text-align: center;
+      font-size: 28px;
+      color: var(--blue);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* Flow */
+    .flow-steps {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px 4px;
+      margin: 16px 0 12px;
+    }
+
+    .flow-step-box {
+      background: var(--gray-100);
+      border-radius: 6px;
+      padding: 9px 16px;
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+      border: 1px solid #e2e8f0;
+    }
+
+    .flow-step-box.active {
+      background: var(--blue);
+      color: #fff;
+      border: none;
+    }
+
+    .flow-arrow {
+      font-size: 16px;
+      color: var(--gray-500);
+      padding: 0 6px;
+    }
+
+    /* Tech Stack */
+    .tech-stack {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 24px 0;
+    }
+
+    .tech-tag {
+      background: #ffffff;
+      color: var(--gray-700);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid #d9e1ef;
+    }
+
+    .tech-tag.blue {
+      background: var(--blue-light);
+      color: var(--blue);
+      border-color: #cad7ff;
+    }
+
+    /* Media Visual Plan */
+    .visual-plan {
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      margin: 32px 0 18px;
+    }
+
+    .visual-stack {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    .visual-card,
+    .visual-feature,
+    .asset-card {
+      background: var(--white);
+      border: 1px solid var(--gray-300);
+      border-radius: 20px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .media-frame {
+      background: linear-gradient(135deg, #fffaf3 0%, #f6f9fe 100%);
+      border: 2px dashed #cfd8ea;
+      border-radius: 16px;
+      padding: 28px 22px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      gap: 10px;
+    }
+
+    .media-frame.wide {
+      min-height: 330px;
+    }
+
+    .media-frame.tall {
+      min-height: 260px;
+    }
+
+    .ph-icon {
+      font-size: 32px;
+    }
+
+    .ph-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--gray-700);
+    }
+
+    .ph-hint {
+      font-size: 12px;
+      color: var(--gray-500);
+      line-height: 1.5;
+    }
+
+    .media-kicker {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(49, 130, 246, 0.12);
+      color: var(--blue);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .media-meta {
+      margin-top: 14px;
+    }
+
+    .media-meta h4 {
+      font-size: 15px;
+      margin-bottom: 6px;
+    }
+
+    .media-meta p {
+      font-size: 13px;
+      color: var(--gray-700);
+      line-height: 1.6;
+    }
+
+    .asset-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin: 18px 0 0;
+    }
+
+    .asset-card h4 {
+      font-size: 15px;
+      margin-bottom: 10px;
+    }
+
+    .asset-card p {
+      font-size: 13px;
+      color: var(--gray-700);
+      margin-top: 12px;
+      line-height: 1.5;
+    }
+
+    .asset-card ul {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--gray-500);
+      margin-top: 10px;
+    }
+
+    .asset-card ul li::before {
+      content: "· ";
+      color: var(--blue);
+    }
+
+    /* Insights */
+    .insights {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 36px;
+    }
+
+    .insight-card {
+      background: #fffdfa;
+      border: 1px solid #e4e0d9;
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .insight-card h4 {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .insight-card p {
+      font-size: 13px;
+      color: var(--gray-700);
+      line-height: 1.6;
+    }
+
+    /* Achievements */
+    .achievements {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .achievement-card {
+      background: #fffdfa;
+      border: 1.5px solid #e3ded6;
+      border-radius: var(--radius);
+      padding: 24px 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .achievement-card .ach-icon {
+      font-size: 28px;
+      margin-bottom: 12px;
+    }
+
+    .achievement-card h4 {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .achievement-card p {
+      font-size: 13px;
+      color: var(--gray-500);
+      line-height: 1.5;
+    }
+
+    /* Contact */
+    .contact-section {
+      background: var(--gray-100);
+    }
+
+    .contact-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      max-width: 480px;
+    }
+
+    .contact-item {
+      background: var(--white);
+      border-radius: 8px;
+      padding: 16px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--gray-500);
+      border: 1px dashed var(--gray-300);
+    }
+
+    .contact-item span {
+      display: block;
+      font-size: 12px;
+      color: var(--gray-300);
+      font-weight: 400;
+      margin-bottom: 4px;
+    }
+
+    /* Responsive */
+    @media (max-width: 960px) {
+      .container {
+        padding: 0 24px;
+      }
+
+      .hero-grid,
+      .arc-timeline,
+      .case-grid,
+      .asset-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .visual-stack {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-copy {
+        padding-top: 0;
+      }
+
+      .hero-panel {
+        max-width: none;
+        justify-self: stretch;
+      }
+
+      .achievements {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 640px) {
+      section {
+        padding: 72px 0;
+      }
+
+      .hero {
+        padding: 56px 0 52px;
+      }
+
+      .hero h1 {
+        font-size: clamp(34px, 11vw, 46px);
+      }
+
+      .arch-diagram {
+        grid-template-columns: 1fr;
+      }
+
+      .arch-arrow {
+        transform: rotate(90deg);
+      }
+
+      .insights,
+      .contact-grid,
+      .hero-stat-grid,
+      .achievements {
+        grid-template-columns: 1fr;
+      }
+
+      .arc-item {
+        grid-template-columns: 1fr;
+        min-height: auto;
+      }
+
+      .arc-dot {
+        width: 48px;
+        height: 48px;
+      }
+    }
+    @media print {
+      body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      .visual-feature, .visual-card, .arc-item, .case-card, .arch-diagram, .hero-panel {
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      img {
+        max-width: 100%;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Hero -->
+  <header class="hero">
+    <div class="container hero-grid">
+      <div class="hero-copy">
+        <div class="hero-label">삼성SDS 12년차 AI/검색 엔지니어</div>
+        <h1>파편화된 정보들에<br>질서를 부여하고,<br><span>AI 에이전트를 통해<br>가치를 창출하는</span><br>데이터 파이프라인 설계자.</h1>
+        <p class="hero-sub">
+          삼성SDS에서 12년간 검색 시스템 엔진 핵심 개발부터 최신 LLM 인프라 고도화 및 파인튜닝 리딩까지 전문성을 증명해 왔습니다.<br>
+          최근에는 그 경험을 살려 세상에 흩어진 정보와 행동 신호를 수집, 멀티 에이전트 간 토론 과정을 거쳐 투자 모델을 만들어내는 다중 에이전트 아키텍처(Desire-Radar)를 설계 및 개발
+          중입니다.
+        </p>
+        <div class="hero-badges">
+          <span class="badge">Elasticsearch 파이프라인</span>
+          <span class="badge">멀티에이전트(MCP) 설계</span>
+          <span class="badge">vLLM 서빙 최적화</span>
+          <span class="badge">LLM Tool Calling 파인튜닝</span>
+          <span class="badge">KorQuAD 상위권</span>
+          <span class="badge">H100 멀티노드 운영</span>
+        </div>
+        <div class="hero-cta">
+          <a href="https://github.com/gttmr/Desire-Radar" class="btn btn-primary">🔗 GitHub</a>
+        </div>
+      </div>
+      <aside class="hero-panel">
+        <div class="hero-panel-label">Project Philosophy</div>
+        <h3>사람들의 욕망과 행동 신호를<br>수집하고 투자 해석으로 통찰</h3>
+        <p>
+          단순 정보 수집 수단이 아니라, 여러 소스의 원본 증거(Evidence)와 AI 해석을 구조적으로 분리·보존하여 언제든 꺼내 쓸 수 있는 코어 파이프라인을 구축하고 있습니다.
+        </p>
+        <div class="hero-stat-grid">
+          <div class="hero-stat">
+            <strong>증거 기반</strong>
+            <span>원본 데이터 라인 보존</span>
+          </div>
+          <div class="hero-stat">
+            <strong>다단계 추론</strong>
+            <span>Triage → Debate 토론 엔진</span>
+          </div>
+          <div class="hero-stat">
+            <strong>모듈화 설계</strong>
+            <span>Discord, 수집앱 분극화</span>
+          </div>
+          <div class="hero-stat">
+            <strong>높은 확장성 </strong>
+            <span>불안정한 Provider CLI 제어</span>
+          </div>
+        </div>
+        <ul class="hero-panel-list">
+          <li>TypeScript/Python 기반의 Microservice 분산 설계</li>
+          <li>결과만이 아닌 증거의 궤적(Graph)을 캡쳐하는 데이터 흐름</li>
+          <li>MCP를 활용한 멀티 에이전트 오케스트레이션 적용</li>
+        </ul>
+      </aside>
+    </div>
+  </header>
+
+  <!-- Career Arc -->
+  <section>
+    <div class="container">
+      <div class="section-label">지금까지의 커리어 흐름</div>
+      <h2 class="section-title">전문성은 이렇게 심화되었습니다</h2>
+      <p class="section-desc">초기 정보 검색 엔진 구축 경험을 시작으로 한국어 NLP 연구개발을 지나 이제는 거대언어모델(LLM) 인프라와 에이전트 설계까지 통합하는 파이프라인 전문가로
+        성장했습니다.</p>
+
+      <div class="arc-timeline">
+        <div class="arc-item">
+          <div class="arc-dot">🔍</div>
+          <div class="arc-content">
+            <div class="arc-period">1단계 (2014-2018)</div>
+            <div class="arc-role">검색 인프라 엔지니어 @ 삼성SDS</div>
+            <div class="arc-desc">초대형 Elasticsearch 사내 검색 시스템 엔진의 인덱스를 직접 설계했습니다. 형태소 분석 처리와 랭킹 튜닝을 통해 정보 파이프라인의 핵심을
+              구성했습니다.</div>
+            <div class="arc-tags">
+              <span class="tag highlight">Elasticsearch</span>
+              <span class="tag">인덱싱 파이프라인</span>
+              <span class="tag">스코어링 최적화</span>
+              <span class="tag">재인덱싱 전략</span>
+            </div>
+          </div>
+        </div>
+        <div class="arc-item">
+          <div class="arc-dot">🧠</div>
+          <div class="arc-content">
+            <div class="arc-period">2단계 (2018-2023)</div>
+            <div class="arc-role">AI/NLP 연구개발 @ 삼성SDS</div>
+            <div class="arc-desc">대규모 코퍼스를 수집 전처리하여 로컬에서 한국어 사전학습(RoBERTa 등) 모델을 직업 학습했습니다. 형태소 기반 토크나이저 개발 및 멀티모달 처리까지
+              풀사이클을 완수했습니다.</div>
+            <div class="arc-tags">
+              <span class="tag highlight">KorQuAD 상위권</span>
+              <span class="tag highlight">LLM 바텀업 학습</span>
+              <span class="tag">형태소 기반 토크나이저</span>
+              <span class="tag">멀티모달 모델 운영</span>
+            </div>
+          </div>
+        </div>
+        <div class="arc-item">
+          <div class="arc-dot">⚙️</div>
+          <div class="arc-content">
+            <div class="arc-period">3단계 (2024-2025)</div>
+            <div class="arc-role">LLM 인프라 및 파인튜닝 팀 리딩 @ 삼성SDS</div>
+            <div class="arc-desc">H100 x8 노드 4대 분산 서빙 인프라에 vLLM을 연결 운영하고 사내 최초의 Llama 기반 도구 호출(Tool Calling) 파인튜닝 5인 팀을
+              리딩하여 상용 서비스와 연계했습니다.</div>
+            <div class="arc-tags">
+              <span class="tag highlight">H100 32장 멀티노드 서빙</span>
+              <span class="tag highlight">vLLM 클러스터 분산 최적화</span>
+              <span class="tag">Tool Calling 파인튜닝</span>
+              <span class="tag">5인 리딩</span>
+            </div>
+          </div>
+        </div>
+        <div class="arc-item current">
+          <div class="arc-dot">🚀</div>
+          <div class="arc-content">
+            <div class="arc-period">현재 — 신규 기획/개발</div>
+            <div class="arc-role">Desire-Radar 멀티에이전트 설계</div>
+            <div class="arc-desc">개인 프로젝트. 정보원(Source)으로부터 초기 증거(Evidence)와 욕망 신호를 수집하고, 멀티-에이전트가 오케스트레이팅하여 최종 투자 리포트를
+              제공하는 자율 판단 프레임워크를 개발중입니다.</div>
+            <div class="arc-tags">
+              <span class="tag highlight">초기 신호 분석</span>
+              <span class="tag highlight">MCP 멀티에이전트</span>
+              <span class="tag">TypeScript/Python</span>
+              <span class="tag">Data Pipeline + AI</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Desire-Radar Case Study -->
+  <section id="desire-radar">
+    <div class="container">
+      <div class="section-label">개인 프로젝트 상세 소개</div>
+      <h2 class="section-title">Desire-Radar</h2>
+      <p class="section-desc">거창한 플랫폼이라기보다 세상에서 벌어지는 일들을 모아 보관해 두고 추론의 증거로 지속 재조합하는 시스템입니다. 투자 관련 인사이트와 검증 엔진은 이 수집 구조
+        위에 구축된 초기 실험입니다.</p>
+
+      <div class="case-header">
+        <h3>아키텍처 확장 원칙: Preserve Facts, Derive Separately</h3>
+        <p>
+          자료 수집, 전처리, 판단 로직을 한 곳에 묶지 않습니다. 수집기가 원본 데이터를 명확히 "근거(Evidence)"로서 보존하며,
+          MCP 오케스트레이터의 에이전트들이 그 근거 위에서 다단계 추론(Triage, Debate, Verification)을 진행하여 결과를 만들어냅니다.
+        </p>
+      </div>
+
+      <div class="case-grid">
+        <article class="case-card">
+          <h4>Collector: 데이터 수집 및 적재의 고도화</h4>
+          <ul class="case-list">
+            <li>Python 개발. 다차원의 Pull / Push / Human / 파생 소스 통합 Ingestion 제공.</li>
+            <li>수집 채널 및 Registry의 티어/분류 동적 관리 및 원본 증거 보존.</li>
+            <li>배치 CLI LLM 분석으로 Entity Cluster 단위 생성, Triage 최적화 수행.</li>
+            <li>크롤러뿐만 아니라 Reddit, Polymarket, X 등 복합 소스의 상태 증거를 보존.</li>
+          </ul>
+        </article>
+        <article class="case-card">
+          <h4>MCP Orchestrator: 투자 판단 및 결론 도출 엔진</h4>
+          <ul class="case-list">
+            <li>TypeScript 기반 Agentic 오케스트레이터로 봇 역할과 완전 분리 설계.</li>
+            <li>Triage → Debate → Research-loop → Verdict 의 다단계 토론-검증 모델.</li>
+            <li>Provider, Model의 API 불안정 대응을 최우선한 CLI Session/Adapter 래핑 디자인.</li>
+            <li>가장 고비용/고품질의 모델 자원은 최종 판단(Verdict) 단계에만 집중 투자.</li>
+          </ul>
+        </article>
+      </div>
+
+      <h3 style="font-size:17px; font-weight:700; margin-bottom:16px;">지금의 물리적/논리적 서비스 분리 노드</h3>
+      <div class="arch-diagram">
+        <div class="arch-box primary">
+          <div class="arch-box-icon">📥</div>
+          <div class="arch-box-name">Collector (데이터 통로)</div>
+          <div class="arch-box-lang">Python</div>
+          <ul class="arch-box-items">
+            <li>다양한 채널 소스 수집기</li>
+            <li>동적 Source Registry 운용</li>
+            <li>원본 증거(Evidence) 스냅샷</li>
+            <li>초록(Bundle) 기반 Candidate 요약</li>
+            <li>배치 LLM 분석 전처리</li>
+          </ul>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-box primary">
+          <div class="arch-box-icon">🧩</div>
+          <div class="arch-box-name">MCP Orchestrator (해석 코어)</div>
+          <div class="arch-box-lang">TypeScript</div>
+          <ul class="arch-box-items">
+            <li>다중 AI 역할(Debate) 오케스트레이션</li>
+            <li>Triage → Research Loop 제어</li>
+            <li>Provider별 CLI Transport 래핑 분리</li>
+            <li>자산 정규화 & Watchlist 제어</li>
+            <li>고비용 비용 효율화 모델 라우팅 결론 모델링</li>
+          </ul>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-box">
+          <div class="arch-box-icon">🤖</div>
+          <div class="arch-box-name">Discord Edge (제어·알림)</div>
+          <div class="arch-box-lang">TypeScript</div>
+          <ul class="arch-box-items">
+            <li>Discord Slack/Channels 등 휴먼 인터페이스</li>
+            <li>자연어 입력 전달로 Thin Client 지향</li>
+            <li>Collector와 Orchestrator에 제어명령 전달</li>
+            <li>투자, 경고(Health) 등 상태 알림 렌더</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3 style="font-size:17px; font-weight:700; margin:32px 0 12px;">정보가 관점이 되고 결론으로 수렴하는 흐름</h3>
+      <div class="flow-steps">
+        <span class="flow-step-box active">채널 소스 수집(Registry)</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-step-box active">원본 증거(Raw Snapshot) 보존</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-step-box active">데이터 번들링 및 후보 생성(Bundle)</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-step-box active">도메인 오케스트레이션(Triage & Debate)</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-step-box active">자산 맵핑 및 우선순위 식별(Normalize)</span>
+        <span class="flow-arrow">→</span>
+        <span class="flow-step-box">투자 리포트 결론 생성(Verdict Artifact)</span>
+      </div>
+      <p style="font-size:13px; color:var(--gray-500); margin-bottom:32px;">
+        ↑ 검색 시스템이 문서를 가져와 인덱스를 구축하고 서빙하는 그 단계를, AI 시대에는 멀티 에이전트들이 "이해"하여 증거로 축적하는 설계입니다.
+      </p>
+
+      <div class="tech-stack">
+        <span class="tech-tag blue">Python (Collector)</span>
+        <span class="tech-tag blue">TypeScript (Orchestrator)</span>
+        <span class="tech-tag">데이터 파이프라인 (Data Pipeline)</span>
+        <span class="tech-tag">MCP 멀티에이전트 협업 체계</span>
+        <span class="tech-tag">도메인 주도 설계(DDD) 관점</span>
+        <span class="tech-tag">CLI Provider Volatility 관리 (Adapter Design)</span>
+        <span class="tech-tag">결정론적 Artifact First 디자인</span>
+      </div>
+
+      <h3 style="font-size:17px; font-weight:700; margin:40px 0 16px;">프로젝트 시각화 요약</h3>
+      <style>
+        .media-img {
+          width: 100%;
+          height: auto;
+          max-height: 480px;
+          object-fit: contain;
+          border-radius: 12px;
+          display: block;
+          background: transparent;
+          cursor: zoom-in;
+          transition: transform 0.2s;
+        }
+
+        .media-img:hover {
+          transform: scale(1.02);
+        }
+
+        /* Lightbox Styles */
+        .lightbox {
+          position: fixed;
+          z-index: 9999;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0, 0, 0, 0.85);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.25s ease;
+        }
+
+        .lightbox.active {
+          opacity: 1;
+          pointer-events: auto;
+        }
+
+        .lightbox-content {
+          position: relative;
+          max-width: 95vw;
+          max-height: 95vh;
+        }
+
+        .lightbox-img {
+          width: auto;
+          height: auto;
+          max-width: 90vw;
+          max-height: 90vh;
+          border-radius: 8px;
+          box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+          display: block;
+        }
+
+        .lightbox-close {
+          position: absolute;
+          top: -45px;
+          right: -10px;
+          background: none;
+          border: none;
+          color: rgba(255, 255, 255, 0.7);
+          font-size: 40px;
+          cursor: pointer;
+          padding: 10px;
+          line-height: 1;
+          transition: color 0.15s;
+        }
+
+        .lightbox-close:hover {
+          color: #fff;
+        }
+      </style>
+
+      <div class="visual-plan">
+        <article class="visual-feature" style="display:flex; align-items:center;">
+          <img src="assets/architecture.png" alt="Architecture Diagram" class="media-img">
+        </article>
+        <div class="visual-stack">
+          <article class="visual-card" style="display:flex; align-items:center;">
+            <img src="assets/dashboard.png" alt="Collector Dashboard" class="media-img">
+          </article>
+          <article class="visual-card" style="display:flex; align-items:center;">
+            <img src="assets/discord_bot.png" alt="Discord Bot Report" class="media-img">
+          </article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Key Achievements -->
+  <section>
+    <div class="container">
+      <div class="section-label">핵심 이력 정리</div>
+      <h2 class="section-title">가치를 이끌어 낸 바탕 역량</h2>
+      <p class="section-desc">엔지니어의 커리어를 통틀어, 규모 있고 복잡한 데이터 인프라 위에서 최신 기술을 접목하여 AI 프로덕트로 안착시킨 다양한 핵심 경험들입니다.</p>
+      <div class="achievements">
+        <div class="achievement-card">
+          <div class="ach-icon">🏆</div>
+          <h4>KorQuAD 리더보드 상위권</h4>
+          <p>한국어 정보 추출 성능을 증명한 공개 벤치마크 참여 모델 튜닝. 언어모델 파이프라인의 핵심 품질 관리.</p>
+        </div>
+        <div class="achievement-card">
+          <div class="ach-icon">🧪</div>
+          <h4>한국어 사전학습 바텀업</h4>
+          <p>코퍼스 수집, 전처리로 시작해 RoBERTa 아키텍처까지 훈련시키는 풀사이클 경험을 쌓았습니다.</p>
+        </div>
+        <div class="achievement-card">
+          <div class="ach-icon">🔍</div>
+          <h4>단단한 검색 파이프라인</h4>
+          <p>Elasticsearch 환경의 재인덱스 전략 및 Dense Retrieval 구현 등 전통적 정보 검색 뼈대 설계 경험.</p>
+        </div>
+        <div class="achievement-card">
+          <div class="ach-icon">👥</div>
+          <h4>H100 & vLLM 인프라 리딩</h4>
+          <p>H100 32장을 이용한 멀티노드 클러스터 구성, 그리고 Tool Calling 모델 개발 5인 리딩 등 팀단위 배포 인프라 성공.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Contact -->
+  <!-- <section class="contact-section">
+    <div class="container">
+      <div class="section-label">Contact</div>
+      <h2 class="section-title">연락처</h2>
+      <p class="section-desc">보다 자세한 이야기와 협업 제휴를 환영합니다.</p>
+      <div class="contact-grid">
+        <div class="contact-item"><span>직무</span>AI · 데이터 파이프라인 설계 / 검색 엔지니어</div>
+        <div class="contact-item"><span>이메일</span>ilmas@example.com</div>
+        <div class="contact-item"><span>GitHub</span>github.com/ilmas</div>
+        <div class="contact-item"><span>경력</span>삼성SDS (2014.08 - 현재)</div>
+      </div>
+    </div>
+  </section> -->
+
+  <!-- Lightbox DOM -->
+  <div class="lightbox" id="lightbox">
+    <div class="lightbox-content">
+      <button class="lightbox-close" id="lightbox-close">&times;</button>
+      <img src="" alt="Expanded Image" class="lightbox-img" id="lightbox-img">
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const lightbox = document.getElementById('lightbox');
+      const lightboxImg = document.getElementById('lightbox-img');
+      const lightboxClose = document.getElementById('lightbox-close');
+      const mediaImgs = document.querySelectorAll('.media-img');
+
+      // Open lightbox on click
+      mediaImgs.forEach(img => {
+        img.addEventListener('click', () => {
+          lightboxImg.src = img.src;
+          lightbox.classList.add('active');
+        });
+      });
+
+      // Close functions
+      const closeLightbox = () => lightbox.classList.remove('active');
+
+      lightboxClose.addEventListener('click', closeLightbox);
+      lightbox.addEventListener('click', (e) => {
+        if (e.target === lightbox) closeLightbox();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeLightbox();
+      });
+    });
+  </script>
+
+</body>
+
+</html>
